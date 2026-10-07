@@ -113,9 +113,12 @@ type ModelEndpoint struct {
 }
 
 type ModelCredential struct {
-	Type         string `json:"type"`
-	APIKey       string `json:"api_key,omitempty"`
-	ConnectionID string `json:"connection_id"`
+	Type         string     `json:"type"`
+	APIKey       string     `json:"api_key,omitempty"`
+	AccessToken  string     `json:"access_token,omitempty"`
+	ExpiresAt    *time.Time `json:"expires_at,omitempty"`
+	ConnectionID string     `json:"connection_id"`
+	AccountID    string     `json:"account_id,omitempty"`
 }
 
 type RunMCPServer struct {

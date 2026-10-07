@@ -1,10 +1,18 @@
 import { useCallback, useEffect, useState } from "react";
+import { Select } from "./Select";
 import { AlarmClock, CircleAlert, Play, Plus, Trash2 } from "lucide-react";
 import { api } from "./api";
 import { SideList } from "./SideList";
 import type { Bot, Routine, RoutineRun } from "./types";
 import { type Repeat, type ScheduleDraft, describeDraft, describeRoutine, draftFromRoutine, scheduleFields, weekdayNames } from "./schedule";
 import { Avatar, Empty, Field, Modal, Toggle, errorMessage, relativeTime } from "./ui";
+
+// Network failures read as what happened, with the raw error on hover.
+function runError(error: string): string {
+  const host = /(?:lookup|dial tcp) ([a-z0-9.-]+\.[a-z]{2,})/i.exec(error)?.[1] || /https?:\/\/([^/"\s]+)/.exec(error)?.[1];
+  if (/no such host|network is unreachable|connection refused|i\/o timeout|dial tcp/i.test(error)) return `Couldn't reach ${host || "the model provider"}. The Mac may have been offline; it retries by itself.`;
+  return error;
+}
 
 const statusLabels: Record<string, string> = {
   succeeded: "Done", failed: "Failed", running: "Running", claimed: "Starting", missed: "Missed · waiting for you", skipped: "Missed · skipped", caught_up: "Missed · ran later", interrupted: "Interrupted", cancelled: "Cancelled", needs_input: "Needs your input",
@@ -35,13 +43,13 @@ function ScheduleBuilder({ routine, onChange }: { routine: Partial<Routine>; onC
     <div className="schedule-row">
       {draft.repeat === "every" && <>
         <span>Every</span>
-        <select value={draft.everyMinutes} onChange={event => update({ everyMinutes: Number(event.target.value) })}>
-          {[15, 30, 45, 60, 120, 180, 240, 360, 720].map(minutes => <option key={minutes} value={minutes}>{minutes < 60 ? `${minutes} minutes` : minutes === 60 ? "hour" : `${minutes / 60} hours`}</option>)}
-        </select>
+        <Select value={draft.everyMinutes} onChange={value => update({ everyMinutes: Number(value) })}>
+          {[15, 30, 45, 60, 120, 180, 240, 360, 720].map(minutes => <option key={minutes} value={minutes}>{minutes < 60 ? `${minutes} minutes` : minutes === 60 ? "1 hour" : `${minutes / 60} hours`}</option>)}
+        </Select>
       </>}
       {draft.repeat === "monthly" && <>
         <span>On day</span>
-        <select value={draft.dayOfMonth} onChange={event => update({ dayOfMonth: Number(event.target.value) })}>{Array.from({ length: 28 }, (_, index) => index + 1).map(day => <option key={day} value={day}>{day}</option>)}</select>
+        <Select value={draft.dayOfMonth} onChange={value => update({ dayOfMonth: Number(value) })}>{Array.from({ length: 28 }, (_, index) => index + 1).map(day => <option key={day} value={day}>{day}</option>)}</Select>
       </>}
       {draft.repeat !== "every" && draft.repeat !== "custom" && <><span>at</span><input type="time" value={draft.time} onChange={event => update({ time: event.target.value })} /></>}
       {draft.repeat === "custom" && <input className="cron-input" value={draft.cron} onChange={event => update({ cron: event.target.value })} placeholder="0 8 * * 1-5" spellCheck={false} />}
@@ -65,7 +73,7 @@ function RoutineEditor({ initial, bots, onClose, onSaved }: { initial: Partial<R
     footer={<><span className="spacer" /><button type="button" className="button secondary" onClick={onClose}>Cancel</button><button type="button" className="button primary" onClick={save}>Save</button></>}>
     {error && <div className="inline-error">{error}</div>}
     <Field label="Title"><input value={routine.title || ""} onChange={event => update({ title: event.target.value })} placeholder="Morning briefing" autoFocus /></Field>
-    <Field label="Bot"><select value={routine.bot_id || ""} onChange={event => update({ bot_id: event.target.value })}>{bots.map(bot => <option key={bot.id} value={bot.id}>{bot.name}</option>)}</select></Field>
+    <Field label="Bot"><Select value={routine.bot_id || ""} onChange={value => update({ bot_id: value })}>{bots.map(bot => <option key={bot.id} value={bot.id}>{bot.name}</option>)}</Select></Field>
     <Field label="What should it do?"><textarea rows={4} value={routine.prompt || ""} onChange={event => update({ prompt: event.target.value })} placeholder="Summarise the top three AI news stories from today with links." /></Field>
     <ScheduleBuilder routine={routine} onChange={update} />
     <Toggle label="Enabled" checked={routine.enabled ?? true} onChange={enabled => update({ enabled })} />
@@ -121,10 +129,10 @@ export function RoutinesView({ bots, onOpenConversation }: { bots: Bot[]; onOpen
           {runs.length === 0 ? <p className="muted">No runs yet.</p> : <table className="history">
             <thead><tr><th>Scheduled</th><th>Status</th><th>Attempt</th><th>Details</th></tr></thead>
             <tbody>{runs.map(run => <tr key={run.id}>
-              <td>{new Date(run.scheduled_for).toLocaleString(undefined, { dateStyle: "medium", timeStyle: "short" })}</td>
+              <td className="nowrap">{new Date(run.scheduled_for).toLocaleString(undefined, { weekday: "short", day: "numeric", month: "short", hour: "2-digit", minute: "2-digit" })}</td>
               <td><span className={`status-pill ${run.status}`}>{statusLabels[run.status] || run.status}</span></td>
               <td>{run.attempt}</td>
-              <td className="muted small">{run.error || (run.finished_at ? `Finished ${relativeTime(run.finished_at)}` : "")}</td>
+              <td className="muted small" title={run.error || undefined}>{run.error ? runError(run.error) : run.finished_at ? `Finished ${relativeTime(run.finished_at)}` : ""}</td>
             </tr>)}</tbody>
           </table>}
         </div>

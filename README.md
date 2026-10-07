@@ -1,81 +1,91 @@
 # Rex
 
-Personal bots that work on your Mac, remember what matters, and ask before they act.
+Personal AI bots that live on your Mac. Each one has its own chat, memory, browser, skills and schedule, asks before it acts, and suggests ways to improve itself.
 
-Rex is a local-first macOS app. Each bot has its own instructions, model, permissions, workspace folder and memory. It runs on a local model server (LM Studio, Ollama) or a hosted provider (Anthropic, OpenAI, OpenRouter), and it uses the bundled `agent-runtime` for execution.
+Rex runs on a local model (LM Studio, Ollama), your API keys (Anthropic, OpenAI, OpenRouter) or your ChatGPT subscription. Conversations, memory and files stay on your Mac; only the model calls you choose leave it.
 
-## What it does
+## Features
 
-- **Bots as contacts.** You can create any number of bots, each with a name, an avatar, instructions, a model and permissions.
-- **Conversations** stream responses and show tool activity. They have approval cards, questions from the bot, attachments, a stop button, and a workspace-files drawer.
-- **Permissions.** These are the web, the browser, reading and writing files in the bot's own folder, and shell commands. Shell commands always ask first, and every command runs in a macOS sandbox (Seatbelt) that can write only inside the bot's folder and cannot read your credentials or Rex's data. Each bot is set to "ask before changes" or "act within scope".
-- **Automatic memory.** After each answer, durable facts from what *you* said are extracted in the background by the bot's own chat model, and this never delays a reply. Finding memories uses a built-in embedding model (Bekko Embedding v1 a8m, a small multilingual model, on a bundled llama.cpp server), so it needs no model server. Relevant memories are recalled into context before each new message. The memory view lists each source with its facts and lets you search, teach, correct or forget. Each bot has its own memory by default; sharing is explicit.
-- **Browser** with a persistent profile per bot. When a site needs a login, the bot asks you to **take over**: the bot's browser opens in a window, you sign in, and you hand it back. The bot cannot act while you hold it, and screenshots are saved to the bot's `outputs/` folder.
-- **MCP connections.** You can connect a Streamable HTTP MCP server, choose its tools and whether each is read or write, and attach it to bots. Write tools follow the bot's approval setting.
-- **Skills** are editable Markdown instruction files in `~/Rex/skills`, enabled per bot.
-- **Routines.** These run on daily or repeating schedules. A slot is claimed in the database before it runs, so a restart never duplicates a run. Retries are bounded (up to 2), five failures in a row pause the routine, and slots missed by more than an hour are recorded as *missed* rather than run late. Routines need the Mac awake and Rex running; closing the window keeps Rex in the menu bar.
-- **Credentials** are stored in the macOS Keychain. The UI talks to the backend over loopback with a per-launch token.
+- **Bots.** Make as many as you like, each with its own instructions, model, permissions, workspace folder and face. A new bot sets itself up by asking you a few questions.
+- **Rex, the main assistant.** Rex answers general questions, hands tasks to the right bot, and creates new bots for you.
+- **Ask before acting.** Each bot can use the web, a browser, files in its own folder, and shell commands. File edits and commands ask first. Commands run in a macOS sandbox that can only write inside the bot's folder. [TypeSafe](https://typesafe.ai) review can clear routine local steps for you.
+- **Memory.** After each answer, Rex keeps lasting facts from what you said and brings back the relevant ones before each new message. This happens in the background, with a built-in embedding model. You can view, search, correct or forget memories. Each bot has its own memory unless you choose to share it.
+- **Browser.** Each bot has a browser with its own profile, so logins persist.
+  - When a site needs you, for a sign-in or a CAPTCHA, you take over the browser and then hand it back.
+  - Saved logins are filled in by Rex, so the bot never sees your passwords.
+  - Optionally, bots can browse in [Kernel](https://www.kernel.sh)'s cloud instead.
+- **Skills.** Reusable instructions in the [Agent Skills](https://agentskills.io) format, kept in `~/Rex/skills`.
+  - Browse curated GitHub collections (Anthropic's skills, marketing, sales, coding) and install a skill for a bot at a pinned version.
+  - Bots can search the catalog and suggest a skill themselves.
+- **Self-improvement.** After corrections, failures, or every few tasks, a bot looks back at its recent work and suggests better instructions or a skill. Nothing changes until you apply it.
+- **Routines.** Daily, weekly or repeating tasks. Retries are bounded, and a restart never runs a task twice. A routine missed while the Mac was off is offered to you, not run late.
+- **MCP connections.** Connect Streamable HTTP MCP servers (signing in with OAuth where they need it), pick their tools, and attach them to bots.
+- **Private by design.** Keys, ChatGPT sign-in and logins live in the macOS Keychain, and the app talks to its backend over loopback with a per-launch token.
 
 ## Architecture
 
 ```
-Tauri 2 shell (Rust) ── supervises ──▶ rex-host (Go)  ── supervises ──▶ agent-runtime (Go, SQLite)
-                                                       └─ supervises ──▶ llama-server (embeddings)
-  React UI  ◀── HTTP + SSE, token ──┘   bots, chats, routines,             native_sdk runs, tools,
-                                         memory (agent-runtime/memory),     approvals, events
-                                         workspace + MCP callbacks
+Tauri 2 shell (Rust) ──▶ rex-host (Go) ──▶ agent-runtime (Go, SQLite)
+  React UI ◀─ HTTP + SSE ─┘     │       └─▶ llama-server (embeddings)
+                                └─ bots, chats, routines, memory, skills,
+                                   settings, workspace and MCP callbacks
 ```
 
-- `cmd/rex-host` and `internal/rex` make up the host. It owns product state (`rex.db`), memory (`memory.db`), settings and secrets. It generates the runtime's app config: model endpoints, workspace provider, target-context endpoint and browser artifacts.
-- `agent-runtime` is unchanged and built from `../agent-runtime`.
-- Data lives in `~/Library/Application Support/ai.rex.desktop/` and bot workspaces in `~/Rex/<bot>/`.
+- **`cmd/rex-host` and `internal/rex`** are the host. It owns the app's state (`rex.db`), memory (`memory.db`), settings and secrets, and configures the runtime.
+- **[agent-runtime](https://github.com/helpin-ai/agent-runtime)** runs the bots: tools, approvals, browser, sandbox and events. It is pinned in `go.mod` as a Go `tool`, so the host and the bundled engine always match. To work against a local checkout, run `go work init . ../agent-runtime`.
+- **Data** lives in `~/Library/Application Support/ai.rex.desktop/`, and bot workspaces in `~/Rex/<bot>/`.
 
 ## Develop
 
-Prerequisites: macOS, Go 1.25+, Rust, Node 20+, pnpm, cmake (to build the bundled llama.cpp embedder once), `agent-browser` (for browser bots), and a model server or an API key.
+You need macOS, Go 1.25+, Rust, Node 20+, pnpm, cmake (to build the bundled embedder once), [`agent-browser`](https://github.com/vercel-labs/agent-browser) for browser bots, and a model server, an API key or a ChatGPT subscription.
 
 ```bash
 pnpm install
-pnpm tauri:dev        # builds sidecars (incl. the embedder), starts Vite and the app
+pnpm tauri:dev     # builds the sidecars, starts Vite and the app
 ```
 
-To run the backend without the shell:
+Backend without the shell:
 
 ```bash
 ./scripts/build-sidecars.sh
 REX_DATA_DIR=/tmp/rex REX_SECRETS=file \
   AGENT_RUNTIME_BINARY=src-tauri/binaries/agent-runtime-aarch64-apple-darwin ./bin/rex-host
-pnpm dev   # then open http://127.0.0.1:5180/?token=<token from /tmp/rex/connection.json>
+pnpm dev           # open http://127.0.0.1:5180/?token=<token from /tmp/rex/connection.json>
 ```
 
 ## Test
 
 ```bash
-go test ./...                         # unit tests
-pnpm test                             # frontend tests
-REX_E2E_MODEL=openai/gpt-oss-20b python3 scripts/e2e.py   # end-to-end gates against LM Studio
+go test ./...
+pnpm test
+REX_E2E_MODEL=openai/gpt-oss-20b python3 scripts/e2e.py   # release gates against LM Studio
 ```
 
-`scripts/e2e.py` starts its own host in a temporary directory and checks the release gates against a real model:
+`scripts/e2e.py` starts its own host in a temporary folder and runs these release gates against a real model:
 
 | Gate | Checks |
 |---|---|
-| m1 | Submit, stream, cancel, restart, reopen the conversation, continue the chat |
-| m2 | Bots with different permissions: a read-only bot cannot write, a writer asks before writing, and a shell command is blocked outside the bot's folder |
-| m3 | A preference survives a restart, a correction wins, a forgotten source stops being recalled |
-| m4 | A bot hits a login wall, asks for takeover, continues after handoff, and saves a screenshot |
-| m5 | A routine runs once, there is no duplicate after a restart, and failures are reported with a bounded retry |
+| m1 | Stream, cancel, restart, reopen, continue a chat |
+| m2 | Permissions: a read-only bot can't write, a writer asks first, the sandbox blocks commands outside the bot's folder |
+| m3 | Memory survives a restart, a correction wins, a forgotten source stays forgotten |
+| m4 | Login wall, takeover, handoff, screenshot |
+| m5 | A routine runs once, never twice after a restart, and retries within bounds |
 
 ## Build
 
 ```bash
-pnpm tauri:build      # produces src-tauri/target/release/bundle/macos/Rex.app and a .dmg
+pnpm tauri:build   # Rex.app and a .dmg in src-tauri/target/release/bundle/
 ```
 
-The build is unsigned. To distribute it, set `APPLE_SIGNING_IDENTITY` and the notarization variables Tauri documents, and add the updater plugin with a release feed.
+Builds run on Apple Silicon and are ad-hoc signed. They aren't notarized, so on another Mac the first launch needs System Settings → Privacy & Security → Open Anyway. To distribute Rex widely, sign it with a Developer ID and notarize it.
 
 ## Known limits
 
-- Commands run in the agent-runtime `seatbelt` sandbox: writes are limited to the bot's folder and credential folders are unreadable, but other files are readable and network access is open.
-- The runtime's browser snapshot shows headings, links and form controls, not body paragraphs, so bots read pages best through headings, tables of links, or `fetch_url` for public pages.
-- Local models must support tool calling and should be loaded with at least 16k context. Use the connection test in Settings → Models to check.
+- The sandbox limits writes to the bot's folder and hides credential folders. Bots can still read other files, and network access is open.
+- Local models must support tool calling. Load them with at least 16k context, and use Settings → Models → Test connection to check.
+- Cloud browsers (Kernel) start fresh for each task: no saved logins and no takeover.
+- Routines run only while the Mac is awake and Rex is running. Closing the window keeps Rex in the menu bar.
+
+## License
+
+[Apache License 2.0](LICENSE)

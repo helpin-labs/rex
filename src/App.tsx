@@ -43,7 +43,8 @@ export default function App() {
   const refreshStatus = useCallback(() => api.status().then(setStatus).catch(caught => setError(errorMessage(caught))), []);
   const refreshBots = useCallback(async () => {
     const list = await api.bots();
-    setBots(list);
+    // Keep the same array when nothing changed, so polling doesn't re-render.
+    setBots(current => JSON.stringify(current) === JSON.stringify(list) ? current : list);
     return list;
   }, []);
   const refreshThreads = useCallback(() => api.conversations().then(setThreads).catch(() => undefined), []);
@@ -61,9 +62,11 @@ export default function App() {
   }, [refreshBots, refreshThreads]);
 
   useEffect(() => {
-    const timer = window.setInterval(() => { void refreshStatus(); void refreshThreads(); }, 5000);
+    // Bots also change outside this window: Rex creates them from chat, and
+    // a new bot renames and sets itself up in its own conversation.
+    const timer = window.setInterval(() => { void refreshStatus(); void refreshThreads(); void refreshBots().catch(() => undefined); }, 5000);
     return () => window.clearInterval(timer);
-  }, [refreshStatus, refreshThreads]);
+  }, [refreshStatus, refreshThreads, refreshBots]);
 
   useEffect(() => {
     try { if (view) localStorage.setItem("rex.view", JSON.stringify(view)); } catch { /* ignore */ }
@@ -119,7 +122,7 @@ export default function App() {
   return <SideSlot.Provider value={sideSlot}><div className="app">
     <nav className="bot-list" aria-label="Bots">
       <header className="bot-list-header">
-        <div className="bot-list-actions">
+        <div className={`bot-list-actions ${view?.kind === "bot" ? "" : "hidden"}`}>
           <button type="button" className="icon-button" title="New bot" aria-label="New bot" onClick={() => setNaming(true)}><Plus size={17} /></button>
         </div>
         {main ? <button type="button" className={`main-bot ${bot?.id === main.id ? "active" : ""}`} onClick={() => setView({ kind: "bot", botId: main.id })} title="Your main assistant">
@@ -162,7 +165,7 @@ export default function App() {
         : <Empty icon={<LoaderCircle className="spin" size={20} />} title={`Opening ${bot.name}…`} />}
     </main>}
     {view?.kind === "routines" && <main className="main wide"><RoutinesView bots={bots} onOpenConversation={async id => { await refreshThreads(); await openConversation(id); }} /></main>}
-    {view?.kind === "skills" && <main className="main wide"><SkillsView bots={bots} workspaceRoot={status?.workspace_root || "~/Rex"} /></main>}
+    {view?.kind === "skills" && <main className="main wide"><SkillsView bots={bots} workspaceRoot={status?.workspace_root || "~/Rex"} onBotsChanged={() => void refreshBots()} /></main>}
     {view?.kind === "settings" && <main className="main wide"><SettingsView status={status} onSaved={saved => { setSettings(saved); void refreshStatus(); }} /></main>}
 
     {naming && <NewBotDialog onCreate={createBot} onClose={() => setNaming(false)} onManual={(name, color) => { setNaming(false); setEditing({ ...newBot(settings), name, color }); }} />}

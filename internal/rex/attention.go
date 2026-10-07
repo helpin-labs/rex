@@ -123,7 +123,14 @@ func (h *Host) Attention(ctx context.Context) ([]AttentionItem, error) {
 		return nil, err
 	}
 	for _, proposal := range proposals {
-		item := AttentionItem{ID: proposal.ID, Kind: "proposal", BotID: proposal.BotID, Title: "New instructions", Detail: proposal.Summary, At: proposal.CreatedAt}
+		title := "New instructions"
+		switch {
+		case proposal.Kind == ProposalInstallSkill:
+			title = "Suggested skill"
+		case proposal.Source == ProposalFromRetrospective:
+			title = "Suggested improvement"
+		}
+		item := AttentionItem{ID: proposal.ID, Kind: "proposal", BotID: proposal.BotID, Title: title, Detail: proposal.Summary, At: proposal.CreatedAt}
 		if bot, err := h.Store.GetBot(ctx, proposal.BotID); err == nil {
 			if thread, err := h.Store.ThreadForBot(ctx, *bot); err == nil {
 				item.ConversationID = thread.ID

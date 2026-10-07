@@ -129,6 +129,28 @@ UPDATE bots SET color='#e0a35e' WHERE lower(color)='#e0821f';
 UPDATE bots SET color='#e48aa8' WHERE lower(color)='#c2417a';
 UPDATE bots SET color='#c9a77c' WHERE lower(color)='#b8862b';
 UPDATE bots SET color='#8e9bb0' WHERE lower(color)='#6b7280';`,
+	// Retrospectives: a bot looks back at recent tasks and suggests an
+	// improvement (see retro.go). Proposals record where they came from,
+	// and answered ones are kept so later look-backs know the outcome.
+	`ALTER TABLE bots ADD COLUMN retro_off INTEGER NOT NULL DEFAULT 0;
+ALTER TABLE instruction_proposals ADD COLUMN source TEXT NOT NULL DEFAULT 'bot';
+ALTER TABLE instruction_proposals ADD COLUMN reason TEXT NOT NULL DEFAULT '';
+CREATE TABLE retrospectives (id TEXT PRIMARY KEY, bot_id TEXT NOT NULL REFERENCES bots(id) ON DELETE CASCADE,
+	trigger TEXT NOT NULL, status TEXT NOT NULL, run_id TEXT NOT NULL DEFAULT '', outcome TEXT NOT NULL DEFAULT '',
+	created_at DATETIME NOT NULL, started_at DATETIME, finished_at DATETIME);
+CREATE INDEX retrospectives_bot ON retrospectives(bot_id, created_at);
+CREATE TABLE proposal_history (id TEXT PRIMARY KEY, bot_id TEXT NOT NULL REFERENCES bots(id) ON DELETE CASCADE,
+	source TEXT NOT NULL, summary TEXT NOT NULL, outcome TEXT NOT NULL, created_at DATETIME NOT NULL, answered_at DATETIME NOT NULL);`,
+	// The skill catalog (catalog.go): GitHub sources, their indexed skills,
+	// and proposals to install one.
+	`CREATE TABLE skill_sources (id TEXT PRIMARY KEY, repo TEXT NOT NULL, enabled INTEGER NOT NULL DEFAULT 1, builtin INTEGER NOT NULL DEFAULT 0,
+	note TEXT NOT NULL DEFAULT '', stars INTEGER NOT NULL DEFAULT 0, license TEXT NOT NULL DEFAULT '', commit_sha TEXT NOT NULL DEFAULT '',
+	skill_count INTEGER NOT NULL DEFAULT 0, indexed_at DATETIME, error TEXT NOT NULL DEFAULT '', description TEXT NOT NULL DEFAULT '');
+CREATE TABLE catalog_skills (id TEXT PRIMARY KEY, source_id TEXT NOT NULL REFERENCES skill_sources(id) ON DELETE CASCADE, dir TEXT NOT NULL,
+	name TEXT NOT NULL, description TEXT NOT NULL, license TEXT NOT NULL DEFAULT '', has_scripts INTEGER NOT NULL DEFAULT 0,
+	files TEXT NOT NULL DEFAULT '[]', commit_sha TEXT NOT NULL);
+ALTER TABLE instruction_proposals ADD COLUMN kind TEXT NOT NULL DEFAULT 'instructions';
+ALTER TABLE instruction_proposals ADD COLUMN catalog_id TEXT NOT NULL DEFAULT '';`,
 }
 
 func (s *Store) migrate(ctx context.Context) error {
@@ -178,12 +200,12 @@ func (s *Store) SetSetting(ctx context.Context, key, value string) error {
 
 // --- bots ---
 
-const botColumns = `id,name,emoji,color,instructions,provider,model,capabilities,approval_mode,workspace_dir,memory_mode,skills,mcp_connections,position,created_at,updated_at,setup,role`
+const botColumns = `id,name,emoji,color,instructions,provider,model,capabilities,approval_mode,workspace_dir,memory_mode,skills,mcp_connections,position,created_at,updated_at,setup,role,retro_off`
 
 func scanBot(row interface{ Scan(...any) error }) (*Bot, error) {
 	var bot Bot
 	var capabilities, skills, connections string
-	if err := row.Scan(&bot.ID, &bot.Name, &bot.Emoji, &bot.Color, &bot.Instructions, &bot.Provider, &bot.Model, &capabilities, &bot.ApprovalMode, &bot.WorkspaceDir, &bot.MemoryMode, &skills, &connections, &bot.Position, &bot.CreatedAt, &bot.UpdatedAt, &bot.Setup, &bot.Role); err != nil {
+	if err := row.Scan(&bot.ID, &bot.Name, &bot.Emoji, &bot.Color, &bot.Instructions, &bot.Provider, &bot.Model, &capabilities, &bot.ApprovalMode, &bot.WorkspaceDir, &bot.MemoryMode, &skills, &connections, &bot.Position, &bot.CreatedAt, &bot.UpdatedAt, &bot.Setup, &bot.Role, &bot.RetroOff); err != nil {
 		return nil, err
 	}
 	_ = json.Unmarshal([]byte(capabilities), &bot.Capabilities)
@@ -232,12 +254,12 @@ func (s *Store) SaveBot(ctx context.Context, bot *Bot) error {
 	capabilities, _ := json.Marshal(bot.Capabilities)
 	skills, _ := json.Marshal(nonNil(bot.Skills))
 	connections, _ := json.Marshal(nonNil(bot.MCPConnections))
-	_, err := s.db.ExecContext(ctx, `INSERT INTO bots(`+botColumns+`) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
+	_, err := s.db.ExecContext(ctx, `INSERT INTO bots(`+botColumns+`) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
 		ON CONFLICT(id) DO UPDATE SET name=excluded.name,emoji=excluded.emoji,color=excluded.color,instructions=excluded.instructions,
 		provider=excluded.provider,model=excluded.model,capabilities=excluded.capabilities,approval_mode=excluded.approval_mode,
 		workspace_dir=excluded.workspace_dir,memory_mode=excluded.memory_mode,skills=excluded.skills,mcp_connections=excluded.mcp_connections,
-		position=excluded.position,updated_at=excluded.updated_at,setup=excluded.setup,role=excluded.role`,
-		bot.ID, bot.Name, bot.Emoji, bot.Color, bot.Instructions, bot.Provider, bot.Model, string(capabilities), bot.ApprovalMode, bot.WorkspaceDir, bot.MemoryMode, string(skills), string(connections), bot.Position, bot.CreatedAt, bot.UpdatedAt, bot.Setup, bot.Role)
+		position=excluded.position,updated_at=excluded.updated_at,setup=excluded.setup,role=excluded.role,retro_off=excluded.retro_off`,
+		bot.ID, bot.Name, bot.Emoji, bot.Color, bot.Instructions, bot.Provider, bot.Model, string(capabilities), bot.ApprovalMode, bot.WorkspaceDir, bot.MemoryMode, string(skills), string(connections), bot.Position, bot.CreatedAt, bot.UpdatedAt, bot.Setup, bot.Role, bot.RetroOff)
 	return err
 }
 

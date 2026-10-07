@@ -211,7 +211,9 @@ func (b *BrowserControl) Ensure(ctx context.Context, session string) {
 	}
 	lock := b.ensuring[session]
 	b.mu.Unlock()
-	if botID == "" {
+	// Cloud browsers are created by the runtime in Kernel; there is no
+	// local profile to open.
+	if botID == "" || b.cloud(ctx) {
 		return
 	}
 	lock.Lock()
@@ -411,8 +413,18 @@ func currentURL(ctx context.Context, session string) string {
 	return ""
 }
 
+// cloud reports whether bots browse in Kernel's cloud instead of a local
+// browser with their own profile.
+func (b *BrowserControl) cloud(ctx context.Context) bool {
+	settings, err := b.host.Settings.Get(ctx)
+	return err == nil && settings.CloudBrowsers()
+}
+
 // TakeOver opens the bot's browser in a visible window for the user.
 func (b *BrowserControl) TakeOver(ctx context.Context, botID string) (map[string]any, error) {
+	if b.cloud(ctx) {
+		return nil, errors.New("bots use cloud browsers (Kernel), which can't be taken over. Turn cloud browsers off in Settings → General to use your Mac's browser")
+	}
 	bot, err := b.host.Store.GetBot(ctx, botID)
 	if err != nil {
 		return nil, err
@@ -574,6 +586,13 @@ func (b *BrowserControl) Live(ctx context.Context, botID string) (LiveView, erro
 	if err != nil {
 		return view, err
 	}
+	// Rex does not open cloud browsers, so it has no record of them; the
+	// current run's session is the one to watch.
+	b.mu.Lock()
+	if runID := b.active[botID]; runID != "" {
+		sessions = append([]string{browserSessionName(runID)}, sessions...)
+	}
+	b.mu.Unlock()
 	if view.Held {
 		sessions = append([]string{takeoverSessionName(botID)}, sessions...)
 	}

@@ -1,5 +1,6 @@
 import { Fragment, type KeyboardEvent, useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { AlarmClock, ArrowUp, KeyRound, Brain, CircleAlert, Eye, FileText, FolderOpen, Hand, MousePointerClick, Paperclip, RotateCcw, ShieldCheck, SlidersHorizontal, Square, X } from "lucide-react";
+import { JsonBlock, TextWithJson } from "./JsonBlock";
+import { AlarmClock, ArrowUp, BookOpen, Brain, CircleAlert, ExternalLink, Eye, FileCode2, FileText, FolderOpen, Hand, KeyRound, MousePointerClick, Paperclip, RotateCcw, ShieldCheck, SlidersHorizontal, Square, X } from "lucide-react";
 import { api } from "./api";
 import { BrowserView } from "./BrowserView";
 import { MemoryPanel, memoryHome, memoryWhereLabel } from "./MemoryPanel";
@@ -7,9 +8,18 @@ import { describeApproval, instructionChanges, looksLikePassword } from "./steps
 import { TurnView } from "./TurnView";
 import { useLiveEvents } from "./useLiveEvents";
 import type { AttentionItem, Bot, ConversationDetail, InstructionProposal, Interaction, MemoryOverview, RunEventEnvelope, Status, Turn, WorkspaceFile } from "./types";
-import { Avatar, Markdown, errorMessage, relativeTime, signInToConnection } from "./ui";
+import { Avatar, Markdown, errorMessage, relativeTime, signInToConnection, openExternal } from "./ui";
 
 type Attachment = { name: string; note: string };
+
+// The opening of a bot's instructions, cut at a sentence or word.
+function intro(instructions: string): string {
+  const text = instructions.replace(/^#+\s.*$/gm, "").replace(/\s+/g, " ").trim();
+  if (text.length <= 200) return text;
+  const cut = text.slice(0, 200);
+  const sentence = cut.lastIndexOf(". ");
+  return sentence > 80 ? cut.slice(0, sentence + 1) : `${cut.slice(0, cut.lastIndexOf(" "))}…`;
+}
 
 function ApprovalCard({ interaction, onRespond }: { interaction: Interaction; onRespond: (intent: string, content?: string) => Promise<void> }) {
   const [busy, setBusy] = useState(false);
@@ -21,7 +31,7 @@ function ApprovalCard({ interaction, onRespond }: { interaction: Interaction; on
   return <div className="approval-card">
     <div className="approval-head"><ShieldCheck size={16} /><div><strong>{plain ? plain.title : toolName ? `Allow “${toolName.split("__").at(-1)}”?` : interaction.title || "Approval needed"}</strong>{!plain && <small>{interaction.summary}</small>}</div></div>
     {plain ? <ul className="approval-list">{plain.lines.map(line => <li key={line}>{line}</li>)}</ul>
-      : input !== undefined && <pre className="approval-input">{typeof input === "string" ? input : JSON.stringify(input, null, 2)}</pre>}
+      : input !== undefined && (typeof input === "string" ? <pre className="approval-input"><TextWithJson text={input} /></pre> : <JsonBlock value={input} />)}
     <div className="approval-actions">
       <button type="button" className="button secondary" disabled={busy} onClick={() => respond("request_changes", "The user declined this action. Do not retry it; continue without it or ask what to do instead.")}>Decline</button>
       <button type="button" className="button primary" disabled={busy} onClick={() => respond("approve", "Approved")}>Allow</button>
@@ -83,12 +93,55 @@ function MissedCard({ item, onAnswered }: { item: AttentionItem; onAnswered: () 
 // ProposalCard shows instructions a bot proposed for itself. Nothing
 // changes until the user applies them.
 function ProposalCard({ bot, proposal, onAnswered }: { bot: Bot; proposal: InstructionProposal; onAnswered: () => void }) {
+  if (proposal.kind === "install_skill") return <SkillProposalCard bot={bot} proposal={proposal} onAnswered={onAnswered} />;
+  return <InstructionProposalCard bot={bot} proposal={proposal} onAnswered={onAnswered} />;
+}
+
+// A catalog skill a bot (or a look-back) suggests installing. Installing
+// copies it at the indexed version and turns it on for the bot.
+function SkillProposalCard({ bot, proposal, onAnswered }: { bot: Bot; proposal: InstructionProposal; onAnswered: () => void }) {
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState("");
+  const skill = proposal.skill;
+  const answer = async (action: "apply" | "discard") => {
+    setBusy(true); setError("");
+    try { await api.answerProposal(proposal.id, action); onAnswered(); } catch (caught) { setError(errorMessage(caught)); } finally { setBusy(false); }
+  };
+  return <div className="approval-card proposal-card">
+    <div className="approval-head"><BookOpen size={16} /><div>
+      <strong>{proposal.source === "retrospective" ? `${bot.name} looked back and suggests a skill` : `${bot.name} suggests a skill`}</strong>
+      <small>{skill ? `${skill.name} · from ${skill.repo}` : proposal.summary}</small>
+    </div></div>
+    {proposal.reason && <p className="proposal-reason">{proposal.reason}</p>}
+    {skill ? <div className="skill-suggestion">
+      <p>{skill.description}</p>
+      <div className="catalog-facts">
+        <span>{skill.license ? `Licence: ${skill.license}` : "No licence stated"}</span>
+        <span>{skill.files.length} file{skill.files.length === 1 ? "" : "s"}</span>
+        {skill.has_scripts && <span className="catalog-warning"><FileCode2 size={13} /> Contains scripts</span>}
+        <button type="button" className="link-button" onClick={() => openExternal(skill.url)}>View on GitHub <ExternalLink size={11} /></button>
+      </div>
+    </div> : <p className="muted small">This skill is no longer in the catalog (its source may be off).</p>}
+    {error && <div className="inline-error">{error}</div>}
+    <div className="approval-actions">
+      <span className="spacer" />
+      <button type="button" className="button secondary" disabled={busy} onClick={() => answer("discard")}>No thanks</button>
+      <button type="button" className="button primary" disabled={busy || !skill} onClick={() => answer("apply")}>{busy ? "Installing…" : `Install for ${bot.name}`}</button>
+    </div>
+  </div>;
+}
+
+function InstructionProposalCard({ bot, proposal, onAnswered }: { bot: Bot; proposal: InstructionProposal; onAnswered: () => void }) {
   const [busy, setBusy] = useState(false);
   const [full, setFull] = useState(false);
   const changes = instructionChanges(bot.instructions, proposal.instructions);
   const answer = async (action: "apply" | "discard") => { setBusy(true); try { await api.answerProposal(proposal.id, action); onAnswered(); } finally { setBusy(false); } };
   return <div className="approval-card proposal-card">
-    <div className="approval-head"><SlidersHorizontal size={16} /><div><strong>Update {bot.name}'s instructions?</strong><small>{proposal.summary}</small></div></div>
+    <div className="approval-head"><SlidersHorizontal size={16} /><div>
+      <strong>{proposal.source === "retrospective" ? `${bot.name} looked back at recent work` : `Update ${bot.name}'s instructions?`}</strong>
+      <small>{proposal.summary}</small>
+    </div></div>
+    {proposal.reason && <p className="proposal-reason">{proposal.reason}</p>}
     {full ? <pre className="approval-input">{proposal.instructions}</pre>
       : <ul className="instruction-diff">{changes.map((change, index) => <li key={index} className={change.kind}>{change.kind === "add" ? "+" : "−"} {change.text}</li>)}{changes.length === 0 && <li>No visible changes.</li>}</ul>}
     <div className="approval-actions">
@@ -102,9 +155,15 @@ function ProposalCard({ bot, proposal, onAnswered }: { bot: Bot; proposal: Instr
 
 function FilesDrawer({ bot, onClose, refreshKey }: { bot: Bot; onClose: () => void; refreshKey: number }) {
   const [files, setFiles] = useState<WorkspaceFile[]>([]);
+  const [total, setTotal] = useState(0);
+  const [filter, setFilter] = useState("");
   const [preview, setPreview] = useState<{ path: string; content?: string; binary?: boolean } | null>(null);
   const [error, setError] = useState("");
-  useEffect(() => { api.files(bot.id).then(result => setFiles(result.files)).catch(caught => setError(errorMessage(caught))); }, [bot.id, refreshKey]);
+  useEffect(() => { api.files(bot.id).then(result => { setFiles(result.files); setTotal(result.total ?? result.files.length); }).catch(caught => setError(errorMessage(caught))); }, [bot.id, refreshKey]);
+  const shown = useMemo(() => {
+    const words = filter.toLowerCase().split(/\s+/).filter(Boolean);
+    return words.length ? files.filter(file => words.every(word => file.path.toLowerCase().includes(word))) : files;
+  }, [files, filter]);
   const open = async (path: string) => {
     try { setPreview({ path, ...(await api.readFile(bot.id, path)) }); } catch (caught) { setError(errorMessage(caught)); }
   };
@@ -121,10 +180,22 @@ function FilesDrawer({ bot, onClose, refreshKey }: { bot: Bot; onClose: () => vo
       <div className="row between"><button type="button" className="link-button" onClick={() => setPreview(null)}>← All files</button><button type="button" className="link-button" onClick={() => api.reveal(bot.id, preview.path)}>Reveal</button></div>
       <h4>{preview.path}</h4>
       {preview.binary ? <p className="muted">This file can't be previewed here.</p> : preview.path.endsWith(".md") ? <Markdown>{preview.content || ""}</Markdown> : <pre>{preview.content}</pre>}
-    </div> : <ul className="file-list">
-      {files.length === 0 && <li className="muted">No files yet. Attach a file or ask the bot to work with one.</li>}
-      {files.map(file => <li key={file.path}><button type="button" onClick={() => open(file.path)}><FileText size={14} /><span>{file.path}</span><small>{relativeTime(file.modified)}</small></button></li>)}
-    </ul>}
+    </div> : <>
+      {files.length > 8 && <div className="file-filter"><input value={filter} onChange={event => setFilter(event.target.value)} placeholder="Filter files" aria-label="Filter files" /></div>}
+      <ul className="file-list">
+        {files.length === 0 && <li className="muted">No files yet. Attach a file or ask the bot to work with one.</li>}
+        {files.length > 0 && shown.length === 0 && <li className="muted">No files match.</li>}
+        {shown.map(file => {
+          const slash = file.path.lastIndexOf("/");
+          return <li key={file.path}><button type="button" onClick={() => open(file.path)} title={file.path}>
+            <FileText size={14} />
+            <span className="file-name"><span>{file.path.slice(slash + 1)}</span>{slash > 0 && <small className="file-dir">{file.path.slice(0, slash)}</small>}</span>
+            <small>{relativeTime(file.modified)}</small>
+          </button></li>;
+        })}
+        {total > files.length && <li className="muted file-more">Showing the {files.length} newest of {total} files. Filter or open the folder in Finder for the rest.</li>}
+      </ul>
+    </>}
   </aside>;
 }
 
@@ -256,10 +327,31 @@ export function Chat({ bot, bots, conversationId, status, pending: waiting, onCh
   const liveEvents = useLiveEvents(working ? activeRun?.id : undefined);
   const eventsByTurn = useTurnEvents(turns, timelines, working ? lastTurn?.id : undefined, liveEvents);
 
-  useEffect(() => {
+  // The transcript stays at its latest message while the reader is there:
+  // steps, answers and cards load after the turns, and each one would
+  // otherwise leave the view short of the bottom. Scrolling up unpins it.
+  const contentRef = useRef<HTMLDivElement>(null);
+  const pinned = useRef(true);
+  const clicked = useRef(0);
+  const toBottom = useCallback(() => {
     const element = scrollRef.current;
-    if (element) element.scrollTop = element.scrollHeight;
-  }, [turns.length, pending.length, conversationId]);
+    if (element) element.scrollTo({ top: element.scrollHeight, behavior: "instant" });
+  }, []);
+  useEffect(() => { pinned.current = true; toBottom(); }, [conversationId, toBottom]);
+  useEffect(() => { if (pinned.current) toBottom(); }, [turns.length, pending.length, toBottom]);
+  useEffect(() => {
+    const content = contentRef.current;
+    if (!content) return;
+    // Growth right after a click is the reader opening something; leave
+    // the view where it is.
+    const observer = new ResizeObserver(() => { if (pinned.current && Date.now() - clicked.current > 800) toBottom(); });
+    observer.observe(content);
+    return () => observer.disconnect();
+  }, [toBottom]);
+  const onScroll = () => {
+    const element = scrollRef.current;
+    if (element) pinned.current = element.scrollHeight - element.scrollTop - element.clientHeight < 80;
+  };
 
   const send = async (text?: string) => {
     const body = (text ?? draft).trim();
@@ -268,7 +360,7 @@ export function Chat({ bot, bots, conversationId, status, pending: waiting, onCh
     // in the conversation. Logins keep them in the Keychain instead.
     if (looksLikePassword(body) && !window.confirm(`This looks like a password. Anything typed here reaches the model and stays in the conversation.\n\nTo let ${bot.name} sign in safely, cancel and add a login under Edit bot → Logins instead.\n\nSend it anyway?`)) return;
     const content = [body, ...attachments.map(item => item.note)].filter(Boolean).join("\n\n");
-    setSending(true); setError("");
+    setSending(true); setError(""); pinned.current = true;
     try {
       await api.send(conversationId, content);
       setDraft(""); setAttachments([]);
@@ -332,7 +424,7 @@ export function Chat({ bot, bots, conversationId, status, pending: waiting, onCh
         </div>
         <div className="row">
           {bot.capabilities.browser && <button type="button" className={`icon-button ${panel === "browser" ? "active" : ""}`} title="Watch the bot's browser" onClick={() => togglePanel("browser")}><Eye size={16} /></button>}
-          {bot.capabilities.browser && <button type="button" className={`button ${browserHeld ? "warning" : "secondary"} small`} onClick={toggleBrowser} title="Take control of the bot's browser, for example to sign in"><MousePointerClick size={14} />{browserHeld ? "Hand back browser" : "Take over browser"}</button>}
+          {bot.capabilities.browser && !status?.cloud_browsers && <button type="button" className={`button ${browserHeld ? "warning" : "secondary"} small`} onClick={toggleBrowser} title={browserHeld ? "Hand the browser back to the bot" : "Take control of the bot's browser, for example to sign in"}><MousePointerClick size={14} /><span className="button-label">{browserHeld ? "Hand back browser" : "Take over browser"}</span></button>}
           {bot.capabilities.files_read && <button type="button" className={`icon-button ${panel === "files" ? "active" : ""}`} title="Workspace files" onClick={() => togglePanel("files")}><FolderOpen size={16} /></button>}
           {home && <button type="button" className={`icon-button ${panel === "memory" ? "active" : ""}`} title={`Memory · ${memoryWhereLabel(home, bot)}`} aria-label="Memory" onClick={() => togglePanel("memory")}><Brain size={16} /></button>}
           <button type="button" className="icon-button" title="Start fresh: keep this conversation on screen, but don't carry it into what the bot remembers right now" aria-label="Start fresh" onClick={startFresh} disabled={working || turns.length === 0}><RotateCcw size={16} /></button>
@@ -341,11 +433,11 @@ export function Chat({ bot, bots, conversationId, status, pending: waiting, onCh
       </header>
       {status && !status.runtime_ready && <div className="banner">Starting the bot engine…</div>}
       {browserHeld && <div className="banner warning">You have control of {bot.name}'s browser. The bot waits until you hand it back.</div>}
-      <div className="transcript" ref={scrollRef}>
+      <div className="transcript" ref={scrollRef} onScroll={onScroll} onPointerDown={() => { clicked.current = Date.now(); }}><div className="transcript-content" ref={contentRef}>
         {detail && turns.length === 0 && <div className="chat-empty">
           <Avatar bot={bot} size={84} />
           <h3>{bot.name}</h3>
-          <p>{bot.instructions ? bot.instructions.slice(0, 180) : "Ask me anything."}</p>
+          <p>{bot.instructions ? intro(bot.instructions) : "Ask me anything."}</p>
         </div>}
         {turns.length > shown && <button type="button" className="show-earlier" onClick={() => setShown(value => value + TURNS_SHOWN)}>Show earlier messages</button>}
         {turns.map((turn, index) => index < turns.length - shown ? null : <Fragment key={turn.id}>
@@ -359,7 +451,7 @@ export function Chat({ bot, bots, conversationId, status, pending: waiting, onCh
         {signIns.map(interaction => <ReconnectCard key={interaction.id} interaction={interaction} />)}
         {approvals.map(interaction => <ApprovalCard key={interaction.id} interaction={interaction} onRespond={(intent, content) => respond(interaction, intent, content)} />)}
         {questions.map(interaction => <QuestionCard key={interaction.id} interaction={interaction} onAnswer={text => void send(text)} />)}
-      </div>
+      </div></div>
       <footer className="composer-wrap">
         {error && <div className="inline-error"><CircleAlert size={14} /><span>{error}</span><button type="button" className="icon-button ghost tiny" onClick={() => setError("")}><X size={12} /></button></div>}
         {attachments.length > 0 && <div className="attachments">{attachments.map((item, index) => <span className="attachment" key={index}><Paperclip size={12} />{item.name}<button type="button" onClick={() => setAttachments(current => current.filter((_, i) => i !== index))} aria-label={`Remove ${item.name}`}><X size={11} /></button></span>)}</div>}

@@ -1,4 +1,5 @@
 import { useEffect, useState } from "react";
+import { Select } from "./Select";
 import { Trash2 } from "lucide-react";
 import { api } from "./api";
 import type { Bot, MCPConnection, ModelInfo, Provider, Settings, Skill, Status } from "./types";
@@ -6,7 +7,14 @@ import { Avatar, Field, Modal, Toggle, errorMessage } from "./ui";
 import { BotFace, botColors, faceJob, faces, suggestFace } from "./BotFace";
 import { ColorPicker } from "./NewBotDialog";
 import { Logins } from "./Logins";
-const providerNames: Record<Provider, string> = { local: "Local model server", anthropic: "Anthropic", openai: "OpenAI", openrouter: "OpenRouter" };
+const providerNames: Record<Provider, string> = { local: "Local model server", anthropic: "Anthropic", openai: "OpenAI", openrouter: "OpenRouter", chatgpt: "ChatGPT subscription" };
+
+// Whether a provider can be chosen, and what to do first if not.
+function providerReady(provider: Provider, settings: Settings | null): string {
+  if (!settings || provider === "local") return "";
+  if (provider === "chatgpt") return settings.chatgpt?.connected ? "" : " (sign in in Settings)";
+  return settings[provider].configured ? "" : " (add key in Settings)";
+}
 
 export function newBot(settings: Settings | null): Bot {
   return {
@@ -47,11 +55,19 @@ export function BotEditor({ initial, settings, status, onClose, onSaved, onDelet
   });
   const pickFace = (emoji: string) => { setFacePicked(true); setBot(current => ({ ...current, emoji })); };
   const currentFace = faceJob(bot.emoji);
+  const [lookBack, setLookBack] = useState<"" | "asking" | "asked">("");
+  const [lookBackError, setLookBackError] = useState("");
+  const askLookBack = async () => {
+    setLookBack("asking"); setLookBackError("");
+    try { await api.lookBack(bot.id); setLookBack("asked"); } catch (caught) { setLookBack(""); setLookBackError(errorMessage(caught)); }
+  };
   const capability = (key: keyof Bot["capabilities"], value: boolean) => setBot(current => {
     const capabilities = { ...current.capabilities, [key]: value };
     if (key === "files_write" && value) capabilities.files_read = true;
     if (key === "files_read" && !value) { capabilities.files_write = false; capabilities.shell = false; }
-    return { ...current, capabilities };
+    if (key === "shell" && value) capabilities.files_read = true;
+    // Shell commands always ask first.
+    return { ...current, capabilities, approval_mode: capabilities.shell ? "ask" : current.approval_mode };
   });
   const toggleList = (key: "skills" | "mcp_connections", id: string) => setBot(current => ({ ...current, [key]: current[key].includes(id) ? current[key].filter(item => item !== id) : [...current[key], id] }));
 
@@ -83,29 +99,29 @@ export function BotEditor({ initial, settings, status, onClose, onSaved, onDelet
           <Avatar bot={bot} size={68} />
           <Field label="Name"><input value={bot.name} onChange={event => update({ name: event.target.value })} placeholder="e.g. Travel planner" autoFocus /></Field>
         </div>
-        <div className="face-picker">
+        {bot.role !== "main" && <div className="face-picker">
           <span className="field-label">Face{!facePicked ? " · suggested from the name" : ""}</span>
           <div className="face-choices">{faces.map(item => <button type="button" key={item.job} title={item.label} aria-label={item.label} className={`face-choice ${currentFace === item.job ? "selected" : ""}`} onClick={() => pickFace(item.job)}>
             <BotFace icon={item.job} color={bot.color} seed={item.job} size={40} />
           </button>)}</div>
           <span className="field-label">Colour</span>
           <ColorPicker value={bot.color} onChange={color => update({ color })} />
-        </div>
+        </div>}
         <Field label="Instructions" hint="Who this bot is and how it should work. Skills below add reusable instructions.">
           <textarea className="instructions-input" rows={6} value={bot.instructions} onChange={event => update({ instructions: event.target.value })} placeholder="You plan trips. Always suggest train options before flights…" />
         </Field>
         <h3 className="section-title">Model</h3>
         <div className="two-col">
           <Field label="Provider">
-            <select value={bot.provider} onChange={event => update({ provider: event.target.value as Provider, model: "" })}>
-              {(Object.keys(providerNames) as Provider[]).map(provider => <option key={provider} value={provider} disabled={provider !== "local" && settings ? !settings[provider].configured : false}>{providerNames[provider]}{provider !== "local" && settings && !settings[provider].configured ? " (add key in Settings)" : ""}</option>)}
-            </select>
+            <Select value={bot.provider} onChange={value => update({ provider: value as Provider, model: "" })}>
+              {(Object.keys(providerNames) as Provider[]).map(provider => <option key={provider} value={provider} disabled={!!providerReady(provider, settings)}>{providerNames[provider]}{providerReady(provider, settings)}</option>)}
+            </Select>
           </Field>
           <Field label="Model" hint={modelError || (bot.provider === "local" ? "Models your local server has available" : undefined)}>
-            {models.length ? <select value={bot.model} onChange={event => update({ model: event.target.value })}>
+            {models.length ? <Select value={bot.model} onChange={value => update({ model: value })}>
               <option value="">{bot.provider === "local" ? "Choose a model" : "Provider default"}</option>
               {models.map(model => <option key={model.id} value={model.id}>{model.id}</option>)}
-            </select> : <input value={bot.model} onChange={event => update({ model: event.target.value })} placeholder="model id" />}
+            </Select> : <input value={bot.model} onChange={event => update({ model: event.target.value })} placeholder="model id" />}
           </Field>
         </div>
       </section>
@@ -119,10 +135,17 @@ export function BotEditor({ initial, settings, status, onClose, onSaved, onDelet
           <Toggle label="Create and edit files" description="Inside its workspace folder" checked={bot.capabilities.files_write} onChange={value => capability("files_write", value)} disabled={!writeTools} note={writeTools ? undefined : "Needs the macOS sandbox, which is not active in the bot engine."} />
           <Toggle label="Run shell commands" description="Runs in a macOS sandbox limited to its folder; asks first unless TypeSafe clears it" checked={bot.capabilities.shell} onChange={value => capability("shell", value)} disabled={!writeTools} />
         </div>
-        <Field label="Approvals" hint={bot.approval_mode === "ask" ? "Reading, browsing and memory never ask. File edits, commands and connection writes ask." : "Acts without asking, within the permissions above."}>
+        <div className="toggles">
+          <Toggle label="Suggest improvements" description="Now and then, and after corrections or problems, it looks back at recent tasks and suggests better instructions. Nothing changes until you apply it." checked={!bot.retro_off} onChange={value => update({ retro_off: !value })} />
+          {!isNew && !bot.retro_off && <div className="look-back-row">
+            <button type="button" className="link-button" disabled={lookBack === "asking"} onClick={askLookBack}>{lookBack === "asked" ? "Looking back…" : "Look back now"}</button>
+            {lookBackError && <small className="inline-error-text">{lookBackError}</small>}
+          </div>}
+        </div>
+        <Field label="Approvals" hint={bot.capabilities.shell ? "Bots that run shell commands always ask first. Reading, browsing and memory never ask." : bot.approval_mode === "ask" ? "Reading, browsing and memory never ask. File edits, commands and connection writes ask." : "Acts without asking, within the permissions above."}>
           <div className="segmented">
             <button type="button" className={bot.approval_mode === "ask" ? "active" : ""} onClick={() => update({ approval_mode: "ask" })}>Ask for risky actions</button>
-            <button type="button" className={bot.approval_mode === "auto" ? "active" : ""} disabled={bot.capabilities.shell} onClick={() => update({ approval_mode: "auto" })}>Act within its scope</button>
+            <button type="button" className={bot.approval_mode === "auto" ? "active" : ""} disabled={bot.capabilities.shell} title={bot.capabilities.shell ? "Not available while it can run shell commands" : undefined} onClick={() => update({ approval_mode: "auto" })}>Act within its scope</button>
           </div>
         </Field>
         {bot.capabilities.files_read && <Field label="Workspace folder" hint="A workspace folder is not an OS sandbox; it limits Rex's file tools."><input value={bot.workspace_dir} onChange={event => update({ workspace_dir: event.target.value })} placeholder={`${status?.workspace_root || "~/Rex"}/${bot.name ? bot.name.toLowerCase().replace(/[^a-z0-9]+/g, "-") : "bot"}`} /></Field>}

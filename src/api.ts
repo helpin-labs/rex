@@ -1,6 +1,6 @@
-import type {
+import type { ChatGPTStatus,
   AttentionItem, Bot, BotLogin, InstructionProposal, Conversation, ConversationDetail, MCPConnection, MemoryOverview, MemorySource, ModelInfo, ProviderTest,
-  Routine, RoutineRun, Run, RunEventEnvelope, Settings, Skill, Status, Turn, WorkspaceFile,
+  Routine, RoutineRun, Run, RunEventEnvelope, Settings, Skill, Status, Turn, WorkspaceFile, CatalogSkill, SkillSource,
 } from "./types";
 
 type Connection = { url: string; token: string };
@@ -55,6 +55,10 @@ export const api = {
   saveSettings: (settings: Settings) => request<Settings>("/api/settings", json("PUT", settings)),
   testProvider: (provider: string, model: string) => request<ProviderTest>("/api/settings/test", json("POST", { provider, model })),
   models: (provider: string) => request<ModelInfo[]>(`/api/providers/${provider}/models`),
+  chatgpt: () => request<ChatGPTStatus>("/api/chatgpt"),
+  chatgptLogin: () => request<ChatGPTStatus>("/api/chatgpt/login", { method: "POST" }),
+  chatgptPoll: () => request<ChatGPTStatus>("/api/chatgpt/login/poll", { method: "POST" }),
+  chatgptSignOut: () => request<ChatGPTStatus>("/api/chatgpt", { method: "DELETE" }),
 
   bots: () => request<Bot[]>("/api/bots"),
   logins: (botId: string) => request<BotLogin[]>(`/api/bots/${encodeURIComponent(botId)}/logins`),
@@ -62,12 +66,13 @@ export const api = {
     request<BotLogin>(`/api/bots/${encodeURIComponent(botId)}/logins${id ? `/${id}` : ""}`, json(id ? "PUT" : "POST", login)),
   deleteLogin: (botId: string, id: string) => request<void>(`/api/bots/${encodeURIComponent(botId)}/logins/${id}`, json("DELETE")),
   proposals: () => request<InstructionProposal[]>("/api/proposals"),
+  lookBack: (botId: string) => request<void>(`/api/bots/${botId}/retrospective`, json("POST", {})),
   answerProposal: (id: string, action: "apply" | "discard") => request<void>(`/api/proposals/${id}`, json("POST", { action })),
   draftBot: (name: string, face: string, color: string) => request<Bot>("/api/bots/draft", json("POST", { name, face, color })),
   createBot: (bot: Partial<Bot>) => request<Bot>("/api/bots", json("POST", bot)),
   saveBot: (bot: Bot) => request<Bot>(`/api/bots/${encodeURIComponent(bot.id)}`, json("PUT", bot)),
   deleteBot: (id: string) => request<void>(`/api/bots/${encodeURIComponent(id)}`, json("DELETE")),
-  files: (botId: string) => request<{ root: string; files: WorkspaceFile[] }>(`/api/bots/${encodeURIComponent(botId)}/files`),
+  files: (botId: string) => request<{ root: string; files: WorkspaceFile[]; total?: number }>(`/api/bots/${encodeURIComponent(botId)}/files`),
   readFile: (botId: string, path: string) => request<{ content?: string; binary?: boolean }>(`/api/bots/${encodeURIComponent(botId)}/file?path=${encodeURIComponent(path)}`),
   reveal: (botId: string, path = "") => request<void>(`/api/bots/${encodeURIComponent(botId)}/reveal`, json("POST", { path })),
   upload: (botId: string, file: File) => {
@@ -102,6 +107,14 @@ export const api = {
   deleteSkill: (id: string) => request<void>(`/api/skills/${id}`, json("DELETE")),
   importSkill: (file: File) => request<Skill>("/api/skills/import", { method: "POST", body: file, headers: { "Content-Type": "application/zip" } }),
   revealSkills: () => request<void>("/api/skills/reveal", json("POST", {})),
+  skillSources: () => request<SkillSource[]>("/api/skill-sources"),
+  addSkillSource: (repo: string) => request<SkillSource>("/api/skill-sources", json("POST", { repo })),
+  setSkillSource: (id: string, enabled: boolean) => request<SkillSource>(`/api/skill-sources/${encodeURIComponent(id)}`, json("PATCH", { enabled })),
+  removeSkillSource: (id: string) => request<void>(`/api/skill-sources/${encodeURIComponent(id)}`, json("DELETE")),
+  refreshSkillSource: (id: string) => request<SkillSource>(`/api/skill-sources/${encodeURIComponent(id)}/refresh`, json("POST", {})),
+  catalog: (query: string) => request<CatalogSkill[]>(`/api/catalog?q=${encodeURIComponent(query)}`),
+  catalogPreview: (id: string) => request<{ content: string }>(`/api/catalog/preview?id=${encodeURIComponent(id)}`),
+  installCatalogSkill: (id: string, botId = "") => request<Skill>("/api/catalog/install", json("POST", { id, bot_id: botId })),
 
   routines: () => request<Routine[]>("/api/routines"),
   saveRoutine: (routine: Partial<Routine>) => request<Routine>(routine.id ? `/api/routines/${routine.id}` : "/api/routines", json(routine.id ? "PUT" : "POST", routine)),

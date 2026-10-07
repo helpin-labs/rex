@@ -33,10 +33,13 @@ func (h *Host) Handler() http.Handler {
 	mux.HandleFunc("POST /runtime/workspaces/finalize", h.requireInternal(h.finalizeWorkspace))
 	mux.HandleFunc("POST /runtime/workspaces/cleanup", h.requireInternal(h.cleanupWorkspace))
 	mux.HandleFunc("POST /runtime/artifacts", h.requireInternal(h.saveArtifact))
+	mux.HandleFunc("POST /runtime/model-credentials/refresh", h.requireInternal(h.refreshChatGPTCredential))
 	mux.Handle("/mcp/memory/", h.memoryMCP())
 	mux.Handle("/mcp/setup/", h.setupMCP())
 	mux.Handle("/mcp/bots/", h.botsMCP())
 	mux.Handle("/mcp/self/", h.selfMCP())
+	mux.Handle("/mcp/retro/", h.retroMCP())
+	mux.Handle("/mcp/catalog/", h.catalogMCP())
 	mux.Handle("/mcp/logins/", h.loginsMCP())
 	mux.HandleFunc("GET "+oauthCallbackPath, h.oauthCallback)
 
@@ -47,10 +50,24 @@ func (h *Host) Handler() http.Handler {
 	api.HandleFunc("PUT /api/settings", h.saveSettings)
 	api.HandleFunc("POST /api/settings/test", h.testProvider)
 	api.HandleFunc("GET /api/providers/{provider}/models", h.providerModels)
+	api.HandleFunc("GET /api/chatgpt", h.chatGPTStatus)
+	api.HandleFunc("POST /api/chatgpt/login", h.chatGPTStartLogin)
+	api.HandleFunc("POST /api/chatgpt/login/poll", h.chatGPTPollLogin)
+	api.HandleFunc("DELETE /api/chatgpt", h.chatGPTSignOut)
 
 	api.HandleFunc("GET /api/bots", h.listBots)
 	api.HandleFunc("POST /api/bots", h.saveBot)
 	api.HandleFunc("POST /api/bots/draft", h.draftBot)
+	api.HandleFunc("POST /api/bots/{id}/retrospective", h.lookBackNow)
+	api.HandleFunc("GET /api/bots/{id}/retrospectives", h.listRetrospectives)
+	api.HandleFunc("GET /api/skill-sources", h.listSkillSources)
+	api.HandleFunc("POST /api/skill-sources", h.addSkillSource)
+	api.HandleFunc("PATCH /api/skill-sources/{id}", h.updateSkillSource)
+	api.HandleFunc("DELETE /api/skill-sources/{id}", h.removeSkillSource)
+	api.HandleFunc("POST /api/skill-sources/{id}/refresh", h.refreshSkillSource)
+	api.HandleFunc("GET /api/catalog", h.searchCatalog)
+	api.HandleFunc("GET /api/catalog/preview", h.previewCatalogSkill)
+	api.HandleFunc("POST /api/catalog/install", h.installCatalogSkill)
 	api.HandleFunc("GET /api/bots/{id}/logins", h.listLogins)
 	api.HandleFunc("POST /api/bots/{id}/logins", h.saveLogin)
 	api.HandleFunc("PUT /api/bots/{id}/logins/{login}", h.saveLogin)
@@ -177,7 +194,7 @@ func (h *Host) status(w http.ResponseWriter, r *http.Request) {
 		"data_dir": h.cfg.DataDir, "workspace_root": h.cfg.WorkspaceRoot,
 		"memory":    map[string]any{"available": h.Memory.Available(), "status": h.Memory.Status()},
 		"onboarded": settings.Onboarded, "active_runs": h.ActiveRuns(), "write_tools": h.WriteTools(),
-		"web_search": settings.WebSearchReady(),
+		"web_search": settings.WebSearchReady(), "cloud_browsers": settings.CloudBrowsers(),
 	})
 }
 
@@ -329,7 +346,7 @@ func (h *Host) listFiles(w http.ResponseWriter, r *http.Request) {
 			}
 			return nil
 		}
-		if strings.HasPrefix(name, ".") || len(files) >= 500 {
+		if strings.HasPrefix(name, ".") || len(files) >= maxWalkedFiles {
 			return nil
 		}
 		info, err := entry.Info()
@@ -340,9 +357,19 @@ func (h *Host) listFiles(w http.ResponseWriter, r *http.Request) {
 		files = append(files, WorkspaceFile{Path: filepath.ToSlash(relative), Size: info.Size(), Modified: info.ModTime()})
 		return nil
 	})
+	// The newest files are the ones worth seeing; a workspace can hold many.
 	sort.Slice(files, func(i, j int) bool { return files[i].Modified.After(files[j].Modified) })
-	writeJSON(w, http.StatusOK, map[string]any{"root": root, "files": files})
+	total := len(files)
+	if len(files) > maxListedFiles {
+		files = files[:maxListedFiles]
+	}
+	writeJSON(w, http.StatusOK, map[string]any{"root": root, "files": files, "total": total})
 }
+
+const (
+	maxWalkedFiles = 20000
+	maxListedFiles = 500
+)
 
 func (h *Host) readFile(w http.ResponseWriter, r *http.Request) {
 	bot, ok := h.botWorkspace(w, r)

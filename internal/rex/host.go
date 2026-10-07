@@ -57,6 +57,8 @@ type Host struct {
 	watchMu sync.Mutex
 	watched map[string]bool
 	wake    chan struct{}
+	// retroWake asks the retrospective worker to look now.
+	retroWake chan struct{}
 
 	// detachAfter marks bots that reconfigured themselves; their next
 	// message starts a new run with the new instructions and tools.
@@ -64,10 +66,12 @@ type Host struct {
 	detachAfter map[string]bool
 
 	oauth mcpOAuth
+	// github reads skill sources for the catalog (catalog.go).
+	github *githubClient
 }
 
 func NewHost(cfg Config, store *Store, runtime *RuntimeClient, settings *SettingsManager, memory *MemoryService, skills *SkillLibrary) *Host {
-	h := &Host{cfg: cfg, Store: store, Runtime: runtime, Settings: settings, Memory: memory, Skills: skills, watched: map[string]bool{}, wake: make(chan struct{}, 1), detachAfter: map[string]bool{}}
+	h := &Host{cfg: cfg, Store: store, Runtime: runtime, Settings: settings, Memory: memory, Skills: skills, watched: map[string]bool{}, wake: make(chan struct{}, 1), retroWake: make(chan struct{}, 1), github: newGitHubClient(), detachAfter: map[string]bool{}}
 	h.Routines = NewScheduler(h)
 	storedPasswords = func() []string { return h.KnownPasswords(context.Background()) }
 	h.Browser = NewBrowserControl(h)
@@ -421,6 +425,9 @@ func (h *Host) runMCPServers(ctx context.Context, bot Bot) ([]RunMCPServer, erro
 	if bot.Role == RoleMain {
 		servers = append(servers, h.botsMCPServer(bot))
 	}
+	// Every bot can search the skill catalog and suggest a skill for
+	// itself; the user installs it from the suggestion.
+	servers = append(servers, h.catalogMCPServer(bot.ID, true))
 	if bot.Capabilities.Browser && !bot.Setup {
 		servers = append(servers, h.loginsMCPServer(bot))
 	}
@@ -657,6 +664,7 @@ func (h *Host) settle(ctx context.Context, run *Run, status string) {
 	if turn.DelegatedBy != "" {
 		h.reportToMain(*turn, status, answer)
 	}
+	go h.noteTaskForRetro(context.WithoutCancel(ctx), *turn, status, answer)
 	if status == "settled" {
 		h.Memory.Notify()
 	} else if turn.MemoryStatus == "pending" {

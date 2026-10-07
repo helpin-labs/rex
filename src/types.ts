@@ -7,7 +7,7 @@ export type Capabilities = {
   memory: boolean;
 };
 
-export type Provider = "local" | "anthropic" | "openai" | "openrouter";
+export type Provider = "local" | "anthropic" | "openai" | "openrouter" | "chatgpt";
 
 export type Bot = {
   id: string;
@@ -30,6 +30,8 @@ export type Bot = {
   setup?: boolean;
   // "main" is Rex itself, the bot that hands work to the others.
   role?: string;
+  // Stops the bot from looking back at its tasks to suggest improvements.
+  retro_off?: boolean;
 };
 
 export type Status = {
@@ -43,9 +45,14 @@ export type Status = {
   write_tools: boolean;
   // True when a web search key is set, so bots can use web_search.
   web_search?: boolean;
+  // True when bots browse in Kernel's cloud, which can't be taken over.
+  cloud_browsers?: boolean;
 };
 
 export type ProviderConfig = { base_url: string; configured: boolean; api_key?: string; clear_key?: boolean };
+
+/** The ChatGPT subscription sign-in; pending holds the code to enter. */
+export type ChatGPTStatus = { connected: boolean; expires_at?: string; pending?: { verification_url: string; user_code: string; expires_at: string; interval_seconds: number } };
 
 export type Settings = {
   local: ProviderConfig;
@@ -53,6 +60,9 @@ export type Settings = {
   openai: ProviderConfig;
   openrouter: ProviderConfig;
   default_provider: Provider;
+  chatgpt?: ChatGPTStatus;
+  kernel?: ProviderConfig;
+  kernel_browser?: boolean;
   default_model: string;
   memory: { enabled: boolean; provider: "local" | "openai"; extraction_model: string; embedding_model: string; embedding_source?: "" | "bundled" | "server" };
   browser_enabled: boolean;
@@ -235,7 +245,12 @@ export type MemoryBank = { bank: string; label: string; bot_ids: string[] };
 export type MemoryOverview = { available: boolean; status: string; banks: MemoryBank[] };
 
 // A skill folder: SKILL.md (body, front matter included) and its files.
-export type Skill = { id: string; title: string; description?: string; body: string; files?: string[]; version?: string; updated_at?: string };
+export type SkillOrigin = { repo: string; commit: string; dir: string; catalog_id: string; installed_at: string };
+export type Skill = { id: string; title: string; description?: string; body: string; files?: string[]; version?: string; updated_at?: string; source?: SkillOrigin };
+
+// The skill catalog: GitHub collections Rex indexes and installs from.
+export type SkillSource = { id: string; repo: string; enabled: boolean; builtin: boolean; note: string; stars: number; license: string; commit: string; skill_count: number; indexed_at?: string; error?: string; description: string };
+export type CatalogSkill = { id: string; source_id: string; repo: string; dir: string; name: string; description: string; license?: string; has_scripts: boolean; files: string[]; commit: string; url: string; installed?: string };
 
 export type Routine = {
   id: string;
@@ -296,7 +311,8 @@ export type AttentionItem = {
 };
 
 // New instructions a bot proposed for itself, waiting for the user.
-export type InstructionProposal = { id: string; bot_id: string; instructions: string; summary: string; created_at: string };
+// source "retrospective": the bot suggested it after looking back at recent tasks.
+export type InstructionProposal = { id: string; bot_id: string; instructions: string; summary: string; source?: string; reason?: string; created_at: string; kind?: "instructions" | "install_skill"; catalog_id?: string; skill?: CatalogSkill };
 
 // A site a bot may sign in to. Passwords never reach the app or the bot.
 export type BotLogin = { id: string; bot_id: string; site: string; username: string; has_2fa: boolean; created_at: string; last_used_at?: string };

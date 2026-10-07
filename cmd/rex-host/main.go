@@ -155,6 +155,8 @@ func run() error {
 	ctx, cancel := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer cancel()
 	go host.RunWatcher(ctx)
+	go host.RetroWorker(ctx)
+	go host.CatalogWorker(ctx)
 	go memory.Worker(ctx)
 	go func() {
 		if err := embedder.Start(ctx); err != nil {
@@ -315,6 +317,8 @@ func (l runtimeLaunch) start(ctx context.Context) (*exec.Cmd, <-chan error, erro
 		"workspace_provider": map[string]any{
 			"transport": "http", "base_url": l.hostURL + "/runtime/workspaces", "token": l.internalToken,
 		},
+		// ChatGPT runs ask Rex for a fresh token before theirs expires.
+		"model_credential_callback": map[string]any{"url": l.hostURL + "/runtime/model-credentials/refresh", "token_env": "REX_MODEL_CALLBACK_TOKEN"},
 		"model_endpoints": []map[string]any{{
 			"id": endpoint.ID, "base_url": endpoint.BaseURL, "auth_mode": endpoint.AuthMode,
 			"allow_http": strings.HasPrefix(endpoint.BaseURL, "http://"),
@@ -341,6 +345,7 @@ func (l runtimeLaunch) start(ctx context.Context) (*exec.Cmd, <-chan error, erro
 		"AGENT_RUNTIME_SERVICE_TOKEN="+l.token,
 		"AGENT_RUNTIME_APP_CONFIG="+string(appConfig),
 		"AGENT_RUNTIME_MODEL_CREDENTIAL_ENCRYPTION_KEY="+base64.StdEncoding.EncodeToString(l.modelCredentialKey),
+		"REX_MODEL_CALLBACK_TOKEN="+l.internalToken,
 		"AGENT_RUNTIME_MCP_CREDENTIAL_ENCRYPTION_KEY="+base64.StdEncoding.EncodeToString(l.mcpCredentialKey),
 		"AGENT_RUNTIME_MCP_ALLOW_HTTP=true",
 		"AGENT_RUNTIME_MCP_ALLOW_PRIVATE_NETWORKS=true",

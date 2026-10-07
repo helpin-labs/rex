@@ -1,9 +1,10 @@
-import { useCallback, useEffect, useState } from "react";
-import { Check, CircleAlert, FolderOpen, LoaderCircle, Plug, Plus, RefreshCw, Trash2 } from "lucide-react";
+import { useCallback, useEffect, useRef, useState } from "react";
+import { Select } from "./Select";
+import { Check, CircleAlert, Copy, ExternalLink, FolderOpen, LoaderCircle, Plug, Plus, RefreshCw, Trash2 } from "lucide-react";
 import { api } from "./api";
 import { SideList } from "./SideList";
-import type { MCPConnection, ModelInfo, Provider, ProviderTest, Settings, Status } from "./types";
-import { Field, Modal, Toggle, errorMessage, signInToConnection } from "./ui";
+import type { ChatGPTStatus, MCPConnection, ModelInfo, Provider, ProviderTest, Settings, Status } from "./types";
+import { Field, Modal, Toggle, errorMessage, openExternal, signInToConnection } from "./ui";
 import { type Theme, loadTheme, saveTheme } from "./theme";
 
 // Web search providers, in the order the bot engine tries them.
@@ -13,11 +14,78 @@ const searchProviders: { key: "tinyfish" | "exa" | "brave"; label: string; place
   { key: "brave", label: "Brave Search", placeholder: "brave key", hint: "Last fallback" },
 ];
 
-const hosted: { key: Exclude<Provider, "local">; label: string; placeholder: string }[] = [
+const hosted: { key: Exclude<Provider, "local" | "chatgpt">; label: string; placeholder: string }[] = [
   { key: "anthropic", label: "Anthropic", placeholder: "sk-ant-…" },
   { key: "openai", label: "OpenAI", placeholder: "sk-…" },
   { key: "openrouter", label: "OpenRouter", placeholder: "sk-or-…" },
 ];
+
+// ChatGPTCard signs Rex in to the user's ChatGPT subscription with a device
+// code: Rex shows a code, the user enters it on ChatGPT's site, and Rex
+// checks until it is approved. Bots can then use ChatGPT models.
+function ChatGPTCard({ initial, onChange }: { initial?: ChatGPTStatus; onChange: (status: ChatGPTStatus) => void }) {
+  // The page re-renders often with a new onChange; timers below keep
+  // running and read the latest one from this ref.
+  const changedRef = useRef(onChange);
+  changedRef.current = onChange;
+  const [status, setStatus] = useState<ChatGPTStatus>(initial || { connected: false });
+  // Follow the saved sign-in, and look again when Rex comes back to the
+  // front (the code is usually entered in the browser meanwhile).
+  useEffect(() => { if (initial) setStatus(initial); }, [initial?.connected, initial?.pending?.user_code]); // eslint-disable-line react-hooks/exhaustive-deps
+  useEffect(() => {
+    const look = () => { if (document.visibilityState === "visible") api.chatgpt().then(next => { setStatus(next); changedRef.current(next); }).catch(() => undefined); };
+    window.addEventListener("focus", look);
+    document.addEventListener("visibilitychange", look);
+    return () => { window.removeEventListener("focus", look); document.removeEventListener("visibilitychange", look); };
+  }, []);
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState("");
+  const [copied, setCopied] = useState(false);
+  const update = useCallback((next: ChatGPTStatus) => { setStatus(next); changedRef.current(next); }, []);
+  const pending = status.pending;
+  const code = pending?.user_code;
+  const interval = Math.max(2, pending?.interval_seconds || 5);
+  useEffect(() => {
+    if (!code) return;
+    const timer = window.setInterval(() => {
+      api.chatgptPoll().then(update).catch(caught => { setError(errorMessage(caught)); update({ connected: false }); });
+    }, interval * 1000);
+    return () => window.clearInterval(timer);
+  }, [code, interval, update]);
+  const start = async () => {
+    setBusy(true); setError("");
+    try {
+      const next = await api.chatgptLogin();
+      update(next);
+      if (next.pending) openExternal(next.pending.verification_url);
+    } catch (caught) { setError(errorMessage(caught)); } finally { setBusy(false); }
+  };
+  const signOut = async () => {
+    if (!window.confirm("Sign out of ChatGPT? Bots set to ChatGPT stop working until you sign in again.")) return;
+    try { update(await api.chatgptSignOut()); } catch (caught) { setError(errorMessage(caught)); }
+  };
+  const copy = async () => {
+    if (!pending) return;
+    try { await navigator.clipboard.writeText(pending.user_code); setCopied(true); window.setTimeout(() => setCopied(false), 1200); } catch { /* clipboard unavailable */ }
+  };
+  return <div className="card">
+    <div className="row between"><h3 className="section-title">ChatGPT subscription</h3>{status.connected && <span className="badge ok-badge">Signed in</span>}</div>
+    <p className="muted small">Run bots on your ChatGPT Plus or Pro plan instead of an API key. Usage counts toward your plan's limits. The sign-in is kept in your macOS Keychain.</p>
+    {error && <div className="inline-error">{error}</div>}
+    {pending ? <div className="device-code">
+      <p className="small">Enter this code on ChatGPT's sign-in page. Rex continues by itself once you approve it.</p>
+      <div className="row">
+        <code className="device-code-value">{pending.user_code}</code>
+        <button type="button" className="icon-button" title="Copy code" aria-label="Copy code" onClick={copy}>{copied ? <Check size={14} /> : <Copy size={14} />}</button>
+        <span className="spacer" />
+        <button type="button" className="button secondary small" onClick={() => openExternal(pending.verification_url)}><ExternalLink size={13} />Open sign-in page</button>
+      </div>
+      <small className="muted row"><LoaderCircle className="spin" size={12} /> Waiting for approval · the code works for 15 minutes</small>
+    </div> : status.connected
+      ? <div className="row"><button type="button" className="button secondary small" onClick={signOut}>Sign out</button></div>
+      : <div className="row"><button type="button" className="button primary small" disabled={busy} onClick={start}>{busy ? "Starting…" : "Sign in with ChatGPT"}</button></div>}
+  </div>;
+}
 
 export function useModels(provider: string, refresh = 0) {
   const [models, setModels] = useState<ModelInfo[]>([]);
@@ -81,7 +149,7 @@ function ConnectionEditor({ initial, onClose, onSaved }: { initial: Partial<MCPC
       <Field label="Server URL" hint="Streamable HTTP endpoint"><input value={connection.url || ""} onChange={event => setConnection({ ...connection, url: event.target.value })} placeholder="https://mcp.example.com/mcp" /></Field>
     </div>
     <div className="two-col">
-      <Field label="Authentication"><select value={connection.auth || "none"} onChange={event => setConnection({ ...connection, auth: event.target.value as MCPConnection["auth"] })}><option value="none">None</option><option value="oauth">Sign in (OAuth)</option><option value="bearer">Bearer token</option></select></Field>
+      <Field label="Authentication"><Select value={connection.auth || "none"} onChange={value => setConnection({ ...connection, auth: value as MCPConnection["auth"] })}><option value="none">None</option><option value="oauth">Sign in (OAuth)</option><option value="bearer">Bearer token</option></Select></Field>
       {connection.auth === "oauth" && <Field label="Account" hint="You sign in on the provider's page in your browser. Rex keeps the sign-in in your macOS Keychain and renews it automatically.">
         <div className="row">
           {connection.signed_in ? <span className="badge ok-badge">Signed in</span> : <span className="muted small">Not signed in</span>}
@@ -96,7 +164,7 @@ function ConnectionEditor({ initial, onClose, onSaved }: { initial: Partial<MCPC
     {!!connection.tools?.length && <><h3 className="section-title">Tools</h3><p className="muted small">Write tools ask for approval on bots set to “Ask for risky actions”.</p>
       <ul className="tool-table">{connection.tools.map(item => <li key={item.name}>
         <label className="check"><input type="checkbox" checked={item.enabled} onChange={event => tool(item.name, { enabled: event.target.checked })} /><span><strong>{item.name}</strong><small>{item.description}</small></span></label>
-        <select value={item.access} onChange={event => tool(item.name, { access: event.target.value as "read" | "write" })}><option value="read">Read</option><option value="write">Write</option></select>
+        <Select value={item.access} onChange={value => tool(item.name, { access: value as "read" | "write" })}><option value="read">Read</option><option value="write">Write</option></Select>
       </li>)}</ul></>}
   </Modal>;
 }
@@ -175,6 +243,7 @@ export function SettingsView({ status, onSaved }: { status: Status | null; onSav
             <input type="password" placeholder={settings[item.key].configured ? "••••••••" : item.placeholder} value={settings[item.key].api_key || ""} onChange={event => update({ [item.key]: { ...settings[item.key], api_key: event.target.value, clear_key: false } } as Partial<Settings>)} />
           </Field>)}
         </div>
+        <ChatGPTCard initial={settings.chatgpt} onChange={chatgpt => update({ chatgpt })} />
         <div className="card">
           <h3 className="section-title">Web search</h3>
           <p className="muted small">Lets bots with web access search the internet, not only read pages they already know. Add at least one key; if a provider fails, the next one is tried. Keys are stored in your macOS Keychain.</p>
@@ -197,20 +266,27 @@ export function SettingsView({ status, onSaved }: { status: Status | null; onSav
         <div className="card">
           <h3 className="section-title">Default for new bots</h3>
           <div className="two-col">
-            <Field label="Provider"><select value={settings.default_provider} onChange={event => update({ default_provider: event.target.value as Provider, default_model: "" })}>
-              <option value="local">Local model server</option>{hosted.map(item => <option key={item.key} value={item.key}>{item.label}</option>)}</select></Field>
-            <Field label="Model">{settings.default_provider === "local" && chatModels.length ? <select value={settings.default_model} onChange={event => update({ default_model: event.target.value })}><option value="">Choose…</option>{chatModels.map(model => <option key={model.id}>{model.id}</option>)}</select>
+            <Field label="Provider"><Select value={settings.default_provider} onChange={value => update({ default_provider: value as Provider, default_model: "" })}>
+              <option value="local">Local model server</option>{hosted.map(item => <option key={item.key} value={item.key}>{item.label}</option>)}{settings.chatgpt?.connected && <option value="chatgpt">ChatGPT subscription</option>}</Select></Field>
+            <Field label="Model">{settings.default_provider === "local" && chatModels.length ? <Select value={settings.default_model} onChange={value => update({ default_model: value })}><option value="">Choose…</option>{chatModels.map(model => <option key={model.id}>{model.id}</option>)}</Select>
               : <input value={settings.default_model} onChange={event => update({ default_model: event.target.value })} placeholder="provider default" />}</Field>
           </div>
           <Toggle label="Allow bots to use a browser" description="Each bot gets its own browser profile, separate from yours" checked={settings.browser_enabled} onChange={browser_enabled => update({ browser_enabled })} />
           {settings.browser_enabled && <>
             <Field label="Browser for bots" hint="Any installed Chromium-based browser works. Safari and Firefox can't be automated.">
-              <select value={settings.browser_path || ""} onChange={event => update({ browser_path: event.target.value })}>
+              <Select value={settings.browser_path || ""} onChange={value => update({ browser_path: value })}>
                 <option value="">{browsers.length ? `Automatic (${browsers[0].name})` : "Built-in test browser"}</option>
                 {browsers.map(browser => <option key={browser.path} value={browser.path}>{browser.name}</option>)}
-              </select>
+              </Select>
             </Field>
-            <Toggle label="Show bot browsers on screen" description="Bots browse in a normal window you can watch. Turn off to keep them in the background (watch them from the chat instead)." checked={!settings.browser_hidden} onChange={visible => update({ browser_hidden: !visible })} />
+            {!settings.kernel_browser && <Toggle label="Show bot browsers on screen" description="Bots browse in a normal window you can watch. Turn off to keep them in the background (watch them from the chat instead)." checked={!settings.browser_hidden} onChange={visible => update({ browser_hidden: !visible })} />}
+            <div className="subsection">
+              <Field label="Kernel API key (cloud browsers)" hint={settings.kernel?.configured ? <span className="row">Key stored in your Keychain. <button type="button" className="link-button" onClick={() => update({ kernel: { ...settings.kernel!, clear_key: true }, kernel_browser: false })}>Remove</button></span> : <>From <button type="button" className="link-button" onClick={() => openExternal("https://www.kernel.sh")}>kernel.sh</button>. Stored in your macOS Keychain.</>}>
+                <input type="password" placeholder={settings.kernel?.configured ? "••••••••" : "sk_…"} value={settings.kernel?.api_key || ""} onChange={event => update({ kernel: { ...(settings.kernel || { base_url: "", configured: false }), api_key: event.target.value, clear_key: false } })} />
+              </Field>
+              <Toggle label="Browse in Kernel's cloud" description="Every bot gets a fresh cloud browser for each task instead of a browser on this Mac. Saved logins, taking over the browser and filling in your saved passwords don't work there. If Kernel credits run out, bots fall back to this Mac."
+                checked={!!settings.kernel_browser} disabled={!settings.kernel?.configured && !settings.kernel?.api_key} onChange={kernel_browser => update({ kernel_browser })} />
+            </div>
           </>}
         </div>
         <div className="row"><span className="spacer" /><button type="button" className="button primary" onClick={save} disabled={saving}>{saving ? "Saving…" : "Save"}</button></div>
@@ -220,21 +296,21 @@ export function SettingsView({ status, onSaved }: { status: Status | null; onSav
         <p className="muted">After each answer, Rex reads what you said and keeps durable facts, such as preferences, people and plans, in a local database. This happens in the background and never delays a reply. Before each new message, relevant memories are given to the bot.</p>
         <div className="card">
           <Toggle label="Remember things automatically" checked={settings.memory.enabled} onChange={enabled => update({ memory: { ...settings.memory, enabled } })} />
-          <Field label="Run memory with"><select value={settings.memory.provider} onChange={event => update({ memory: { ...settings.memory, provider: event.target.value as "local" | "openai" } })}><option value="local">Local model server</option><option value="openai" disabled={!settings.openai.configured}>OpenAI{settings.openai.configured ? "" : " (add key first)"}</option></select></Field>
+          <Field label="Run memory with"><Select value={settings.memory.provider} onChange={value => update({ memory: { ...settings.memory, provider: value as "local" | "openai" } })}><option value="local">Local model server</option><option value="openai" disabled={!settings.openai.configured}>OpenAI{settings.openai.configured ? "" : " (add key first)"}</option></Select></Field>
           <div className="two-col">
-            <Field label="Model for saving memories" hint="Each bot's memories are extracted by its own chat model, so your model server never has to swap models. Finding memories only uses the embedding model.">{settings.memory.provider === "local" && chatModels.length ? <select value={settings.memory.extraction_model} onChange={event => update({ memory: { ...settings.memory, extraction_model: event.target.value } })}><option value="">Same as each bot's chat model (recommended)</option>{chatModels.map(model => <option key={model.id}>{model.id}</option>)}</select>
+            <Field label="Model for saving memories" hint="Each bot's memories are extracted by its own chat model, so your model server never has to swap models. Finding memories only uses the embedding model.">{settings.memory.provider === "local" && chatModels.length ? <Select value={settings.memory.extraction_model} onChange={value => update({ memory: { ...settings.memory, extraction_model: value } })}><option value="">Each bot's own chat model</option>{chatModels.map(model => <option key={model.id}>{model.id}</option>)}</Select>
               : <input value={settings.memory.extraction_model} onChange={event => update({ memory: { ...settings.memory, extraction_model: event.target.value } })} placeholder="gpt-5.6-mini" />}</Field>
             <Field label="Finding memories" hint="The embedding model turns memories and questions into vectors. The built-in one runs inside Rex (about 180 MB of memory) and needs no model server.">
-              <select value={settings.memory.embedding_source === "server" ? "server" : "bundled"} onChange={event => update({ memory: { ...settings.memory, embedding_source: event.target.value as "bundled" | "server" } })}>
-                <option value="bundled">Built into Rex: Bekko Embedding (recommended)</option>
+              <Select value={settings.memory.embedding_source === "server" ? "server" : "bundled"} onChange={value => update({ memory: { ...settings.memory, embedding_source: value as "bundled" | "server" } })}>
+                <option value="bundled">Built into Rex (Bekko)</option>
                 <option value="server">From the model server</option>
-              </select>
+              </Select>
             </Field>
           </div>
-          {settings.memory.embedding_source === "server" && <Field label="Embedding model on the server">{settings.memory.provider === "local" && embeddingModels.length ? <select value={settings.memory.embedding_model} onChange={event => update({ memory: { ...settings.memory, embedding_model: event.target.value } })}><option value="">Choose…</option>{embeddingModels.map(model => <option key={model.id}>{model.id}</option>)}</select>
+          {settings.memory.embedding_source === "server" && <Field label="Embedding model on the server">{settings.memory.provider === "local" && embeddingModels.length ? <Select value={settings.memory.embedding_model} onChange={value => update({ memory: { ...settings.memory, embedding_model: value } })}><option value="">Choose…</option>{embeddingModels.map(model => <option key={model.id}>{model.id}</option>)}</Select>
               : <input value={settings.memory.embedding_model} onChange={event => update({ memory: { ...settings.memory, embedding_model: event.target.value } })} placeholder="text-embedding-3-small" />}</Field>}
           <p className="muted small">Changing how memories are found rebuilds memory: the old database is kept as a backup and every remembered source is learned again in the background.</p>
-          <p className="muted small">Status: {status?.memory.status || "unknown"}</p>
+          <p className="muted small memory-status"><span className={`status-dot ${status?.memory.status === "ready" ? "ok" : ""}`} />Memory is {status?.memory.status || "starting"}</p>
         </div>
         <div className="row"><span className="spacer" /><button type="button" className="button primary" onClick={save} disabled={saving}>{saving ? "Saving…" : "Save"}</button></div>
       </>}

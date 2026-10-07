@@ -30,8 +30,8 @@ func TestMainBotDelegatesWithinRules(t *testing.T) {
 	if prompt := main.SystemPrompt(nil); !strings.Contains(prompt, "mcp__bots__delegate_task") {
 		t.Fatal("the main bot is told how to hand work over")
 	}
-	if servers, _ := host.runMCPServers(ctx, *main); servers[len(servers)-1].ServerName != "bots" {
-		t.Fatalf("the main bot gets the bots tools: %+v", servers)
+	if servers, _ := host.runMCPServers(ctx, *main); !hasServer(servers, "bots") || !hasServer(servers, "catalog") {
+		t.Fatalf("the main bot gets the bots and catalog tools: %+v", servers)
 	}
 
 	travel := Bot{Name: "Spain trip", Instructions: "You plan family trips to Spain.", Capabilities: Capabilities{Browser: true, Web: true}}

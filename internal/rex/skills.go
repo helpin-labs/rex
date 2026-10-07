@@ -36,6 +36,8 @@ type Skill struct {
 	Files     []string  `json:"files"`
 	Version   string    `json:"version"`
 	UpdatedAt time.Time `json:"updated_at"`
+	// Source is where an installed catalog skill came from (catalog.go).
+	Source *SkillOrigin `json:"source,omitempty"`
 }
 
 // SkillLibrary keeps skills as folders under one directory.
@@ -64,6 +66,7 @@ description: Research a topic from several reputable sources and write a short r
 type skillFrontMatter struct {
 	Name        string `yaml:"name"`
 	Description string `yaml:"description"`
+	License     string `yaml:"license"`
 }
 
 // splitFrontMatter separates YAML front matter from the instructions.
@@ -245,8 +248,8 @@ func (l SkillLibrary) Get(id string) (*Skill, error) {
 	if heading := firstHeading(body); heading != "" {
 		title = heading
 	}
-	if title == "" {
-		title = id
+	if title == "" || title == id {
+		title = skillTitleFromName(id)
 	}
 	skill := &Skill{ID: id, Title: title, Description: strings.TrimSpace(front.Description), Body: string(raw)}
 	hash := sha256.New()
@@ -265,10 +268,21 @@ func (l SkillLibrary) Get(id string) (*Skill, error) {
 		}
 	}
 	skill.Version = hex.EncodeToString(hash.Sum(nil))[:12]
+	skill.Source = readSkillOrigin(dir)
 	if skill.Files == nil {
 		skill.Files = []string{}
 	}
 	return skill, nil
+}
+
+// skillTitleFromName makes a readable title from a folder name:
+// "research-report" becomes "Research report".
+func skillTitleFromName(name string) string {
+	words := strings.TrimSpace(strings.NewReplacer("-", " ", "_", " ").Replace(name))
+	if words == "" {
+		return name
+	}
+	return strings.ToUpper(words[:1]) + words[1:]
 }
 
 func firstHeading(body string) string {
@@ -436,8 +450,17 @@ func (l SkillLibrary) Import(data []byte) (*Skill, error) {
 		return nil, errors.New("SKILL.md needs front matter with a name and description, then instructions")
 	}
 	id := Slug(firstNonEmpty(front.Name, path.Base(root)))
+	return l.writeFolder(id, contents)
+}
+
+// writeFolder replaces a skill's folder with the given files (relative,
+// already checked paths), writing to a staging folder first.
+func (l SkillLibrary) writeFolder(id string, contents map[string][]byte) (*Skill, error) {
 	dir, err := l.folder(id)
 	if err != nil {
+		return nil, err
+	}
+	if err := os.MkdirAll(l.Dir, 0o755); err != nil {
 		return nil, err
 	}
 	staging, err := os.MkdirTemp(l.Dir, ".import-")

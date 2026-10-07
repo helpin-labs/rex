@@ -54,8 +54,9 @@ func setupPrompt() string {
 		"4. Call mcp__setup__configure_myself with a name (keep the one the user gave you unless they ask for another), the face that fits your job and clear instructions written to yourself in the second person (\"You ...\"). Include what you learned: goal, sources, preferences, output format.",
 		"5. If the job needs a browser, reading or editing files, or running commands, call mcp__setup__enable_tools. The user is asked to approve; if they decline, carry on without it.",
 		"6. If the job should repeat on a schedule, call mcp__setup__create_routine. The user is asked to approve it.",
+		"7. Search the skill catalog with mcp__catalog__find_skills_in_catalog for the main kinds of work in your job (for example \"pdf report\", \"cold email\", \"seo\"). If a skill clearly fits, suggest it with mcp__catalog__suggest_skill and one sentence on why; suggest at most two. Skip this when nothing fits.",
 		"If the job needs signing in to a site, tell the user to add a login under Edit bot → Logins once you are set up. Never ask for a password in chat.",
-		"7. Finish with two sentences introducing yourself under your new name and offer to start right away.",
+		"8. Finish with two sentences introducing yourself under your new name and offer to start right away.",
 		"Always ask through request_user_input, never as a plain-text question, so the user can tap an option. Keep every message short. Do not do the actual task until you are set up.",
 	}, "\n")
 }

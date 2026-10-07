@@ -14,3 +14,5 @@ src-tauri/binaries/*
 src-tauri/resources/models/
 __pycache__/
 *.pyc
+go.work
+go.work.sum

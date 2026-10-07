@@ -30,8 +30,8 @@ func TestNewBotSetsItselfUp(t *testing.T) {
 	if prompt := draft.SystemPrompt(nil); !strings.Contains(prompt, "mcp__setup__configure_myself") {
 		t.Fatal("a draft bot is told to set itself up")
 	}
-	if servers, _ := host.runMCPServers(ctx, *draft); len(servers) == 0 || servers[len(servers)-1].ServerName != "setup" {
-		t.Fatalf("a draft bot gets the setup tools: %+v", servers)
+	if servers, _ := host.runMCPServers(ctx, *draft); !hasServer(servers, "setup") || !hasServer(servers, "catalog") {
+		t.Fatalf("a draft bot gets the setup and catalog tools: %+v", servers)
 	}
 	if thread, err := host.Store.ThreadForBot(ctx, *draft); err != nil || thread.BotID != draft.ID {
 		t.Fatalf("a draft bot has its conversation: %v", err)
@@ -77,15 +77,15 @@ func TestBotsProposeInstructionsTheUserApplies(t *testing.T) {
 	if err := host.SaveBot(ctx, bot); err != nil {
 		t.Fatal(err)
 	}
-	if servers, _ := host.runMCPServers(ctx, *bot); servers[len(servers)-1].ServerName != "self" {
+	if servers, _ := host.runMCPServers(ctx, *bot); !hasServer(servers, "self") {
 		t.Fatalf("configured bots can propose instructions: %+v", servers)
 	}
 	if prompt := bot.SystemPrompt(nil); !strings.Contains(prompt, "Never say your instructions") {
 		t.Fatal("bots are told not to claim changes that did not happen")
 	}
 
-	first, _ := host.Store.ProposeInstructions(ctx, bot.ID, "You write a weekly AI newsletter. Use AP and Ground News.", "Add AP and Ground News")
-	second, err := host.Store.ProposeInstructions(ctx, bot.ID, "You write a weekly AI newsletter. Sources: AP, Ground News, The Conversation.", "Add three impartial sources")
+	first, _ := host.Store.ProposeInstructions(ctx, bot.ID, "You write a weekly AI newsletter. Use AP and Ground News.", "Add AP and Ground News", ProposalFromBot, "")
+	second, err := host.Store.ProposeInstructions(ctx, bot.ID, "You write a weekly AI newsletter. Sources: AP, Ground News, The Conversation.", "Add three impartial sources", ProposalFromBot, "")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -106,7 +106,7 @@ func TestBotsProposeInstructionsTheUserApplies(t *testing.T) {
 	if !strings.Contains(applied.Instructions, "The Conversation") {
 		t.Fatalf("applying updates the instructions: %q", applied.Instructions)
 	}
-	third, _ := host.Store.ProposeInstructions(ctx, bot.ID, "You write a daily AI newsletter instead of a weekly one.", "Make it daily")
+	third, _ := host.Store.ProposeInstructions(ctx, bot.ID, "You write a daily AI newsletter instead of a weekly one.", "Make it daily", ProposalFromBot, "")
 	if err := host.AnswerProposal(ctx, third.ID, false); err != nil {
 		t.Fatal(err)
 	}

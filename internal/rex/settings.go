@@ -108,6 +108,13 @@ type Settings struct {
 	// are stored (in the Keychain); TinyFish is tried first, then Exa,
 	// then Brave.
 	TinyFish ProviderConfig `json:"tinyfish"`
+	// Kernel runs bot browsers in Kernel's cloud (kernel.sh) when
+	// KernelBrowser is on and a key is stored. Cloud browsers start fresh for
+	// every run: no saved logins, no takeover.
+	Kernel        ProviderConfig `json:"kernel"`
+	KernelBrowser bool           `json:"kernel_browser"`
+	// ChatGPT reports the subscription sign-in; it is not saved here.
+	ChatGPT ChatGPTStatus `json:"chatgpt"`
 	Exa      ProviderConfig `json:"exa"`
 	Brave    ProviderConfig `json:"brave"`
 	// NotificationsOff stops system notifications when a bot needs the user.
@@ -118,6 +125,9 @@ type Settings struct {
 const settingsKey = "settings.v1"
 
 const providerTypeSafe = "typesafe"
+
+// providerKernel is the kernel.sh key for cloud browsers.
+const providerKernel = "kernel"
 
 // Web search providers, in the order the runtime tries them.
 const (
@@ -131,10 +141,12 @@ type SettingsManager struct {
 	store   *Store
 	secrets Secrets
 	mu      sync.Mutex
+	// ChatGPT is the ChatGPT subscription sign-in.
+	ChatGPT *ChatGPTAuth
 }
 
 func NewSettingsManager(store *Store, secrets Secrets) *SettingsManager {
-	return &SettingsManager{store: store, secrets: secrets}
+	return &SettingsManager{store: store, secrets: secrets, ChatGPT: NewChatGPTAuth(secrets)}
 }
 
 func defaultSettings() Settings {
@@ -175,12 +187,19 @@ func (m *SettingsManager) load(ctx context.Context) (Settings, error) {
 		config.APIKey = ""
 		config.ClearKey = false
 	}
+	settings.ChatGPT, err = m.ChatGPT.Status()
+	if err != nil {
+		return settings, fmt.Errorf("read ChatGPT sign-in from keychain: %w", err)
+	}
 	return settings, nil
 }
 
+// CloudBrowsers reports whether bots browse in Kernel's cloud.
+func (s Settings) CloudBrowsers() bool { return s.KernelBrowser && s.Kernel.Configured }
+
 func (s *Settings) providers() map[string]*ProviderConfig {
 	return map[string]*ProviderConfig{ProviderLocal: &s.Local, ProviderAnthropic: &s.Anthropic, ProviderOpenAI: &s.OpenAI, ProviderOpenRouter: &s.OpenRouter, providerTypeSafe: &s.TypeSafe,
-		searchTinyFish: &s.TinyFish, searchExa: &s.Exa, searchBrave: &s.Brave}
+		searchTinyFish: &s.TinyFish, searchExa: &s.Exa, searchBrave: &s.Brave, providerKernel: &s.Kernel}
 }
 
 // WebSearchReady reports whether any web search provider has a key, which
@@ -212,11 +231,12 @@ func (m *SettingsManager) Save(ctx context.Context, input Settings) (Settings, b
 			}
 		}
 	}
+	input.ChatGPT = ChatGPTStatus{}
 	if input.Local.BaseURL == "" {
 		input.Local.BaseURL = defaultSettings().Local.BaseURL
 	}
 	switch input.DefaultProvider {
-	case ProviderLocal, ProviderAnthropic, ProviderOpenAI, ProviderOpenRouter:
+	case ProviderLocal, ProviderAnthropic, ProviderOpenAI, ProviderOpenRouter, ProviderChatGPT:
 	default:
 		input.DefaultProvider = ProviderLocal
 	}
@@ -252,7 +272,8 @@ func (m *SettingsManager) Save(ctx context.Context, input Settings) (Settings, b
 	saved, err := m.load(ctx)
 	restart := keysChanged || saved.Local.BaseURL != previous.Local.BaseURL || saved.Anthropic.BaseURL != previous.Anthropic.BaseURL ||
 		saved.OpenAI.BaseURL != previous.OpenAI.BaseURL || saved.OpenRouter.BaseURL != previous.OpenRouter.BaseURL ||
-		saved.BrowserEnabled != previous.BrowserEnabled || saved.BrowserPath != previous.BrowserPath || saved.TypeSafeAutoApprove != previous.TypeSafeAutoApprove
+		saved.BrowserEnabled != previous.BrowserEnabled || saved.BrowserPath != previous.BrowserPath || saved.TypeSafeAutoApprove != previous.TypeSafeAutoApprove ||
+		saved.CloudBrowsers() != previous.CloudBrowsers()
 	return saved, restart, err
 }
 
@@ -276,7 +297,15 @@ func (m *SettingsManager) RuntimeEnv(ctx context.Context) ([]string, error) {
 	if err != nil {
 		return nil, err
 	}
-	env := []string{"AGENT_RUNTIME_NATIVE_EINO=true"}
+	// ChatGPT runs carry their own credential, refreshed through Rex.
+	env := []string{"AGENT_RUNTIME_NATIVE_EINO=true", "AGENT_RUNTIME_CHATGPT_ENABLED=true"}
+	if settings.CloudBrowsers() {
+		key, err := m.APIKey(providerKernel)
+		if err != nil {
+			return nil, err
+		}
+		env = append(env, "KERNEL_API_KEY="+key)
+	}
 	if key, err := m.APIKey(providerTypeSafe); err != nil {
 		return nil, err
 	} else if key != "" {
@@ -332,6 +361,16 @@ func (m *SettingsManager) RunModelFor(ctx context.Context, bot Bot) (*RunModel, 
 	if model == "" && bot.Provider == settings.DefaultProvider {
 		model = settings.DefaultModel
 	}
+	if bot.Provider == ProviderChatGPT {
+		if model == "" {
+			model = ChatGPTModels[0]
+		}
+		credential, err := m.ChatGPT.Credential(ctx, false, "")
+		if err != nil {
+			return nil, nil, err
+		}
+		return &RunModel{Provider: bot.RuntimeProvider(), Model: model}, credential, nil
+	}
 	if bot.Provider != ProviderLocal {
 		if !settings.providers()[bot.Provider].Configured {
 			return nil, nil, fmt.Errorf("%s has no API key yet. Add one in Settings → Models", providerLabel(bot.Provider))
@@ -364,6 +403,8 @@ func providerLabel(provider string) string {
 		return "OpenAI"
 	case ProviderOpenRouter:
 		return "OpenRouter"
+	case ProviderChatGPT:
+		return "ChatGPT"
 	default:
 		return "The local model server"
 	}

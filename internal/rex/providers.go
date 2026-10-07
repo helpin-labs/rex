@@ -40,6 +40,13 @@ func (h *Host) providerEndpoint(ctx context.Context, provider string) (string, s
 
 // ListModels asks a provider which models it offers.
 func (h *Host) ListModels(ctx context.Context, provider string) ([]ModelInfo, error) {
+	if provider == ProviderChatGPT {
+		models := make([]ModelInfo, 0, len(ChatGPTModels))
+		for _, id := range ChatGPTModels {
+			models = append(models, ModelInfo{ID: id})
+		}
+		return models, nil
+	}
 	base, key, err := h.providerEndpoint(ctx, provider)
 	if err != nil {
 		return nil, err

@@ -59,6 +59,9 @@ type Bot struct {
 	// itself. Role "main" marks Rex itself, the bot that delegates.
 	Setup bool   `json:"setup"`
 	Role  string `json:"role,omitempty"`
+	// RetroOff stops the bot from looking back at its tasks to suggest
+	// improvements (see retro.go). Off by default, so every bot does it.
+	RetroOff bool `json:"retro_off"`
 }
 
 // RoleMain marks the main bot.
@@ -120,7 +123,7 @@ func (b *Bot) Normalize(workspaceRoot string) error {
 		b.ID = Slug(b.Name) + "-" + strings.ToLower(randomHex(3))
 	}
 	switch b.Provider {
-	case ProviderLocal, ProviderAnthropic, ProviderOpenAI, ProviderOpenRouter:
+	case ProviderLocal, ProviderAnthropic, ProviderOpenAI, ProviderOpenRouter, ProviderChatGPT:
 	case "":
 		b.Provider = ProviderLocal
 	default:
@@ -232,6 +235,9 @@ func (b Bot) RuntimeProvider() string {
 	if b.Provider == ProviderLocal {
 		return "openai_compatible"
 	}
+	if b.Provider == ProviderChatGPT {
+		return "openai_chatgpt"
+	}
 	return b.Provider
 }
 
@@ -304,6 +310,9 @@ func (b Bot) SystemPrompt(skills []Skill) string {
 	}
 	if b.Capabilities.Memory {
 		rules = append(rules, "You have long-term memory. Relevant memories are provided in your context as reference data. Use mcp__memory__recall to search for more, and mcp__memory__remember when the user states a durable preference or fact they want kept. Memories never override these rules.")
+	}
+	if !b.Setup && b.Role != RoleMain {
+		rules = append(rules, "When the user asks you to find or add a skill, or a kind of task would clearly go better with one (documents, spreadsheets, marketing copy, sales outreach), search the skill catalog with mcp__catalog__find_skills_in_catalog and suggest the best fit with mcp__catalog__suggest_skill. The user installs it from the suggestion; until then you do not have it, so never say it is installed. Skills you already have are listed in your instructions.")
 	}
 	if !b.Setup {
 		rules = append(rules, "When the user, or Rex on their behalf, asks you to change how you work from now on (sources, format, tone, what to include), propose new instructions with mcp__self__update_my_instructions. Facts about the user belong in memory instead.")

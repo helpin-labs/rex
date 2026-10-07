@@ -57,10 +57,19 @@ export function stepLabel(tool: RunToolCall): string {
     case "mcp__setup__enable_tools": return "Turn on tools";
     case "mcp__self__update_my_instructions": return "Propose new instructions";
     case "mcp__setup__create_routine": return str(args.title) ? `Add the routine ${quoted(str(args.title))}` : "Add a routine";
+    case "mcp__bots__list_bots": return "Look at your bots";
+    case "mcp__bots__delegate_task": return "Hand the task to a bot";
+    case "mcp__bots__create_bot": return str(args.name) ? `Create the bot ${quoted(str(args.name))}` : "Create a bot";
+    case "mcp__catalog__find_skills_in_catalog": return str(args.query) ? `Search skills for ${quoted(str(args.query))}` : "Search the skill catalog";
+    case "mcp__catalog__suggest_skill": return "Suggest a skill";
+    case "mcp__retro__suggest_improvement": return "Suggest an improvement";
+    case "mcp__logins__list_logins": return "Check its logins";
+    case "mcp__logins__sign_in": return "Sign in with a saved login";
+    case "mcp__logins__fill_2fa_code": return "Enter the sign-in code";
   }
   const mcp = /^mcp__(.+?)__(.+)$/.exec(name);
-  if (mcp) return `${mcp[2].replace(/_/g, " ")} · ${mcp[1]}`;
-  return name.replace(/_/g, " ");
+  if (mcp) return sentence(`${mcp[2].replace(/_/g, " ")} · ${mcp[1].replace(/_/g, " ")}`);
+  return sentence(name.replace(/_/g, " "));
 }
 
 export function formatElapsed(milliseconds: number): string {
@@ -101,4 +110,8 @@ export function instructionChanges(before: string, after: string): { kind: "add"
 /** Whether a message seems to contain a password, e.g. "password: hunter2". */
 export function looksLikePassword(text: string): boolean {
   return /\b(password|passwd|pwd|passcode|pass code|lösenord)\b\s*(is|:|=|-)?\s*\S{4,}/i.test(text);
+}
+
+function sentence(text: string): string {
+  return text.charAt(0).toUpperCase() + text.slice(1);
 }

@@ -7,6 +7,7 @@ import type { Bot, MemoryOverview, RunEventEnvelope, RunTimelineSegment, RunTool
 import { Markdown } from "./ui";
 import { AppLogo } from "./AppLogo";
 import { BotFace } from "./BotFace";
+import { TextWithJson } from "./JsonBlock";
 
 // TurnView renders one exchange in the style of Helpin's transcript: the
 // user's message; the bot's work (thinking, tool steps, narration) collapsed
@@ -79,6 +80,17 @@ function UsedMemories({ recalled, overview }: { recalled: { text: string; bank: 
   </div>;
 }
 
+// Long pasted messages fold to their first lines; the whole text is a click away.
+const FOLD_LINES = 10;
+function UserText({ text }: { text: string }) {
+  const long = text.length > 900 || text.split("\n").length > FOLD_LINES + 2;
+  const [open, setOpen] = useState(false);
+  return <>
+    <div className={`bubble-text ${long && !open ? "folded" : ""}`}><TextWithJson text={text} /></div>
+    {long && <button type="button" className="bubble-more" onClick={() => setOpen(value => !value)}>{open ? "Show less" : "Show more"}</button>}
+  </>;
+}
+
 export const TurnView = memo(function TurnView({ turn, bot, events, working, memoryWhere, overview, onShowMemory }: TurnViewProps) {
   // Events arrive in order (stored by sequence, live by arrival).
   const state = useMemo(() => events.reduce((current, event) => applyRunEvent(current, event, event.sent_at || new Date().toISOString()), emptyRunStreamState()), [events]);
@@ -108,9 +120,9 @@ export const TurnView = memo(function TurnView({ turn, bot, events, working, mem
     workRow = <div className="work-group active">
       <button type="button" className="work-head" onClick={() => setOpen(value => !value)} aria-expanded={open}>
         <LoaderCircle className="spin work-icon" size={13} />
-        <span className="work-label">{label} · {formatElapsed(elapsedMs)}</span>
+        <span className="work-label">{label}</span>
         <span className="spacer" />
-        {tools.length > 1 && <span className="work-meta">{tools.length - 1} previous</span>}
+        <span className="work-meta">{formatElapsed(elapsedMs)}{tools.length > 1 ? ` · ${tools.length - 1} earlier ${tools.length === 2 ? "step" : "steps"}` : ""}</span>
         {work.length > 0 && <ChevronRight className={`disclosure ${open ? "open" : ""}`} size={13} />}
       </button>
       {open && <div className="work-body">{work.map(segment => <WorkItem key={segment.id} segment={segment} />)}</div>}
@@ -133,7 +145,7 @@ export const TurnView = memo(function TurnView({ turn, bot, events, working, mem
   return <div className="turn">
     {turn.user_text && <div className={`bubble user ${turn.origin === "rex" ? "from-rex" : ""}`}>
       {turn.origin === "rex" && <small className="bubble-from">From Rex</small>}
-      <div className="bubble-text">{turn.user_text}</div>
+      <UserText text={turn.user_text} />
     </div>}
     <div className="bot-reply">
       <div className="reply-meta"><span className="reply-name">{bot.role === "main" ? <AppLogo size={18} /> : <BotFace icon={bot.emoji} color={bot.color} seed={bot.id} size={18} />} {bot.name}</span>

@@ -1,4 +1,5 @@
 import { useState } from "react";
+import { Select } from "./Select";
 import { ArrowRight, Check, CircleAlert, LoaderCircle } from "lucide-react";
 import { api } from "./api";
 import type { ProviderTest, Settings } from "./types";
@@ -56,9 +57,9 @@ export function Onboarding({ initial, onDone }: { initial: Settings; onDone: (se
           <div className="row"><input value={settings.local.base_url} onChange={event => setSettings({ ...settings, local: { ...settings.local, base_url: event.target.value } })} /><button type="button" className="button secondary small" onClick={() => { void api.saveSettings(settings).then(() => setRefresh(value => value + 1)); }}>Find models</button></div>
         </Field>
         <Field label="Model for your bots">
-          <select value={settings.default_model} onChange={event => { setSettings({ ...settings, default_model: event.target.value }); setTest(null); }}>
+          <Select value={settings.default_model} onChange={value => { setSettings({ ...settings, default_model: value }); setTest(null); }}>
             <option value="">Choose a model</option>{chat.map(model => <option key={model.id}>{model.id}</option>)}
-          </select>
+          </Select>
         </Field>
         <div className="row"><button type="button" className="button secondary" disabled={!settings.default_model || busy} onClick={check}>{busy ? <><LoaderCircle className="spin" size={14} />Testing…</> : "Test model"}</button>
           {test && <span className={`test-result inline ${test.ok ? "ok" : "bad"}`}>{test.ok ? <Check size={14} /> : <CircleAlert size={14} />}{test.message}</span>}</div>
