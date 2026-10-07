@@ -1,0 +1,16 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1024" height="1024" viewBox="0 0 1024 1024">
+  <!-- App icon: the robot dog face (src/AppLogo.tsx), white on black. -->
+  <rect x="100" y="100" width="824" height="824" rx="185" fill="#000000"/>
+  <svg x="192" y="192" width="640" height="640" viewBox="70 48 260 260">
+    <line x1="200" y1="112" x2="200" y2="82" stroke="#ffffff" stroke-width="8" stroke-linecap="round"/>
+    <circle cx="200" cy="74" r="11" fill="#ffffff"/>
+    <rect x="130" y="110" width="140" height="150" rx="50" fill="#ffffff"/>
+    <path d="M142 116 C110 110 86 130 84 170 C82 212 92 240 108 246 C124 250 132 236 134 212 L136 138 Z" fill="#ffffff" stroke="#000000" stroke-width="10" stroke-linejoin="round"/>
+    <path d="M258 116 C290 110 314 130 316 170 C318 212 308 240 292 246 C276 250 268 236 266 212 L264 138 Z" fill="#ffffff" stroke="#000000" stroke-width="10" stroke-linejoin="round"/>
+    <rect x="162" y="160" width="20" height="30" rx="10" fill="#000000"/>
+    <rect x="218" y="160" width="20" height="30" rx="10" fill="#000000"/>
+    <rect x="148" y="210" width="104" height="80" rx="40" fill="#ffffff" stroke="#000000" stroke-width="10"/>
+    <rect x="180" y="220" width="40" height="24" rx="12" fill="#000000"/>
+    <path d="M200 244 L200 258 M178 262 C188 272 200 268 200 258 C200 268 212 272 222 262" fill="none" stroke="#000000" stroke-width="7" stroke-linecap="round"/>
+  </svg>
+</svg>
