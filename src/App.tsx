@@ -21,7 +21,7 @@ import { ProfileMenu } from "./ProfileMenu";
 
 // Memory lives in each bot's conversation (the memory panel), so there is
 // no separate Memory page.
-type View = { kind: "bot"; botId: string } | { kind: "routines" } | { kind: "skills" } | { kind: "apps" } | { kind: "settings" };
+type View = { kind: "bot"; botId: string; conversationId?: string } | { kind: "routines" } | { kind: "skills" } | { kind: "apps" } | { kind: "settings"; tab?: "models" | "tools" | "memory" | "about" };
 const viewKinds = ["bot", "routines", "skills", "apps", "settings"];
 
 function loadView(): View | null {
@@ -80,7 +80,7 @@ export default function App() {
 
   const openConversation = async (conversationId: string) => {
     const thread = threads.find(item => item.id === conversationId) || (await api.conversation(conversationId)).conversation;
-    setView({ kind: "bot", botId: thread.bot_id });
+    setView({ kind: "bot", botId: thread.bot_id, conversationId: thread.kind === "chat" ? undefined : thread.id });
   };
 
   // A new bot starts in its own conversation and sets itself up by asking
@@ -102,8 +102,10 @@ export default function App() {
   if (settings && !settings.onboarded) return <Onboarding initial={settings} onDone={async saved => { setSettings(saved); await refreshBots(); await refreshStatus(); }} />;
 
   const bot = view?.kind === "bot" ? bots.find(item => item.id === view.botId) : undefined;
-  const threadOf = (botId: string) => threads.find(item => item.bot_id === botId);
-  const thread = bot ? threadOf(bot.id) : undefined;
+  // A bot's place in the sidebar is its chat; a routine's conversation opens
+  // only when asked for (from Routines or a notification).
+  const threadOf = (botId: string) => threads.find(item => item.bot_id === botId && item.kind === "chat") || threads.find(item => item.bot_id === botId);
+  const thread = bot ? (view?.kind === "bot" && view.conversationId && threads.find(item => item.id === view.conversationId)) || threadOf(bot.id) : undefined;
   // Most recent activity first; bots without messages keep their order.
   // Rex, the main bot, sits in the header; the others follow by latest
   // activity.
@@ -173,13 +175,13 @@ export default function App() {
       }}
       onDeleted={async () => { setEditing(null); const list = await refreshBots(); await refreshThreads(); setView(list[0] ? { kind: "bot", botId: list[0].id } : { kind: "settings" }); }} /></main> : <>
       {view?.kind === "bot" && bot && <main className="main">
-        {thread ? <Chat key={thread.id} bot={bot} bots={bots} conversationId={thread.id} status={status} pending={attention.filter(item => (item.kind === "missed" || item.kind === "proposal") && item.bot_id === bot.id)} onEdit={() => setEditing(bot)} onChanged={() => void refreshThreads()} />
+        {thread ? <Chat key={thread.id} bot={bot} bots={bots} conversationId={thread.id} status={status} pending={attention.filter(item => (item.kind === "missed" || item.kind === "proposal") && item.bot_id === bot.id)} onEdit={() => setEditing(bot)} onOpenSettings={tab => setView({ kind: "settings", tab })} onChanged={() => void refreshThreads()} />
           : <Empty icon={<LoaderCircle className="spin" size={20} />} title={`Opening ${bot.name}…`} />}
       </main>}
       {view?.kind === "routines" && <main className="main wide"><RoutinesView bots={bots} onOpenConversation={async id => { await refreshThreads(); await openConversation(id); }} /></main>}
       {view?.kind === "skills" && <main className="main wide"><SkillsView bots={bots} workspaceRoot={status?.workspace_root || "~/Rex"} onBotsChanged={() => void refreshBots()} /></main>}
       {view?.kind === "apps" && <main className="main wide"><AppsView bots={bots} onBotsChanged={() => void refreshBots()} /></main>}
-      {view?.kind === "settings" && <main className="main wide"><SettingsView status={status} onSaved={saved => { setSettings(saved); void refreshStatus(); }} /></main>}
+      {view?.kind === "settings" && <main className="main wide"><SettingsView key={view.tab || "models"} initialTab={view.tab} status={status} onSaved={saved => { setSettings(saved); void refreshStatus(); }} /></main>}
     </>}
 
     {naming && <NewBotDialog onCreate={createBot} onClose={() => setNaming(false)} onManual={(name, color) => { setNaming(false); setEditing({ ...newBot(settings), name, color }); }} />}
