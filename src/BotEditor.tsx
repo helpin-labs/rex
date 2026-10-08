@@ -9,6 +9,8 @@ import { ColorPicker } from "./NewBotDialog";
 import { Logins } from "./Logins";
 import { AppMark } from "./AppsView";
 import { appFor } from "./apps";
+import { ModelPicker, ProviderPicker } from "./ModelPicker";
+import { modelName } from "./models";
 const providerNames: Record<Provider, string> = { local: "Local model server", anthropic: "Anthropic", openai: "OpenAI", openrouter: "OpenRouter", chatgpt: "ChatGPT subscription" };
 
 // Whether a provider can be chosen, and what to do first if not.
@@ -16,6 +18,12 @@ function providerReady(provider: Provider, settings: Settings | null): string {
   if (!settings || provider === "local") return "";
   if (provider === "chatgpt") return settings.chatgpt?.connected ? "" : " (sign in in Settings)";
   return settings[provider].configured ? "" : " (add key in Settings)";
+}
+
+// Why a provider can't be picked yet, as a short note.
+function providerNote(provider: Provider, settings: Settings | null): string | undefined {
+  const reason = providerReady(provider, settings).trim().replace(/^\(|\)$/g, "");
+  return reason ? reason.charAt(0).toUpperCase() + reason.slice(1) : undefined;
 }
 
 export function newBot(settings: Settings | null): Bot {
@@ -63,9 +71,14 @@ export function BotEditor({ initial, settings, status, onClose, onSaved, onDelet
   const [allBots, setAllBots] = useState<Bot[]>([]);
   useEffect(() => { api.skills().then(setSkills).catch(() => undefined); api.connections().then(setConnections).catch(() => undefined); api.bots().then(setAllBots).catch(() => undefined); }, []);
   const sharers = allBots.filter(item => item.id !== bot.id && item.memory_mode === "shared");
+  const [modelsLoading, setModelsLoading] = useState(false);
   useEffect(() => {
-    setModelError("");
-    api.models(bot.provider).then(list => setModels(list.filter(model => !model.embedding))).catch(caught => { setModels([]); setModelError(errorMessage(caught)); });
+    let current = true;
+    setModelError(""); setModelsLoading(true);
+    api.models(bot.provider).then(list => { if (current) setModels(list.filter(model => !model.embedding)); })
+      .catch(caught => { if (current) { setModels([]); setModelError(errorMessage(caught)); } })
+      .finally(() => { if (current) setModelsLoading(false); });
+    return () => { current = false; };
   }, [bot.provider]);
 
   // A new bot's face follows its name until the user picks one.
@@ -155,17 +168,11 @@ export function BotEditor({ initial, settings, status, onClose, onSaved, onDelet
           </div>
           <div className="card">
             <h3 className="section-title">Model</h3>
-            <div className="two-col">
-              <Field label="Provider">
-                <Select value={bot.provider} onChange={value => update({ provider: value as Provider, model: "" })}>
-                  {(Object.keys(providerNames) as Provider[]).map(provider => <option key={provider} value={provider} disabled={!!providerReady(provider, settings)}>{providerNames[provider]}{providerReady(provider, settings)}</option>)}
-                </Select>
-              </Field>
-              <Field label="Model" hint={modelError || (models.length ? `${models.length} models. Start typing to search; leave empty for the default.` : undefined)}>
-                <input list="bot-models" value={bot.model} onChange={event => update({ model: event.target.value })} placeholder={bot.provider === settings?.default_provider && settings?.default_model ? `Default: ${settings.default_model}` : "provider default"} />
-                <datalist id="bot-models">{models.map(model => <option key={model.id} value={model.id} />)}</datalist>
-              </Field>
-            </div>
+            <p className="muted small">Where {bot.name || "the bot"} thinks. Bots need a model that can call tools.</p>
+            <ProviderPicker value={bot.provider} onChange={provider => update({ provider, model: "" })}
+              providers={(Object.keys(providerNames) as Provider[]).map(id => ({ id, note: providerNote(id, settings) }))} />
+            <ModelPicker value={bot.model} models={models} loading={modelsLoading} error={modelError} onChange={model => update({ model })}
+              defaultLabel={bot.provider === settings?.default_provider && settings?.default_model ? `Follows Settings: ${modelName({ id: settings.default_model })}` : "The provider's default"} />
           </div>
         </>}
 

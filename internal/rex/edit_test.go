@@ -51,3 +51,15 @@ func TestContextCutsKeepTheEarliestCutOfARun(t *testing.T) {
 		t.Fatalf("cuts %v, want run-1 at %v", cuts, early)
 	}
 }
+
+func TestPerMillionPrices(t *testing.T) {
+	if got := perMillion("0.000003"); got == nil || *got != 3 {
+		t.Fatalf("perMillion = %v, want 3", got)
+	}
+	if got := perMillion("0.00000015"); got == nil || *got != 0.15 {
+		t.Fatalf("perMillion = %v, want 0.15", got)
+	}
+	if perMillion("-1") != nil || perMillion("") != nil {
+		t.Fatal("bad prices should be nil")
+	}
+}

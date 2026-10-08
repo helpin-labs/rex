@@ -79,7 +79,15 @@ export type Settings = {
   onboarded: boolean;
 };
 
-export type ModelInfo = { id: string; embedding: boolean };
+export type ModelInfo = {
+  id: string; embedding: boolean;
+  // Details the provider gives, where it gives them (OpenRouter most).
+  name?: string; context?: number; vision?: boolean;
+  // False only when the provider says the model can't call tools.
+  tools?: boolean;
+  // US dollars per million input and output tokens.
+  price_in?: number; price_out?: number;
+};
 
 export type ProviderTest = { ok: boolean; reachable: boolean; tool_calls: boolean; models: number; message: string; latency_ms: number };
 

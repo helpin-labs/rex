@@ -7,8 +7,11 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"math"
 	"net/http"
+	"slices"
 	"sort"
+	"strconv"
 	"strings"
 	"time"
 )
@@ -16,6 +19,27 @@ import (
 type ModelInfo struct {
 	ID        string `json:"id"`
 	Embedding bool   `json:"embedding"`
+	// What the provider says about the model, where it says it (OpenRouter
+	// says the most; Anthropic gives a name).
+	Name    string `json:"name,omitempty"`
+	Context int    `json:"context,omitempty"`
+	Vision  bool   `json:"vision,omitempty"`
+	// Tools is false only when the provider says the model can't call tools.
+	Tools *bool `json:"tools,omitempty"`
+	// Prices in US dollars per million input and output tokens.
+	PriceIn  *float64 `json:"price_in,omitempty"`
+	PriceOut *float64 `json:"price_out,omitempty"`
+}
+
+// perMillion turns a per-token price string ("0.000003") into dollars per
+// million tokens.
+func perMillion(value string) *float64 {
+	price, err := strconv.ParseFloat(strings.TrimSpace(value), 64)
+	if err != nil || price < 0 {
+		return nil
+	}
+	price = math.Round(price*1e6*1000) / 1000
+	return &price
 }
 
 var providerDefaults = map[string]string{
@@ -68,8 +92,19 @@ func (h *Host) ListModels(ctx context.Context, provider string) ([]ModelInfo, er
 	}
 	var response struct {
 		Data []struct {
-			ID   string `json:"id"`
-			Type string `json:"type"`
+			ID            string `json:"id"`
+			Type          string `json:"type"`
+			Name          string `json:"name"`
+			DisplayName   string `json:"display_name"`
+			ContextLength int    `json:"context_length"`
+			Architecture  struct {
+				InputModalities []string `json:"input_modalities"`
+			} `json:"architecture"`
+			Pricing *struct {
+				Prompt     string `json:"prompt"`
+				Completion string `json:"completion"`
+			} `json:"pricing"`
+			SupportedParameters []string `json:"supported_parameters"`
 		} `json:"data"`
 	}
 	if err := httpJSON(ctx, http.MethodGet, endpoint, headers, nil, &response); err != nil {
@@ -78,7 +113,17 @@ func (h *Host) ListModels(ctx context.Context, provider string) ([]ModelInfo, er
 	models := make([]ModelInfo, 0, len(response.Data))
 	for _, item := range response.Data {
 		lower := strings.ToLower(item.ID)
-		models = append(models, ModelInfo{ID: item.ID, Embedding: strings.Contains(lower, "embed") || item.Type == "embeddings"})
+		model := ModelInfo{ID: item.ID, Embedding: strings.Contains(lower, "embed") || item.Type == "embeddings",
+			Name: firstNonEmpty(item.DisplayName, item.Name), Context: item.ContextLength,
+			Vision: slices.Contains(item.Architecture.InputModalities, "image")}
+		if item.SupportedParameters != nil {
+			tools := slices.Contains(item.SupportedParameters, "tools")
+			model.Tools = &tools
+		}
+		if item.Pricing != nil {
+			model.PriceIn, model.PriceOut = perMillion(item.Pricing.Prompt), perMillion(item.Pricing.Completion)
+		}
+		models = append(models, model)
 	}
 	sort.Slice(models, func(i, j int) bool { return models[i].ID < models[j].ID })
 	return models, nil

@@ -8,6 +8,7 @@ import { Field, PageHeader, TileMark, Toggle, errorMessage, openExternal } from 
 import { type Theme, loadTheme, saveTheme } from "./theme";
 import { siAnthropic, siBrave, siLmstudio, siOpenrouter } from "simple-icons";
 import { AppMark } from "./AppsView";
+import { ModelPicker, ProviderPicker } from "./ModelPicker";
 
 // Web search providers, in the order the bot engine tries them.
 const searchProviders: { key: "tinyfish" | "exa" | "brave"; label: string; placeholder: string; hint: string }[] = [
@@ -120,8 +121,11 @@ export function useModels(provider: string, refresh = 0) {
   const [models, setModels] = useState<ModelInfo[]>([]);
   const [error, setError] = useState("");
   useEffect(() => {
+    // A slower answer for a provider no longer chosen must not win.
+    let current = true;
     setError("");
-    api.models(provider).then(setModels).catch(caught => { setModels([]); setError(errorMessage(caught)); });
+    api.models(provider).then(list => { if (current) setModels(list); }).catch(caught => { if (current) { setModels([]); setError(errorMessage(caught)); } });
+    return () => { current = false; };
   }, [provider, refresh]);
   return { models, error };
 }
@@ -172,7 +176,6 @@ export function SettingsView({ status, initialTab, onSaved }: { status: Status |
   };
   const chatModels = local.models.filter(model => !model.embedding);
   const embeddingModels = local.models.filter(model => model.embedding);
-  const defaultChoices = defaultModels.models.filter(model => !model.embedding);
   const tabs = [["models", "Models"], ["tools", "Tools"], ["memory", "Memory"], ["about", "General"]] as const;
   const searchOn = searchProviders.some(item => settings[item.key]?.configured);
   const keyField = (key: "anthropic" | "openai" | "openrouter" | "tinyfish" | "exa" | "brave", placeholder: string, hint?: ReactNode, label = "API key") => {
@@ -199,14 +202,10 @@ export function SettingsView({ status, initialTab, onSaved }: { status: Status |
         <div className="card">
           <h3 className="section-title">Default for new bots</h3>
           <p className="muted small">Bots without their own model use this one too.</p>
-          <div className="two-col">
-            <Field label="Provider"><Select value={settings.default_provider} onChange={value => update({ default_provider: value as Provider, default_model: "" })}>
-              <option value="local">Local model server</option>{hosted.map(item => <option key={item.key} value={item.key}>{item.label}</option>)}{settings.chatgpt?.connected && <option value="chatgpt">ChatGPT subscription</option>}</Select></Field>
-            <Field label="Model" hint={defaultChoices.length ? `${defaultChoices.length} models available. Start typing to search.` : undefined}>
-              <input list="default-models" value={settings.default_model} onChange={event => update({ default_model: event.target.value })} placeholder="provider default" />
-              <datalist id="default-models">{defaultChoices.map(model => <option key={model.id} value={model.id} />)}</datalist>
-            </Field>
-          </div>
+          <ProviderPicker value={settings.default_provider} onChange={provider => update({ default_provider: provider, default_model: "" })}
+            providers={[{ id: "local" as Provider }, ...hosted.map(item => ({ id: item.key as Provider, note: settings[item.key].configured ? undefined : "Add a key below" })),
+              { id: "chatgpt" as Provider, note: settings.chatgpt?.connected ? undefined : "Sign in below" }]} />
+          <ModelPicker value={settings.default_model} models={defaultModels.models} error={defaultModels.error} onChange={default_model => update({ default_model })} defaultLabel="The provider's default" />
         </div>
 
         <h3 className="gallery-section-title">Providers</h3>
