@@ -298,15 +298,21 @@ export type MCPConnection = {
   id: string;
   name: string;
   url: string;
-  auth: "none" | "bearer" | "oauth";
+  auth: "none" | "bearer" | "oauth" | "google";
   token?: string;
   clear_token?: boolean;
   has_token: boolean;
   // True when an OAuth connection is signed in.
   signed_in?: boolean;
+  // The signed-in address, for Google apps.
+  account?: string;
   tools: MCPTool[];
   status: string;
 };
+
+// Whether Rex can sign in to Google: with a client the user added
+// ("settings") or one built into Rex.
+export type GoogleStatus = { configured: boolean; source: "settings" | "built-in" | ""; client_id?: string };
 
 export type WorkspaceFile = { path: string; size: number; modified: string };
 

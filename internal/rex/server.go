@@ -39,6 +39,7 @@ func (h *Host) Handler() http.Handler {
 	mux.Handle("/mcp/memory/", h.memoryMCP())
 	mux.Handle("/mcp/setup/", h.setupMCP())
 	mux.Handle("/mcp/bots/", h.botsMCP())
+	mux.Handle("/mcp/google/", h.googleMCP())
 	mux.Handle("/mcp/self/", h.selfMCP())
 	mux.Handle("/mcp/retro/", h.retroMCP())
 	mux.Handle("/mcp/catalog/", h.catalogMCP())
@@ -132,6 +133,8 @@ func (h *Host) Handler() http.Handler {
 	api.HandleFunc("DELETE /api/connections/{id}", h.deleteConnection)
 	api.HandleFunc("POST /api/connections/{id}/oauth/start", h.startOAuth)
 	api.HandleFunc("POST /api/connections/{id}/oauth/signout", h.signOut)
+	api.HandleFunc("GET /api/google", h.getGoogle)
+	api.HandleFunc("PUT /api/google", h.setGoogleClient)
 
 	api.HandleFunc("POST /api/logs/reveal", h.revealLogs)
 	mux.Handle("/api/", h.requireUI(api))

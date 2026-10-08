@@ -11,8 +11,9 @@ describe("apps catalog", () => {
     // The host's server-name rule.
     for (const app of appCatalog) expect(app.name).toMatch(/^[A-Za-z0-9 _.-]{1,40}$/);
   });
-  it("uses https and gives token apps a hint", () => {
+  it("uses https (or names a Google app) and gives token apps a hint", () => {
     for (const app of appCatalog) {
+      if (app.auth === "google") { expect(app.url).toMatch(/^google:[a-z]+$/); expect(app.access).toBeTruthy(); continue; }
       expect(app.url.startsWith("https://")).toBe(true);
       if (app.auth === "bearer") expect(app.tokenHint).toBeTruthy();
     }

@@ -1,11 +1,11 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
-import { Blocks, Check, CircleAlert, ExternalLink, LoaderCircle, Plus, RefreshCw, Trash2 } from "lucide-react";
+import { Blocks, Check, CircleAlert, ExternalLink, KeyRound, LoaderCircle, Plus, RefreshCw, Trash2 } from "lucide-react";
 import { api } from "./api";
 import { type AppCategory, type AppEntry, appCategories, appFor, connectionFor, connectionState, searchApps } from "./apps";
 import { Select } from "./Select";
 import { SideList } from "./SideList";
-import type { Bot, MCPConnection } from "./types";
-import { Avatar, Field, Modal, PageHeader, SearchBox, errorMessage, signInToConnection } from "./ui";
+import type { Bot, GoogleStatus, MCPConnection } from "./types";
+import { Avatar, Field, Modal, PageHeader, SearchBox, errorMessage, openExternal, signInToConnection } from "./ui";
 
 // Apps are MCP connections. The gallery connects a known app in one step
 // (sign in on its site, or no account at all); anything else is added as a
@@ -86,8 +86,11 @@ export function AppsView({ bots, onBotsChanged }: { bots: Bot[]; onBotsChanged: 
     if (app.auth === "bearer") return setEditing({ connection: existing ?? { name: app.name, url: app.url, auth: "bearer", tools: [] }, app });
     setBusy(app.id); setError("");
     try {
+      // Google apps need a Google client before the first sign-in; the
+      // editor walks through adding one.
+      if (app.auth === "google" && !(await api.google()).configured) return setEditing({ connection: existing ?? { name: app.name, url: app.url, auth: "google", tools: [] }, app });
       const saved = existing ?? await api.saveConnection({ name: app.name, url: app.url, auth: app.auth, tools: [] });
-      if (app.auth === "oauth") {
+      if (app.auth === "oauth" || app.auth === "google") {
         await signInToConnection(saved.id);
         setWaiting({ appId: app.id, connectionId: saved.id });
       } else {
@@ -120,7 +123,7 @@ export function AppsView({ bots, onBotsChanged }: { bots: Bot[]; onBotsChanged: 
             <span className="spacer" /><button type="button" className="button secondary small" onClick={open}>Manage</button></>
           : state === "signin" ? <><span className="tile-status warn"><CircleAlert size={12} />Signed out</span><span className="spacer" /><button type="button" className="button secondary small" disabled={busy === app.id} onClick={() => void connect(app)}>Sign in</button></>
           : state === "broken" ? <><span className="tile-status bad"><CircleAlert size={12} />Needs attention</span><span className="spacer" /><button type="button" className="button secondary small" onClick={open}>Fix</button></>
-          : <>{app.auth !== "oauth" && <span className="muted small">{app.auth === "bearer" ? "Uses an access token" : "No account needed"}</span>}<span className="spacer" />
+          : <>{(app.auth === "bearer" || app.auth === "none") && <span className="muted small">{app.auth === "bearer" ? "Uses an access token" : "No account needed"}</span>}<span className="spacer" />
             <button type="button" className="button primary small" disabled={busy === app.id} onClick={() => void connect(app)}>{busy === app.id ? <LoaderCircle className="spin" size={13} /> : <Plus size={13} />}Connect</button></>}
       </footer>
     </article>;
@@ -192,6 +195,10 @@ export function ConnectionEditor({ initial, app, justConnected, bots, onClose, o
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState("");
   const [removing, setRemoving] = useState(false);
+  const isGoogle = app?.auth === "google" || connection.auth === "google";
+  const [google, setGoogle] = useState<GoogleStatus | null>(null);
+  const [changingClient, setChangingClient] = useState(false);
+  useEffect(() => { if (isGoogle) api.google().then(setGoogle).catch(caught => setError(errorMessage(caught))); }, [isGoogle]);
   // Bots still in their setup interview are left alone: saving a bot ends it.
   const choosable = bots.filter(bot => !bot.setup);
   const [useWith, setUseWith] = useState<Set<string>>(() => new Set(initial.id ? usedBy(bots, initial.id).map(bot => bot.id) : []));
@@ -234,6 +241,12 @@ export function ConnectionEditor({ initial, app, justConnected, bots, onClose, o
       setWaiting(true);
     } catch (caught) { setError(errorMessage(caught)); } finally { setBusy(false); }
   };
+  // A new Google client signs Google apps out: show what the host says.
+  const refreshConnection = async () => {
+    if (!connection.id) return;
+    const current = (await api.connections().catch(() => [])).find(item => item.id === connection.id);
+    if (current) setConnection(current);
+  };
   const signOut = async () => {
     try { await api.signOut(connection.id!); setConnection({ ...connection, signed_in: false }); } catch (caught) { setError(errorMessage(caught)); }
   };
@@ -264,6 +277,14 @@ export function ConnectionEditor({ initial, app, justConnected, bots, onClose, o
     </div>}
     <div className="two-col">
       {!app && <Field label="Authentication"><Select value={connection.auth || "none"} onChange={value => setConnection({ ...connection, auth: value as MCPConnection["auth"] })}><option value="none">None</option><option value="oauth">Sign in (OAuth)</option><option value="bearer">Bearer token</option></Select></Field>}
+      {isGoogle && <Field label="Google account" hint={app?.access ? `Rex asks Google to let it: ${app.access}` : undefined}>
+        <div className="row">
+          {connection.signed_in ? <span className="badge ok-badge" title="Signed in">{connection.account || "Signed in"}</span> : <span className="muted small">Not signed in</span>}
+          <span className="spacer" />
+          {connection.signed_in && <button type="button" className="link-button" onClick={signOut}>Sign out</button>}
+          <button type="button" className="button secondary small" disabled={busy || !google?.configured} onClick={signIn}>{connection.signed_in ? "Sign in again" : "Sign in with Google"}</button>
+        </div>
+      </Field>}
       {connection.auth === "oauth" && <Field label="Account" hint="You sign in on the app's page in your browser. Rex keeps the sign-in in your macOS Keychain and renews it automatically.">
         <div className="row">
           {connection.signed_in ? <span className="badge ok-badge">Signed in</span> : <span className="muted small">Not signed in</span>}
@@ -276,7 +297,10 @@ export function ConnectionEditor({ initial, app, justConnected, bots, onClose, o
         <input type="password" value={connection.token || ""} onChange={event => setConnection({ ...connection, token: event.target.value })} placeholder={connection.has_token ? "••••••••" : "token"} />
       </Field>}
     </div>
-    <div className="row"><button type="button" className="button secondary small" disabled={busy || !connection.url || !connection.name} onClick={() => save(false)}><RefreshCw size={13} />{connection.id ? "Refresh tools" : "Connect and list tools"}</button>{connection.status && connection.id && connectionState(connection as MCPConnection) === "ready" && <span className="muted small">{connection.status}</span>}</div>
+    {isGoogle && google && (!google.configured || changingClient
+      ? <GoogleClientSetup status={google} onSaved={status => { setGoogle(status); setChangingClient(false); void refreshConnection(); }} onCancel={google.configured ? () => setChangingClient(false) : undefined} />
+      : google.source === "settings" && <p className="muted small row"><KeyRound size={12} /><span>Signs in with your Google client <span className="mono-url">{google.client_id}</span></span><button type="button" className="link-button" onClick={() => setChangingClient(true)}>Change</button></p>)}
+    {!(isGoogle && !connection.signed_in) && <div className="row"><button type="button" className="button secondary small" disabled={busy || !connection.url || !connection.name} onClick={() => save(false)}><RefreshCw size={13} />{connection.id ? "Refresh tools" : "Connect and list tools"}</button>{connection.status && connection.id && connectionState(connection as MCPConnection) === "ready" && <span className="muted small">{connection.status}</span>}</div>}
     {connection.status && connection.id && connectionState(connection as MCPConnection) === "broken" && <div className="inline-error"><CircleAlert size={14} /><span>{connection.status}</span></div>}
     {choosable.length > 0 && <>
       <h3 className="section-title">Use with</h3>
@@ -289,6 +313,49 @@ export function ConnectionEditor({ initial, app, justConnected, bots, onClose, o
         <label className="check"><input type="checkbox" checked={item.enabled} onChange={event => tool(item.name, { enabled: event.target.checked })} /><span><strong>{item.name}</strong><small>{item.description}</small></span></label>
         <Select value={item.access} onChange={value => tool(item.name, { access: value as "read" | "write" })}><option value="read">Read</option><option value="write">Write</option></Select>
       </li>)}</ul></>}
-    {app && <p className="muted small row"><ExternalLink size={12} /><span className="mono-url">{app.url}</span></p>}
+    {app && !isGoogle && <p className="muted small row"><ExternalLink size={12} /><span className="mono-url">{app.url}</span></p>}
   </Modal>;
+}
+
+const googleConsole = "https://console.cloud.google.com";
+const googleSteps: { text: string; link?: { label: string; url: string } }[] = [
+  { text: "Create a Google Cloud project (or pick one you have).", link: { label: "New project", url: `${googleConsole}/projectcreate` } },
+  { text: "Turn on the Gmail, Google Sheets and Google Drive APIs for it.", link: { label: "Enable APIs", url: `${googleConsole}/flows/enableapi?apiid=gmail.googleapis.com,sheets.googleapis.com,drive.googleapis.com` } },
+  { text: "Set up the consent screen: choose External, and add your Google address under Audience → Test users.", link: { label: "Consent screen", url: `${googleConsole}/auth/overview` } },
+  { text: "Create an OAuth client of type Desktop app, then paste its ID and secret here.", link: { label: "Create client", url: `${googleConsole}/auth/clients/create` } },
+];
+
+// GoogleClientSetup adds the Google client Rex signs in with. Until Rex
+// ships with its own, each person creates one in their Google Cloud
+// project; Google shows it as unverified, which is expected for a client
+// only you use.
+function GoogleClientSetup({ status, onSaved, onCancel }: { status: GoogleStatus; onSaved: (status: GoogleStatus) => void; onCancel?: () => void }) {
+  const [clientId, setClientId] = useState("");
+  const [secret, setSecret] = useState("");
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState("");
+  const save = async (client: { client_id: string; client_secret?: string }) => {
+    setBusy(true); setError("");
+    try { onSaved(await api.saveGoogleClient(client)); } catch (caught) { setError(errorMessage(caught)); } finally { setBusy(false); }
+  };
+  return <section className="google-setup">
+    <h3 className="section-title">Connect Rex to Google</h3>
+    <p className="muted small">Rex signs in to Google with an OAuth client from your own Google Cloud project. It takes about five minutes, once, and covers every Google app.</p>
+    <ol className="google-steps">{googleSteps.map((step, index) => <li key={index}>
+      <span>{step.text}</span>
+      {step.link && <button type="button" className="link-button" onClick={() => void openExternal(step.link!.url)}>{step.link.label}<ExternalLink size={11} /></button>}
+    </li>)}</ol>
+    {error && <div className="inline-error">{error}</div>}
+    <div className="two-col">
+      <Field label="Client ID"><input value={clientId} onChange={event => setClientId(event.target.value)} placeholder="1234-abc.apps.googleusercontent.com" spellCheck={false} /></Field>
+      <Field label="Client secret" hint="Stored in your macOS Keychain"><input type="password" value={secret} onChange={event => setSecret(event.target.value)} placeholder="GOCSPX-…" /></Field>
+    </div>
+    <p className="muted small">When Google says the app isn't verified, choose Continue: it's your own client. {status.configured && "Changing the client signs Google apps out."}</p>
+    <div className="row">
+      {status.source === "settings" && <button type="button" className="link-button" disabled={busy} onClick={() => void save({ client_id: "" })}>Remove my client</button>}
+      <span className="spacer" />
+      {onCancel && <button type="button" className="button secondary small" onClick={onCancel}>Cancel</button>}
+      <button type="button" className="button primary small" disabled={busy || !clientId.trim().endsWith(".apps.googleusercontent.com")} onClick={() => void save({ client_id: clientId, client_secret: secret })}>{busy ? <LoaderCircle className="spin" size={13} /> : <Check size={13} />}Save client</button>
+    </div>
+  </section>;
 }

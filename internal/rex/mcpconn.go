@@ -28,7 +28,9 @@ type MCPConnection struct {
 	ClearToken bool   `json:"clear_token,omitempty"`
 	HasToken   bool   `json:"has_token"`
 	// SignedIn is true for an OAuth connection with a working sign-in.
-	SignedIn  bool      `json:"signed_in"`
+	SignedIn bool `json:"signed_in"`
+	// Account is the signed-in address, for Google apps.
+	Account   string    `json:"account,omitempty"`
 	Tools     []MCPTool `json:"tools"`
 	Status    string    `json:"status"`
 	CreatedAt time.Time `json:"created_at"`
@@ -56,6 +58,7 @@ func (h *Host) ListMCPConnections(ctx context.Context) ([]MCPConnection, error) 
 		token, _ := h.Settings.secrets.Get(mcpTokenKey(items[index].ID))
 		items[index].HasToken = token != ""
 		items[index].SignedIn = items[index].oauth.SignedIn
+		items[index].Account = items[index].oauth.Account
 	}
 	return items, nil
 }
@@ -68,19 +71,24 @@ func (h *Host) SaveMCPConnection(ctx context.Context, input MCPConnection) (*MCP
 	if !serverNamePattern.MatchString(input.Name) {
 		return nil, errors.New("name must be 1–40 letters, numbers, spaces, dots, dashes or underscores")
 	}
-	parsed, err := url.Parse(input.URL)
-	if err != nil || parsed.Host == "" || (parsed.Scheme != "https" && parsed.Scheme != "http") || parsed.User != nil || parsed.RawQuery != "" || parsed.Fragment != "" {
+	// Google apps are served by Rex itself; their URL names the app.
+	if googleServices[input.URL] != nil {
+		input.Auth = "google"
+	} else if input.Auth == "google" {
+		return nil, fmt.Errorf("unknown Google app %q", input.URL)
+	} else if parsed, err := url.Parse(input.URL); err != nil || parsed.Host == "" || (parsed.Scheme != "https" && parsed.Scheme != "http") || parsed.User != nil || parsed.RawQuery != "" || parsed.Fragment != "" {
 		return nil, errors.New("URL must be an http(s) URL without credentials, query or fragment")
 	}
-	if input.Auth != "bearer" && input.Auth != "oauth" {
+	if input.Auth != "bearer" && input.Auth != "oauth" && input.Auth != "google" {
 		input.Auth = "none"
 	}
+	signIn := input.Auth == "oauth" || input.Auth == "google"
 	existing := map[string]MCPTool{}
 	if input.ID == "" {
 		input.ID = uuid.NewString()
 	} else if previous, err := h.Store.GetMCPConnection(ctx, input.ID); err == nil {
 		input.CreatedAt = previous.CreatedAt
-		if input.Auth == "oauth" {
+		if signIn {
 			input.oauth = previous.oauth
 		}
 		for _, tool := range previous.Tools {
@@ -98,13 +106,13 @@ func (h *Host) SaveMCPConnection(ctx context.Context, input MCPConnection) (*MCP
 			return nil, fmt.Errorf("store token in keychain: %w", err)
 		}
 	}
-	if input.Auth != "oauth" {
+	if !signIn {
 		_ = h.Settings.secrets.Delete(mcpOAuthKey(input.ID))
 		input.oauth = oauthMeta{}
 	}
 	input.Token, input.ClearToken = "", false
 	tools, err := h.discoverMCPTools(ctx, input)
-	if input.Auth == "oauth" && !input.oauth.SignedIn {
+	if signIn && !input.oauth.SignedIn {
 		input.Status = "Sign in to connect"
 	} else if err != nil {
 		input.Status = "Could not reach the server: " + err.Error()
@@ -127,6 +135,7 @@ func (h *Host) SaveMCPConnection(ctx context.Context, input MCPConnection) (*MCP
 	token, _ := h.Settings.secrets.Get(mcpTokenKey(input.ID))
 	input.HasToken = token != ""
 	input.SignedIn = input.oauth.SignedIn
+	input.Account = input.oauth.Account
 	return &input, nil
 }
 
@@ -149,8 +158,11 @@ func (t bearerTransport) RoundTrip(request *http.Request) (*http.Response, error
 
 func (h *Host) discoverMCPTools(ctx context.Context, connection MCPConnection) ([]MCPTool, error) {
 	client := &http.Client{Timeout: 20 * time.Second}
-	if connection.Auth == "oauth" && !connection.oauth.SignedIn {
+	if (connection.Auth == "oauth" || connection.Auth == "google") && !connection.oauth.SignedIn {
 		return nil, errors.New("sign in first")
+	}
+	if service := googleServices[connection.URL]; connection.Auth == "google" && service != nil {
+		return googleToolList(service), nil
 	}
 	token, _, err := h.accessToken(ctx, connection, false)
 	if err != nil {
@@ -214,6 +226,11 @@ func (h *Host) MCPServersForBot(ctx context.Context, bot Bot) ([]RunMCPServer, e
 				return nil, fmt.Errorf("sign in to %s again in Apps to use it", connection.Name)
 			}
 			return nil, err
+		}
+		// Rex serves Google apps itself and keeps the Google token.
+		if connection.Auth == "google" {
+			servers = append(servers, h.googleRunServer(*connection, tools))
+			continue
 		}
 		if token != "" {
 			server.Credential = &RunMCPCredential{Type: "bearer_token", AccessToken: token, ExpiresAt: expires}
