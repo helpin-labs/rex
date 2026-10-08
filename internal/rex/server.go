@@ -10,10 +10,12 @@ import (
 	"net/http"
 	"os"
 	"os/exec"
+	"os/user"
 	"path/filepath"
 	"sort"
 	"strconv"
 	"strings"
+	"sync"
 	"time"
 	"unicode/utf8"
 )
@@ -195,8 +197,19 @@ func (h *Host) status(w http.ResponseWriter, r *http.Request) {
 		"memory":    map[string]any{"available": h.Memory.Available(), "status": h.Memory.Status()},
 		"onboarded": settings.Onboarded, "active_runs": h.ActiveRuns(), "write_tools": h.WriteTools(),
 		"web_search": settings.WebSearchReady(), "cloud_browsers": settings.CloudBrowsers(),
+		"user_name": accountName(),
 	})
 }
+
+// accountName is the Mac account's full name (or login name), shown on the
+// profile button.
+var accountName = sync.OnceValue(func() string {
+	account, err := user.Current()
+	if err != nil {
+		return ""
+	}
+	return firstNonEmpty(strings.TrimSpace(account.Name), account.Username)
+})
 
 func (h *Host) getSettings(w http.ResponseWriter, r *http.Request) {
 	settings, err := h.Settings.Get(r.Context())

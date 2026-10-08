@@ -270,7 +270,7 @@ func (h *Host) accessToken(ctx context.Context, connection MCPConnection, force 
 	case "bearer":
 		token, err := h.Settings.secrets.Get(mcpTokenKey(connection.ID))
 		if err != nil || token == "" {
-			return "", nil, fmt.Errorf("the %s connection has no token; add it in Settings → Connections", connection.Name)
+			return "", nil, fmt.Errorf("the %s connection has no token; add it in Apps", connection.Name)
 		}
 		return token, nil, nil
 	case "oauth":
