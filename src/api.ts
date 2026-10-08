@@ -1,5 +1,5 @@
 import type { ChatGPTStatus,
-  AttentionItem, Bot, BotLogin, InstructionProposal, Conversation, ConversationDetail, MCPConnection, MemoryOverview, MemorySource, ModelInfo, ProviderTest,
+  AttentionItem, Bot, BotLogin, InstructionProposal, Conversation, ConversationDetail, GoogleStatus, MCPConnection, MemoryOverview, MemorySource, ModelInfo, ProviderTest,
   Routine, RoutineRun, Run, RunEventEnvelope, Settings, Skill, Status, Turn, WorkspaceFile, CatalogSkill, SkillSource,
 } from "./types";
 
@@ -129,6 +129,8 @@ export const api = {
   startSignIn: (id: string) => request<{ url: string }>(`/api/connections/${id}/oauth/start`, json("POST", {})),
   signOut: (id: string) => request<void>(`/api/connections/${id}/oauth/signout`, json("POST", {})),
   saveConnection: (connection: Partial<MCPConnection>) => request<MCPConnection>(connection.id ? `/api/connections/${connection.id}` : "/api/connections", json(connection.id ? "PUT" : "POST", connection)),
+  google: () => request<GoogleStatus>("/api/google"),
+  saveGoogleClient: (client: { client_id: string; client_secret?: string }) => request<GoogleStatus>("/api/google", json("PUT", client)),
   deleteConnection: (id: string) => request(`/api/connections/${id}`, json("DELETE")),
   browsers: () => request<{ name: string; path: string }[]>("/api/browsers"),
   revealLogs: () => request<void>("/api/logs/reveal", json("POST", {})),

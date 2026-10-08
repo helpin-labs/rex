@@ -1,11 +1,12 @@
-import { siAirtable, siAtlassian, siCloudflare, siClickup, siGithub, siHuggingface, siIntercom, siLinear, siNeon, siNetlify, siNotion, siPaypal, siPosthog,
+import { siAirtable, siAtlassian, siCloudflare, siClickup, siGithub, siGmail, siGooglecalendar, siGoogledrive, siGooglesheets, siHuggingface, siIntercom, siLinear, siNeon, siNetlify, siNotion, siPaypal, siPosthog,
   siSentry, siStripe, siSupabase, siVercel, siWebflow, siWix, siZapier } from "simple-icons";
 import type { MCPConnection } from "./types";
 
 // The Apps gallery: hosted MCP servers that Rex can connect in one step.
 // Every "oauth" entry was checked to offer OAuth discovery and dynamic client
 // registration, which Rex's sign-in needs; "bearer" ones take a token the
-// user creates on the app's site; "none" ones need no account.
+// user creates on the app's site; "none" ones need no account. "google"
+// ones are served by Rex itself, which signs in to Google for them.
 
 export type AppCategory = "Work" | "Engineering" | "Design" | "Customers" | "Payments" | "Research";
 export const appCategories: AppCategory[] = ["Work", "Engineering", "Design", "Customers", "Payments", "Research"];
@@ -17,9 +18,11 @@ export type AppEntry = {
   description: string;
   category: AppCategory;
   url: string;
-  auth: "oauth" | "bearer" | "none";
+  auth: "oauth" | "bearer" | "none" | "google";
   // For bearer apps: where to create the token.
   tokenHint?: string;
+  // For Google apps: what Rex may do in the account, in plain words.
+  access?: string;
   // A simple-icons path, or a letter on the brand color.
   icon?: { path: string; hex: string };
   color: string;
@@ -28,6 +31,14 @@ export type AppEntry = {
 const icon = (item: { path: string; hex: string }) => ({ path: item.path, hex: item.hex });
 
 export const appCatalog: AppEntry[] = [
+  { id: "gmail", name: "Gmail", description: "Search, read, draft and send email.", category: "Work", url: "google:gmail", auth: "google",
+    access: "Read, search and label your email, save drafts and send email. Rex can't permanently delete mail.", icon: icon(siGmail), color: "#EA4335" },
+  { id: "google-sheets", name: "Google Sheets", description: "Find, read and update spreadsheets.", category: "Work", url: "google:sheets", auth: "google",
+    access: "Read and edit your spreadsheets, create new ones, and see the names of files in your Drive to find them.", icon: icon(siGooglesheets), color: "#34A853" },
+  { id: "google-calendar", name: "Google Calendar", description: "See your schedule, find free time and book meetings.", category: "Work", url: "google:calendar", auth: "google",
+    access: "See your calendars and when you're free, add and change events, and answer invitations.", icon: icon(siGooglecalendar), color: "#4285F4" },
+  { id: "google-drive", name: "Google Drive", description: "Search and read your files, create Docs and folders.", category: "Work", url: "google:drive", auth: "google",
+    access: "Search and read your files, and create new Docs and folders. Rex can't change or delete files it didn't create.", icon: icon(siGoogledrive), color: "#4285F4" },
   { id: "notion", name: "Notion", description: "Search, read and update pages and databases.", category: "Work", url: "https://mcp.notion.com/mcp", auth: "oauth", icon: icon(siNotion), color: "#000000" },
   { id: "linear", name: "Linear", description: "Find, create and update issues, projects and cycles.", category: "Engineering", url: "https://mcp.linear.app/mcp", auth: "oauth", icon: icon(siLinear), color: "#5E6AD2" },
   { id: "atlassian", name: "Atlassian", description: "Jira issues and Confluence pages.", category: "Work", url: "https://mcp.atlassian.com/v1/mcp", auth: "oauth", icon: icon(siAtlassian), color: "#0052CC" },
@@ -74,7 +85,7 @@ export function connectionFor(app: AppEntry, connections: MCPConnection[]): MCPC
 export type AppState = "ready" | "signin" | "broken";
 
 export function connectionState(connection: MCPConnection): AppState {
-  if (connection.auth === "oauth" && !connection.signed_in) return "signin";
+  if ((connection.auth === "oauth" || connection.auth === "google") && !connection.signed_in) return "signin";
   return connection.status.startsWith("Connected") ? "ready" : "broken";
 }
 

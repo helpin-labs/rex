@@ -43,6 +43,8 @@ type oauthMeta struct {
 	AuthMethod    string     `json:"auth_method,omitempty"`
 	RedirectURI   string     `json:"redirect_uri,omitempty"`
 	ExpiresAt     *time.Time `json:"expires_at,omitempty"`
+	// Account is the signed-in address, when the provider says (Google).
+	Account string `json:"account,omitempty"`
 	// SignedIn is false until the first sign-in and after a refresh is
 	// rejected.
 	SignedIn bool `json:"signed_in"`
@@ -149,6 +151,9 @@ func (h *Host) StartOAuth(ctx context.Context, connectionID string) (string, err
 	if err != nil {
 		return "", err
 	}
+	if connection.Auth == "google" {
+		return h.startGoogleSignIn(ctx, connection)
+	}
 	if connection.Auth != "oauth" {
 		return "", errors.New("this connection does not use sign-in")
 	}
@@ -223,20 +228,11 @@ func (h *Host) CompleteOAuth(ctx context.Context, state, code, providerError str
 	if err != nil {
 		return nil, err
 	}
-	client, err := oauthClient(*connection)
-	if err != nil {
-		return nil, err
-	}
-	secrets, err := h.oauthSecretsFor(connection.ID)
-	if err != nil {
-		return nil, err
-	}
-	meta := connection.oauth
-	token, err := client.ExchangeCode(ctx, meta.TokenEndpoint, meta.ClientID, secrets.ClientSecret, meta.AuthMethod, code, pending.verifier, meta.RedirectURI, meta.Resource)
-	if err != nil {
-		return nil, oauthError("sign-in could not be completed", err)
-	}
-	if err := h.storeToken(ctx, connection, token, secrets); err != nil {
+	if connection.Auth == "google" {
+		if err := h.completeGoogleSignIn(ctx, connection, code, pending.verifier); err != nil {
+			return nil, err
+		}
+	} else if err := h.completeMCPSignIn(ctx, connection, code, pending.verifier); err != nil {
 		return nil, err
 	}
 	// Read the tools now that Rex may call them, then continue runs that
@@ -247,6 +243,23 @@ func (h *Host) CompleteOAuth(ctx context.Context, state, code, providerError str
 	}
 	go h.resumeRunsWaitingFor(context.Background(), connection.ID)
 	return saved, nil
+}
+
+func (h *Host) completeMCPSignIn(ctx context.Context, connection *MCPConnection, code, verifier string) error {
+	client, err := oauthClient(*connection)
+	if err != nil {
+		return err
+	}
+	secrets, err := h.oauthSecretsFor(connection.ID)
+	if err != nil {
+		return err
+	}
+	meta := connection.oauth
+	token, err := client.ExchangeCode(ctx, meta.TokenEndpoint, meta.ClientID, secrets.ClientSecret, meta.AuthMethod, code, verifier, meta.RedirectURI, meta.Resource)
+	if err != nil {
+		return oauthError("sign-in could not be completed", err)
+	}
+	return h.storeToken(ctx, connection, token, secrets)
 }
 
 func (h *Host) storeToken(ctx context.Context, connection *MCPConnection, token *mcpauth.Token, secrets oauthSecrets) error {
@@ -273,7 +286,7 @@ func (h *Host) accessToken(ctx context.Context, connection MCPConnection, force 
 			return "", nil, fmt.Errorf("the %s connection has no token; add it in Apps", connection.Name)
 		}
 		return token, nil, nil
-	case "oauth":
+	case "oauth", "google":
 	default:
 		return "", nil, nil
 	}
@@ -300,22 +313,39 @@ func (h *Host) accessToken(ctx context.Context, connection MCPConnection, force 
 		h.requireSignIn(ctx, current)
 		return "", nil, fmt.Errorf("%w: %s", ErrSignInRequired, current.Name)
 	}
-	client, err := oauthClient(*current)
+	token, err := h.refreshToken(ctx, current, secrets)
 	if err != nil {
-		return "", nil, err
-	}
-	token, err := client.Refresh(ctx, meta.TokenEndpoint, meta.ClientID, secrets.ClientSecret, meta.AuthMethod, secrets.RefreshToken, meta.Resource)
-	if err != nil {
-		if mcpauth.IsStatus(err, http.StatusBadRequest) || mcpauth.IsStatus(err, http.StatusUnauthorized) {
+		if errors.Is(err, ErrSignInRequired) {
 			h.requireSignIn(ctx, current)
 			return "", nil, fmt.Errorf("%w: %s", ErrSignInRequired, current.Name)
 		}
-		return "", nil, oauthError("could not refresh the "+current.Name+" sign-in", err)
+		return "", nil, err
 	}
 	if err := h.storeToken(ctx, current, token, secrets); err != nil {
 		return "", nil, err
 	}
 	return token.AccessToken, token.ExpiresAt, nil
+}
+
+// refreshToken renews a sign-in; ErrSignInRequired means the provider
+// refused the refresh token.
+func (h *Host) refreshToken(ctx context.Context, connection *MCPConnection, secrets oauthSecrets) (*mcpauth.Token, error) {
+	if connection.Auth == "google" {
+		return h.refreshGoogleToken(ctx, connection, secrets)
+	}
+	meta := connection.oauth
+	client, err := oauthClient(*connection)
+	if err != nil {
+		return nil, err
+	}
+	token, err := client.Refresh(ctx, meta.TokenEndpoint, meta.ClientID, secrets.ClientSecret, meta.AuthMethod, secrets.RefreshToken, meta.Resource)
+	if err != nil {
+		if mcpauth.IsStatus(err, http.StatusBadRequest) || mcpauth.IsStatus(err, http.StatusUnauthorized) {
+			return nil, ErrSignInRequired
+		}
+		return nil, oauthError("could not refresh the "+connection.Name+" sign-in", err)
+	}
+	return token, nil
 }
 
 func (h *Host) requireSignIn(ctx context.Context, connection *MCPConnection) {
@@ -331,6 +361,11 @@ func (h *Host) SignOut(ctx context.Context, connectionID string) error {
 	connection, err := h.Store.GetMCPConnection(ctx, connectionID)
 	if err != nil {
 		return err
+	}
+	if connection.Auth == "google" {
+		if secrets, err := h.oauthSecretsFor(connectionID); err == nil {
+			go revokeGoogle(firstNonEmpty(secrets.RefreshToken, secrets.AccessToken))
+		}
 	}
 	if err := h.Settings.secrets.Delete(mcpOAuthKey(connectionID)); err != nil {
 		return err

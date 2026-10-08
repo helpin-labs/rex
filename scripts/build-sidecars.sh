@@ -17,7 +17,14 @@ mkdir -p "$bin_dir" "$repo_root/bin"
 export GOPRIVATE="${GOPRIVATE:+$GOPRIVATE,}github.com/helpin-ai/*"
 
 flags=(-trimpath -ldflags "-s -w")
-(cd "$repo_root" && go build "${flags[@]}" -o "$bin_dir/rex-host-$target_triple" ./cmd/rex-host)
+# Rex's own Google client, for Gmail and Google Sheets. Without one, people
+# add their own in Apps.
+host_ldflags="-s -w"
+if [ -n "${REX_GOOGLE_CLIENT_ID:-}" ]; then
+  pkg=github.com/helpin-ai/rex/internal/rex
+  host_ldflags+=" -X $pkg.googleClientID=$REX_GOOGLE_CLIENT_ID -X $pkg.googleClientSecret=${REX_GOOGLE_CLIENT_SECRET:-}"
+fi
+(cd "$repo_root" && go build -trimpath -ldflags "$host_ldflags" -o "$bin_dir/rex-host-$target_triple" ./cmd/rex-host)
 (cd "$repo_root" && go build "${flags[@]}" -o "$bin_dir/agent-runtime-$target_triple" github.com/helpin-ai/agent-runtime/cmd/agent-runtime)
 if [ -f "$repo_root/go.work" ]; then
   echo "agent-runtime: local checkout from go.work"
