@@ -1,7 +1,7 @@
 import { type ReactNode, useEffect } from "react";
 import ReactMarkdown from "react-markdown";
 import remarkGfm from "remark-gfm";
-import { X } from "lucide-react";
+import { ArrowLeft, Search, X } from "lucide-react";
 import type { Bot } from "./types";
 import { BotFace } from "./BotFace";
 import { AppLogo } from "./AppLogo";
@@ -106,4 +106,37 @@ export async function signInToConnection(id: string) {
   const { api } = await import("./api");
   const { url } = await api.startSignIn(id);
   await openExternal(url);
+}
+
+// --- page building blocks shared by Apps, Skills, Routines and Settings ---
+
+/** A page's title, what it is for, and its main actions. */
+export function PageHeader({ title, description, back, actions }: { title: ReactNode; description?: ReactNode; back?: { label: string; onClick: () => void }; actions?: ReactNode }) {
+  return <header className="gallery-header">
+    <div className="gallery-header-text">
+      {back && <button type="button" className="back-link" onClick={back.onClick}><ArrowLeft size={13} />{back.label}</button>}
+      <h1>{title}</h1>
+      {description && <p className="muted">{description}</p>}
+    </div>
+    {actions && <div className="gallery-header-actions">{actions}</div>}
+  </header>;
+}
+
+export function SearchBox({ value, onChange, placeholder }: { value: string; onChange: (value: string) => void; placeholder: string }) {
+  return <label className="gallery-search"><Search size={14} /><input value={value} onChange={event => onChange(event.target.value)} placeholder={placeholder} aria-label={placeholder} /></label>;
+}
+
+/** A soft hue that stays the same for the same seed. */
+export function seedHue(seed: string): number {
+  let hash = 0;
+  for (const char of seed) hash = (hash * 31 + char.charCodeAt(0)) | 0;
+  return Math.abs(hash) % 360;
+}
+
+/** A card's icon: a lucide icon or a letter on a tint picked from the seed. */
+export function TileMark({ seed, icon, label, size = 40 }: { seed: string; icon?: ReactNode; label?: string; size?: number }) {
+  const hue = seedHue(seed);
+  return <span className="tile-mark" style={{ width: size, height: size, borderRadius: Math.round(size * 0.26), "--tile-hue": hue } as React.CSSProperties}>
+    {icon || <span style={{ fontSize: Math.round(size * 0.42) }}>{(label || seed).trim().charAt(0).toUpperCase()}</span>}
+  </span>;
 }

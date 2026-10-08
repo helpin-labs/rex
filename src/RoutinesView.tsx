@@ -1,11 +1,12 @@
 import { useCallback, useEffect, useState } from "react";
 import { Select } from "./Select";
-import { AlarmClock, CircleAlert, Play, Plus, Trash2 } from "lucide-react";
+import { AlarmClock, BookMarked, Binoculars, CircleAlert, Eye, MessagesSquare, Pencil, Play, Plus, Sunrise, Trash2 } from "lucide-react";
 import { api } from "./api";
 import { SideList } from "./SideList";
 import type { Bot, Routine, RoutineRun } from "./types";
 import { type Repeat, type ScheduleDraft, describeDraft, describeRoutine, draftFromRoutine, scheduleFields, weekdayNames } from "./schedule";
-import { Avatar, Empty, Field, Modal, Toggle, errorMessage, relativeTime } from "./ui";
+import { routineTemplates } from "./routineTemplates";
+import { Avatar, Field, Modal, PageHeader, TileMark, Toggle, errorMessage, relativeTime } from "./ui";
 
 // Network failures read as what happened, with the raw error on hover.
 function runError(error: string): string {
@@ -81,61 +82,130 @@ function RoutineEditor({ initial, bots, onClose, onSaved }: { initial: Partial<R
   </Modal>;
 }
 
+type Filter = "all" | "active" | "off";
+
+const templateIcons = { sunrise: Sunrise, binoculars: Binoculars, bookmarked: BookMarked, eye: Eye };
+
+// A routine is active when it is on and not paused after failures.
+function isActive(routine: Routine) {
+  return routine.enabled && !routine.paused_reason;
+}
+
+function routineStatus(routine: Routine): { label: string; tone: "ok" | "warn" | "" } {
+  if (routine.paused_reason) return { label: "Paused", tone: "warn" };
+  if (!routine.enabled) return { label: "Off", tone: "" };
+  return { label: routine.next_run_at ? `Next ${relativeTime(routine.next_run_at)}` : "On", tone: "ok" };
+}
+
+const when = (at: string) => new Date(at).toLocaleString(undefined, { weekday: "short", day: "numeric", month: "short", hour: "2-digit", minute: "2-digit" });
+
 export function RoutinesView({ bots, onOpenConversation }: { bots: Bot[]; onOpenConversation: (conversationId: string) => void }) {
   const [routines, setRoutines] = useState<Routine[]>([]);
+  const [loaded, setLoaded] = useState(false);
+  const [filter, setFilter] = useState<Filter>("all");
   const [selected, setSelected] = useState<string>("");
   const [runs, setRuns] = useState<RoutineRun[]>([]);
   const [editing, setEditing] = useState<Partial<Routine> | null>(null);
+  const [confirmDelete, setConfirmDelete] = useState(false);
   const [error, setError] = useState("");
-  const load = useCallback(() => api.routines().then(list => { setRoutines(list); setSelected(current => current || list[0]?.id || ""); }).catch(caught => setError(errorMessage(caught))), []);
+  const load = useCallback(() => api.routines().then(list => { setRoutines(list); setLoaded(true); }).catch(caught => setError(errorMessage(caught))), []);
   useEffect(() => { void load(); }, [load]);
   const loadRuns = useCallback(() => { if (selected) api.routineRuns(selected).then(setRuns).catch(() => undefined); }, [selected]);
-  useEffect(() => { loadRuns(); const timer = window.setInterval(() => { loadRuns(); void load(); }, 5000); return () => window.clearInterval(timer); }, [loadRuns, load]);
+  useEffect(() => { setRuns([]); setConfirmDelete(false); loadRuns(); const timer = window.setInterval(() => { loadRuns(); void load(); }, 5000); return () => window.clearInterval(timer); }, [loadRuns, load]);
 
   const routine = routines.find(item => item.id === selected);
   const bot = bots.find(item => item.id === routine?.bot_id);
+  const defaultBot = (bots.find(item => item.role === "main") || bots[0])?.id;
+  const create = (fields: Partial<Routine> = {}) => setEditing({ bot_id: defaultBot, schedule_kind: "cron", cron: "0 8 * * *", daily_time: "08:00", interval_minutes: 60, enabled: true, ...fields });
   const runNow = async () => { try { await api.runRoutine(selected); loadRuns(); } catch (caught) { setError(errorMessage(caught)); } };
-  const remove = async () => { if (routine && window.confirm(`Delete “${routine.title}”?`)) { await api.deleteRoutine(routine.id); setSelected(""); void load(); } };
+  const remove = async () => {
+    if (!routine) return;
+    try { await api.deleteRoutine(routine.id); setSelected(""); void load(); } catch (caught) { setError(errorMessage(caught)); }
+  };
+  const shown = routines.filter(item => filter === "all" || (filter === "active" ? isActive(item) : !isActive(item)));
+  const counts = { all: routines.length, active: routines.filter(isActive).length, off: routines.filter(item => !isActive(item)).length };
+  const note = "Routines run while your Mac is awake and Rex is running. Closing the window keeps Rex in the menu bar.";
+
+  const card = (item: Routine) => {
+    const owner = bots.find(candidate => candidate.id === item.bot_id);
+    const status = routineStatus(item);
+    return <article key={item.id} className="gallery-card">
+      <button type="button" className="gallery-card-main" onClick={() => setSelected(item.id)}>
+        {owner ? <Avatar bot={owner} size={40} /> : <TileMark seed={item.id} icon={<AlarmClock size={18} />} />}
+        <span className="gallery-card-text"><strong>{item.title}</strong><small>{describeRoutine(item)}{owner ? ` · ${owner.name}` : ""}</small></span>
+      </button>
+      <footer className="gallery-card-footer">
+        <span className={`chip ${status.tone}`}>{status.label}</span>
+        <span className="spacer" />
+        <span className="muted small">{item.last_run_at ? `Ran ${relativeTime(item.last_run_at)}` : "Not run yet"}</span>
+      </footer>
+    </article>;
+  };
+
+  const templates = <section className="gallery-section">
+    <h3 className="gallery-section-title">Start from a template</h3>
+    <div className="gallery-grid">{routineTemplates.map(template => {
+      const Icon = templateIcons[template.icon];
+      return <article key={template.id} className="gallery-card">
+        <button type="button" className="gallery-card-main" onClick={() => create(template.fields)}>
+          <TileMark seed={template.id} icon={<Icon size={18} />} />
+          <span className="gallery-card-text"><strong>{template.fields.title}</strong><small className="clamp">{template.fields.prompt}</small></span>
+        </button>
+        <footer className="gallery-card-footer"><span className="muted small">{describeRoutine(template.fields as Routine)}</span><span className="spacer" />
+          <button type="button" className="button secondary small" disabled={!bots.length} onClick={() => create(template.fields)}>Use</button></footer>
+      </article>;
+    })}</div>
+  </section>;
 
   return <div className="page">
     <SideList>
-      <header className="page-list-header row between"><div><h2>Routines</h2><small className="subtitle">Scheduled tasks</small></div>
-        <button type="button" className="icon-button" title="New routine" disabled={!bots.length} onClick={() => setEditing({ bot_id: bots[0]?.id, schedule_kind: "daily", daily_time: "08:00", interval_minutes: 60, enabled: true })}><Plus size={16} /></button></header>
-      <div className="callout small">Routines run only while your Mac is awake and Rex is running (it keeps running in the menu bar when you close the window).</div>
-      <nav className="list">{routines.map(item => {
-        const owner = bots.find(candidate => candidate.id === item.bot_id);
-        return <button type="button" key={item.id} className={`list-item ${selected === item.id ? "selected" : ""}`} onClick={() => setSelected(item.id)}>
-          {owner ? <Avatar bot={owner} size={34} /> : <span className="list-icon"><AlarmClock size={15} /></span>}
-          <span className="list-text"><strong>{item.title}</strong><small>{item.enabled ? `${describeRoutine(item)} · next ${relativeTime(item.next_run_at)}` : item.paused_reason ? "Paused" : "Off"}</small></span>
-        </button>;
-      })}</nav>
+      <header className="page-list-header"><h2>Routines</h2><small className="subtitle">Tasks that run on a schedule</small></header>
+      <nav className="list">
+        {(["all", "active", "off"] as Filter[]).map(item => <button type="button" key={item} className={`list-item compact ${!routine && filter === item ? "selected" : ""}`} onClick={() => { setSelected(""); setFilter(item); }}>
+          <span className="list-text"><strong>{item === "all" ? "All routines" : item === "active" ? "Active" : "Paused or off"}</strong></span>
+          {counts[item] > 0 && <span className="count">{counts[item]}</span>}
+        </button>)}
+      </nav>
     </SideList>
-    <section className="page-content">
-      {error && <div className="inline-error">{error}<button type="button" className="link-button" onClick={() => setError("")}>Dismiss</button></div>}
-      {!routine ? <Empty icon={<AlarmClock size={22} />} title="No routine selected">Create a routine to have a bot do something on a schedule, such as a morning briefing.</Empty> : <>
-        <header className="content-header">
-          <div><h1>{routine.title}</h1><p className="muted">{bot ? `${bot.name} · ` : ""}{describeRoutine(routine)}{routine.enabled && routine.next_run_at ? ` · next run ${relativeTime(routine.next_run_at)}` : ""}</p></div>
-          <div className="row">
-            <button type="button" className="button secondary small" onClick={() => setEditing(routine)}>Edit</button>
+    <section className="page-content gallery-page">
+      {error && <div className="inline-error"><span>{error}</span><button type="button" className="link-button" onClick={() => setError("")}>Dismiss</button></div>}
+      {routine ? <div className="detail-page">
+        <PageHeader back={{ label: "Routines", onClick: () => setSelected("") }} title={routine.title}
+          description={<>{describeRoutine(routine)}{bot ? ` · ${bot.name}` : ""}</>}
+          actions={<>
+            {confirmDelete ? <><span className="small">Delete this routine?</span><button type="button" className="button danger-ghost small" onClick={remove}>Delete</button><button type="button" className="link-button" onClick={() => setConfirmDelete(false)}>Keep</button></>
+              : <button type="button" className="icon-button ghost" title="Delete" aria-label="Delete routine" onClick={() => setConfirmDelete(true)}><Trash2 size={15} /></button>}
+            <button type="button" className="button secondary small" onClick={() => setEditing(routine)}><Pencil size={13} />Edit</button>
             <button type="button" className="button primary small" onClick={runNow}><Play size={13} />Run now</button>
-            <button type="button" className="icon-button ghost" title="Delete" onClick={remove}><Trash2 size={15} /></button>
-          </div>
-        </header>
-        {routine.paused_reason && <div className="callout warning"><CircleAlert size={15} />{routine.paused_reason}</div>}
+          </>} />
+        {routine.paused_reason && <div className="callout warning"><CircleAlert size={15} /><span>{routine.paused_reason}</span></div>}
         {routine.retry_at && <div className="callout">A retry is scheduled {relativeTime(routine.retry_at)}.</div>}
+        <div className="stat-row">
+          <div className="stat"><small>Status</small><strong><span className={`chip ${routineStatus(routine).tone}`}>{routineStatus(routine).label.startsWith("Next") ? "On" : routineStatus(routine).label}</span></strong></div>
+          <div className="stat"><small>Next run</small><strong>{isActive(routine) && routine.next_run_at ? when(routine.next_run_at) : "—"}</strong></div>
+          <div className="stat"><small>Last run</small><strong>{routine.last_run_at ? when(routine.last_run_at) : "Not yet"}</strong></div>
+          <div className="stat"><small>Bot</small><strong>{bot ? <><Avatar bot={bot} size={20} />{bot.name}</> : "—"}</strong></div>
+        </div>
         <div className="card"><h3 className="section-title">Instructions</h3><p className="pre">{routine.prompt}</p></div>
         <div className="card">
-          <div className="row between"><h3 className="section-title">History</h3>{routine.conversation_id && <button type="button" className="link-button" onClick={() => onOpenConversation(routine.conversation_id)}>Open conversation</button>}</div>
-          {runs.length === 0 ? <p className="muted">No runs yet.</p> : <table className="history">
+          <div className="row between"><h3 className="section-title">History</h3>{routine.conversation_id && <button type="button" className="button secondary small" onClick={() => onOpenConversation(routine.conversation_id)}><MessagesSquare size={13} />Open conversation</button>}</div>
+          {runs.length === 0 ? <p className="muted small">No runs yet. Use Run now to try it.</p> : <table className="history">
             <thead><tr><th>Scheduled</th><th>Status</th><th>Attempt</th><th>Details</th></tr></thead>
             <tbody>{runs.map(run => <tr key={run.id}>
-              <td className="nowrap">{new Date(run.scheduled_for).toLocaleString(undefined, { weekday: "short", day: "numeric", month: "short", hour: "2-digit", minute: "2-digit" })}</td>
+              <td className="nowrap">{when(run.scheduled_for)}</td>
               <td><span className={`status-pill ${run.status}`}>{statusLabels[run.status] || run.status}</span></td>
               <td>{run.attempt}</td>
               <td className="muted small" title={run.error || undefined}>{run.error ? runError(run.error) : run.finished_at ? `Finished ${relativeTime(run.finished_at)}` : ""}</td>
             </tr>)}</tbody>
           </table>}
         </div>
+      </div> : <>
+        <PageHeader title={filter === "all" ? "Routines" : filter === "active" ? "Active routines" : "Paused or off"} description={`Have a bot do something on a schedule, like a morning briefing or a weekly report. ${note}`}
+          actions={<button type="button" className="button primary small" disabled={!bots.length} onClick={() => create()}><Plus size={14} />New routine</button>} />
+        {!loaded ? null : shown.length > 0 ? <div className="gallery-grid">{shown.map(card)}</div>
+          : <div className="gallery-empty"><AlarmClock size={22} /><strong>{filter === "all" ? "No routines yet" : filter === "active" ? "No active routines" : "Nothing paused or off"}</strong>
+            {filter === "all" && <span className="muted small">Create one, or start from a template below.</span>}</div>}
+        {filter === "all" && templates}
       </>}
     </section>
     {editing && <RoutineEditor initial={editing} bots={bots} onClose={() => setEditing(null)} onSaved={() => { setEditing(null); void load(); }} />}

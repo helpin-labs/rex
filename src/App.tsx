@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useRef, useState } from "react";
-import { AlarmClock, BookOpen, LoaderCircle, MessagesSquare, Plus, Settings as SettingsIcon } from "lucide-react";
+import { AlarmClock, Blocks, BookOpen, LoaderCircle, MessagesSquare, Plus } from "lucide-react";
 import { api } from "./api";
 import { useAttention, waitingConversations } from "./attention";
 import { BotEditor, newBot } from "./BotEditor";
@@ -13,14 +13,16 @@ import { SkillsView } from "./SkillsView";
 import type { Bot, Conversation, Settings, Status } from "./types";
 import { Avatar, Empty, errorMessage, relativeTime } from "./ui";
 import { AppLogo } from "./AppLogo";
+import { AppsView } from "./AppsView";
+import { ProfileMenu } from "./ProfileMenu";
 
 // Each bot has one ongoing conversation, so the sidebar lists bots with
 // their latest message, newest first, and opening a bot opens its thread.
 
 // Memory lives in each bot's conversation (the memory panel), so there is
 // no separate Memory page.
-type View = { kind: "bot"; botId: string } | { kind: "routines" } | { kind: "skills" } | { kind: "settings" };
-const viewKinds = ["bot", "routines", "skills", "settings"];
+type View = { kind: "bot"; botId: string } | { kind: "routines" } | { kind: "skills" } | { kind: "apps" } | { kind: "settings" };
+const viewKinds = ["bot", "routines", "skills", "apps", "settings"];
 
 function loadView(): View | null {
   try { const raw = localStorage.getItem("rex.view"); const view = raw ? JSON.parse(raw) as View : null; return view && viewKinds.includes(view.kind) ? view : null; } catch { return null; }
@@ -152,9 +154,9 @@ export default function App() {
         {tab("bot", "Bots", <MessagesSquare size={18} />)}
         {tab("routines", "Routines", <AlarmClock size={18} />)}
         {tab("skills", "Skills", <BookOpen size={18} />)}
-        {tab("settings", "Settings", <SettingsIcon size={18} />)}
         <span className="spacer" />
-        <span className={`engine-dot ${status?.runtime_ready ? "ready" : ""}`} title={status?.runtime_ready ? "Bot engine running" : "Bot engine starting"} />
+        {tab("apps", "Connect apps", <Blocks size={18} />)}
+        <ProfileMenu status={status} active={view?.kind === "settings"} onSettings={() => setView({ kind: "settings" })} onApps={() => setView({ kind: "apps" })} />
       </footer>
     </nav>
 
@@ -166,6 +168,7 @@ export default function App() {
     </main>}
     {view?.kind === "routines" && <main className="main wide"><RoutinesView bots={bots} onOpenConversation={async id => { await refreshThreads(); await openConversation(id); }} /></main>}
     {view?.kind === "skills" && <main className="main wide"><SkillsView bots={bots} workspaceRoot={status?.workspace_root || "~/Rex"} onBotsChanged={() => void refreshBots()} /></main>}
+    {view?.kind === "apps" && <main className="main wide"><AppsView bots={bots} onBotsChanged={() => void refreshBots()} /></main>}
     {view?.kind === "settings" && <main className="main wide"><SettingsView status={status} onSaved={saved => { setSettings(saved); void refreshStatus(); }} /></main>}
 
     {naming && <NewBotDialog onCreate={createBot} onClose={() => setNaming(false)} onManual={(name, color) => { setNaming(false); setEditing({ ...newBot(settings), name, color }); }} />}

@@ -47,6 +47,8 @@ export type Status = {
   web_search?: boolean;
   // True when bots browse in Kernel's cloud, which can't be taken over.
   cloud_browsers?: boolean;
+  // The Mac account's name, for the profile button.
+  user_name?: string;
 };
 
 export type ProviderConfig = { base_url: string; configured: boolean; api_key?: string; clear_key?: boolean };

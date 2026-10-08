@@ -1,11 +1,9 @@
 import { useEffect, useMemo, useState } from "react";
-import { Download, ExternalLink, FileCode2, FileText, RefreshCw, Search, Star, Trash2 } from "lucide-react";
+import { Download, ExternalLink, FileCode2, FileText, RefreshCw, Star, Trash2 } from "lucide-react";
 import { api } from "./api";
-import { AppLogo } from "./AppLogo";
-import { BotFace } from "./BotFace";
 import { parseSkillDoc } from "./skillDoc";
 import type { Bot, CatalogSkill, Skill, SkillSource } from "./types";
-import { Markdown, Toggle, errorMessage, openExternal, relativeTime } from "./ui";
+import { Avatar, Markdown, PageHeader, Toggle, errorMessage, openExternal, relativeTime } from "./ui";
 
 // Browsing the skill catalog: curated GitHub collections Rex indexes. The
 // list shows what matches a search; the detail shows a skill's SKILL.md,
@@ -13,32 +11,12 @@ import { Markdown, Toggle, errorMessage, openExternal, relativeTime } from "./ui
 
 // Catalog descriptions mostly start with the same words; the list shows
 // what each skill is for.
-function gist(description: string): string {
+export function gist(description: string): string {
   const rest = description.replace(/^(use (this skill )?)?when (the )?user (wants|asks|needs)( help)?( to| with| for)?\s+/i, "");
   return rest.charAt(0).toUpperCase() + rest.slice(1);
 }
 
-export function CatalogList({ results, query, onQuery, selected, onSelect, loading, sourcesOn, onSources }: {
-  results: CatalogSkill[]; query: string; onQuery: (value: string) => void; selected: string | null; onSelect: (item: CatalogSkill) => void;
-  loading: boolean; sourcesOn: number; onSources: () => void;
-}) {
-  return <>
-    <div className="catalog-search">
-      <Search size={14} />
-      <input value={query} onChange={event => onQuery(event.target.value)} placeholder="Search, e.g. pdf, seo, cold email" aria-label="Search skills" />
-    </div>
-    <button type="button" className={`catalog-sources-link ${selected === null ? "active" : ""}`} onClick={onSources}>{sourcesOn} source{sourcesOn === 1 ? "" : "s"} on · manage</button>
-    <nav className="list skill-list">
-      {results.map(item => <button type="button" key={item.id} className={`list-item ${selected === item.id ? "selected" : ""}`} onClick={() => onSelect(item)}>
-        <span className="list-icon">{item.installed ? <Download size={15} /> : <FileText size={15} />}</span>
-        <span className="list-text" title={`${item.description}\n\n${item.repo}`}><strong>{item.name}</strong><small>{item.installed ? "Installed · " : ""}{item.description ? gist(item.description) : item.repo}</small></span>
-      </button>)}
-      {!loading && results.length === 0 && <p className="muted small skill-list-empty">{sourcesOn === 0 ? "Turn on a source to browse its skills." : query ? "No skills match." : "Sources are being read; this takes a moment the first time."}</p>}
-    </nav>
-  </>;
-}
-
-export function CatalogDetail({ item, bots, onInstalled }: { item: CatalogSkill; bots: Bot[]; onInstalled: (skill: Skill) => void }) {
+export function CatalogDetail({ item, bots, onBack, onInstalled }: { item: CatalogSkill; bots: Bot[]; onBack: () => void; onInstalled: (skill: Skill) => void }) {
   const [content, setContent] = useState<string | null>(null);
   const [error, setError] = useState("");
   const [busy, setBusy] = useState(false);
@@ -56,6 +34,7 @@ export function CatalogDetail({ item, bots, onInstalled }: { item: CatalogSkill;
   return <div className="skill-editor">
     <header className="skill-header">
       <div className="skill-header-text">
+        <button type="button" className="back-link" onClick={onBack}>← Browse skills</button>
         <h1 className="catalog-title">{doc?.title || item.name}</h1>
         <small className="muted"><button type="button" className="link-button" onClick={() => openExternal(item.url)}>{item.repo}/{item.dir} <ExternalLink size={11} /></button> · {item.commit.slice(0, 7)}</small>
       </div>
@@ -73,13 +52,11 @@ export function CatalogDetail({ item, bots, onInstalled }: { item: CatalogSkill;
     </div>
     {!item.installed && <div className="skill-section">
       <span className="field-label">Turn it on for</span>
-      <div className="skill-bots">
-        <label className={`skill-bot ${forBot === "" ? "on" : ""}`}><input type="radio" name="install-for" checked={forBot === ""} onChange={() => setForBot("")} /><span>No bot yet</span></label>
-        {selectable.map(bot => <label key={bot.id} className={`skill-bot ${forBot === bot.id ? "on" : ""}`}>
-          <input type="radio" name="install-for" checked={forBot === bot.id} onChange={() => setForBot(bot.id)} />
-          {bot.role === "main" ? <AppLogo size={22} /> : <BotFace icon={bot.emoji} color={bot.color} seed={bot.id} size={22} />}
-          <span>{bot.name}</span>
-        </label>)}
+      <div className="bot-picker" role="radiogroup">
+        <button type="button" role="radio" aria-checked={forBot === ""} className={`bot-chip ${forBot === "" ? "on" : ""}`} onClick={() => setForBot("")}><span>No bot yet</span></button>
+        {selectable.map(bot => <button type="button" role="radio" aria-checked={forBot === bot.id} key={bot.id} className={`bot-chip ${forBot === bot.id ? "on" : ""}`} onClick={() => setForBot(bot.id)}>
+          <Avatar bot={bot} size={20} /><span>{bot.name}</span>
+        </button>)}
       </div>
       <span className="field-hint">Installing copies the skill into your skills folder at this exact version. You can turn it on for more bots later.</span>
     </div>}
@@ -102,9 +79,8 @@ export function SourcesPanel({ sources, onChanged }: { sources: SkillSource[]; o
     setBusy(id); setError("");
     try { await work(); onChanged(); } catch (caught) { setError(errorMessage(caught)); onChanged(); } finally { setBusy(""); }
   };
-  return <div className="skill-editor">
-    <header className="skill-header"><div className="skill-header-text"><h1 className="catalog-title">Skill sources</h1>
-      <small className="muted plain">GitHub collections Rex searches for skills. Rex reads their skill names and descriptions; nothing is installed until you choose to.</small></div></header>
+  return <div className="detail-page">
+    <PageHeader title="Sources" description="GitHub collections Rex searches for skills. Rex reads their skill names and descriptions; nothing is installed until you choose to." />
     {error && <div className="inline-error">{error}</div>}
     <div className="source-list">
       {sources.map(source => <div key={source.id} className={`source-row ${source.enabled ? "" : "off"}`}>
