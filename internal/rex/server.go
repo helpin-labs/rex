@@ -10,10 +10,12 @@ import (
 	"net/http"
 	"os"
 	"os/exec"
+	"os/user"
 	"path/filepath"
 	"sort"
 	"strconv"
 	"strings"
+	"sync"
 	"time"
 	"unicode/utf8"
 )
@@ -92,6 +94,7 @@ func (h *Host) Handler() http.Handler {
 	api.HandleFunc("DELETE /api/conversations/{id}", h.deleteConversation)
 	api.HandleFunc("POST /api/conversations/{id}/messages", h.sendMessage)
 	api.HandleFunc("POST /api/conversations/{id}/fresh", h.startFresh)
+	api.HandleFunc("POST /api/conversations/{id}/turns/{turn}/edit", h.editMessage)
 
 	api.HandleFunc("POST /api/runs/{run_id}/interactions/{interaction_id}", h.respondInteraction)
 	api.HandleFunc("GET /api/runs/{run_id}/events", h.streamRunEvents)
@@ -195,8 +198,19 @@ func (h *Host) status(w http.ResponseWriter, r *http.Request) {
 		"memory":    map[string]any{"available": h.Memory.Available(), "status": h.Memory.Status()},
 		"onboarded": settings.Onboarded, "active_runs": h.ActiveRuns(), "write_tools": h.WriteTools(),
 		"web_search": settings.WebSearchReady(), "cloud_browsers": settings.CloudBrowsers(),
+		"user_name": accountName(),
 	})
 }
+
+// accountName is the Mac account's full name (or login name), shown on the
+// profile button.
+var accountName = sync.OnceValue(func() string {
+	account, err := user.Current()
+	if err != nil {
+		return ""
+	}
+	return firstNonEmpty(strings.TrimSpace(account.Name), account.Username)
+})
 
 func (h *Host) getSettings(w http.ResponseWriter, r *http.Request) {
 	settings, err := h.Settings.Get(r.Context())
@@ -580,6 +594,27 @@ func (h *Host) sendMessage(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	run, turn, err := h.SendMessage(r.Context(), r.PathValue("id"), input.Content)
+	if err != nil {
+		status := http.StatusBadRequest
+		if errors.Is(err, ErrBusy) {
+			status = http.StatusConflict
+		} else if errors.Is(err, ErrNotFound) {
+			status = http.StatusNotFound
+		}
+		writeError(w, status, err)
+		return
+	}
+	writeJSON(w, http.StatusAccepted, map[string]any{"run": run, "turn": turn})
+}
+
+func (h *Host) editMessage(w http.ResponseWriter, r *http.Request) {
+	var input struct {
+		Content string `json:"content"`
+	}
+	if !decode(w, r, &input) {
+		return
+	}
+	run, turn, err := h.EditLastMessage(r.Context(), r.PathValue("id"), r.PathValue("turn"), input.Content)
 	if err != nil {
 		status := http.StatusBadRequest
 		if errors.Is(err, ErrBusy) {

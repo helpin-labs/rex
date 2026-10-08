@@ -1,11 +1,14 @@
-import { useCallback, useEffect, useRef, useState } from "react";
+import { type ReactNode, useCallback, useEffect, useRef, useState } from "react";
 import { Select } from "./Select";
-import { Check, CircleAlert, Copy, ExternalLink, FolderOpen, LoaderCircle, Plug, Plus, RefreshCw, Trash2 } from "lucide-react";
+import { Bell, Check, CircleAlert, Copy, ExternalLink, FolderOpen, Globe, LoaderCircle, Palette, ShieldCheck } from "lucide-react";
 import { api } from "./api";
 import { SideList } from "./SideList";
-import type { ChatGPTStatus, MCPConnection, ModelInfo, Provider, ProviderTest, Settings, Status } from "./types";
-import { Field, Modal, Toggle, errorMessage, openExternal, signInToConnection } from "./ui";
+import type { ChatGPTStatus, ModelInfo, Provider, ProviderTest, Settings, Status } from "./types";
+import { Field, PageHeader, TileMark, Toggle, errorMessage, openExternal } from "./ui";
 import { type Theme, loadTheme, saveTheme } from "./theme";
+import { siAnthropic, siBrave, siLmstudio, siOpenrouter } from "simple-icons";
+import { AppMark } from "./AppsView";
+import { ModelPicker, ProviderPicker } from "./ModelPicker";
 
 // Web search providers, in the order the bot engine tries them.
 const searchProviders: { key: "tinyfish" | "exa" | "brave"; label: string; placeholder: string; hint: string }[] = [
@@ -68,9 +71,8 @@ function ChatGPTCard({ initial, onChange }: { initial?: ChatGPTStatus; onChange:
     if (!pending) return;
     try { await navigator.clipboard.writeText(pending.user_code); setCopied(true); window.setTimeout(() => setCopied(false), 1200); } catch { /* clipboard unavailable */ }
   };
-  return <div className="card">
-    <div className="row between"><h3 className="section-title">ChatGPT subscription</h3>{status.connected && <span className="badge ok-badge">Signed in</span>}</div>
-    <p className="muted small">Run bots on your ChatGPT Plus or Pro plan instead of an API key. Usage counts toward your plan's limits. The sign-in is kept in your macOS Keychain.</p>
+  return <div className="card provider-card">
+    <ProviderHead logo={providerLogos.chatgpt} title="ChatGPT subscription" note="Run bots on your ChatGPT Plus or Pro plan instead of an API key. Usage counts toward your plan's limits." status={status.connected ? <span className="chip ok">Signed in</span> : pending ? <span className="chip warn">Waiting for approval</span> : <span className="chip">Not signed in</span>} />
     {error && <div className="inline-error">{error}</div>}
     {pending ? <div className="device-code">
       <p className="small">Enter this code on ChatGPT's sign-in page. Rex continues by itself once you approve it.</p>
@@ -87,12 +89,43 @@ function ChatGPTCard({ initial, onChange }: { initial?: ChatGPTStatus; onChange:
   </div>;
 }
 
+const logo = (name: string, icon?: { path: string; hex: string }, color = "#1f2125") => ({ name, icon: icon && { path: icon.path, hex: icon.hex }, color });
+const providerLogos = {
+  local: logo("LM Studio", siLmstudio, "#4338CA"),
+  anthropic: logo("Anthropic", siAnthropic, "#191919"),
+  openai: logo("OpenAI", undefined, "#0D0D0D"),
+  openrouter: logo("OpenRouter", siOpenrouter, "#6566F1"),
+  chatgpt: logo("ChatGPT", undefined, "#10A37F"),
+  brave: logo("Brave", siBrave, "#FB542B"),
+  exa: logo("Exa", undefined, "#1F40ED"),
+  tinyfish: logo("TinyFish", undefined, "#0EA5E9"),
+};
+
+// ProviderHead is a provider card's first row: logo, name, what it is for,
+// and whether it is set up.
+function ProviderHead({ logo: mark, title, note, status }: { logo: { name: string; icon?: { path: string; hex: string }; color: string }; title: string; note?: ReactNode; status?: ReactNode }) {
+  return <div className="provider-head">
+    <AppMark app={mark} size={36} />
+    <div className="grow"><strong>{title}</strong>{note && <small className="muted">{note}</small>}</div>
+    {status}
+  </div>;
+}
+
+const keyChip = (configured: boolean) => configured ? <span className="chip ok"><Check size={11} />Key stored</span> : <span className="chip">Not set</span>;
+
+// Comparing for unsaved changes ignores the ChatGPT sign-in, which saves
+// itself.
+const comparable = (settings: Settings | null) => settings ? JSON.stringify({ ...settings, chatgpt: undefined }) : "";
+
 export function useModels(provider: string, refresh = 0) {
   const [models, setModels] = useState<ModelInfo[]>([]);
   const [error, setError] = useState("");
   useEffect(() => {
+    // A slower answer for a provider no longer chosen must not win.
+    let current = true;
     setError("");
-    api.models(provider).then(setModels).catch(caught => { setModels([]); setError(errorMessage(caught)); });
+    api.models(provider).then(list => { if (current) setModels(list); }).catch(caught => { if (current) { setModels([]); setError(errorMessage(caught)); } });
+    return () => { current = false; };
   }, [provider, refresh]);
   return { models, error };
 }
@@ -102,176 +135,122 @@ function TestResult({ result }: { result: ProviderTest | null }) {
   return <div className={`test-result ${result.ok ? "ok" : "bad"}`}>{result.ok ? <Check size={14} /> : <CircleAlert size={14} />}<span>{result.message}</span></div>;
 }
 
-function ConnectionEditor({ initial, onClose, onSaved }: { initial: Partial<MCPConnection>; onClose: () => void; onSaved: () => void }) {
-  const [connection, setConnection] = useState<Partial<MCPConnection>>(initial);
-  const [busy, setBusy] = useState(false);
-  const [error, setError] = useState("");
-  const save = async (close: boolean) => {
-    setBusy(true); setError("");
-    try {
-      const saved = await api.saveConnection(connection);
-      setConnection(saved);
-      if (close) onSaved();
-    } catch (caught) { setError(errorMessage(caught)); } finally { setBusy(false); }
-  };
-  // Sign-in happens in the browser; the connection refreshes until it
-  // reports signed in.
-  const [waiting, setWaiting] = useState(false);
-  useEffect(() => {
-    if (!waiting || !connection.id) return;
-    const timer = window.setInterval(async () => {
-      const list = await api.connections().catch(() => []);
-      const current = list.find(item => item.id === connection.id);
-      if (current?.signed_in) { setConnection(current); setWaiting(false); }
-    }, 1500);
-    const stop = window.setTimeout(() => setWaiting(false), 10 * 60 * 1000);
-    return () => { window.clearInterval(timer); window.clearTimeout(stop); };
-  }, [waiting, connection.id]);
-  const signIn = async () => {
-    setBusy(true); setError("");
-    try {
-      const saved = connection.id ? connection : await api.saveConnection(connection);
-      setConnection(saved);
-      await signInToConnection(saved.id!);
-      setWaiting(true);
-    } catch (caught) { setError(errorMessage(caught)); } finally { setBusy(false); }
-  };
-  const signOut = async () => {
-    try { await api.signOut(connection.id!); setConnection({ ...connection, signed_in: false }); } catch (caught) { setError(errorMessage(caught)); }
-  };
-  const tool = (name: string, patch: Partial<MCPConnection["tools"][number]>) => setConnection(current => ({ ...current, tools: (current.tools || []).map(item => item.name === name ? { ...item, ...patch } : item) }));
-  return <Modal title={connection.id ? connection.name || "Connection" : "Add a connection"} subtitle="MCP server" onClose={onClose} wide
-    footer={<><span className="spacer" /><button type="button" className="button secondary" onClick={onClose}>Close</button><button type="button" className="button primary" disabled={busy} onClick={() => save(true)}>{busy ? "Connecting…" : "Save"}</button></>}>
-    {error && <div className="inline-error">{error}</div>}
-    {waiting && <div className="callout">Finish signing in in your browser. This updates by itself when you're done.</div>}
-    <div className="two-col">
-      <Field label="Name"><input value={connection.name || ""} onChange={event => setConnection({ ...connection, name: event.target.value })} placeholder="notion" /></Field>
-      <Field label="Server URL" hint="Streamable HTTP endpoint"><input value={connection.url || ""} onChange={event => setConnection({ ...connection, url: event.target.value })} placeholder="https://mcp.example.com/mcp" /></Field>
-    </div>
-    <div className="two-col">
-      <Field label="Authentication"><Select value={connection.auth || "none"} onChange={value => setConnection({ ...connection, auth: value as MCPConnection["auth"] })}><option value="none">None</option><option value="oauth">Sign in (OAuth)</option><option value="bearer">Bearer token</option></Select></Field>
-      {connection.auth === "oauth" && <Field label="Account" hint="You sign in on the provider's page in your browser. Rex keeps the sign-in in your macOS Keychain and renews it automatically.">
-        <div className="row">
-          {connection.signed_in ? <span className="badge ok-badge">Signed in</span> : <span className="muted small">Not signed in</span>}
-          <span className="spacer" />
-          {connection.signed_in && <button type="button" className="link-button" onClick={signOut}>Sign out</button>}
-          <button type="button" className="button secondary small" disabled={busy || !connection.url || !connection.name} onClick={signIn}>{connection.signed_in ? "Sign in again" : "Sign in"}</button>
-        </div>
-      </Field>}
-      {connection.auth === "bearer" && <Field label="Token" hint={connection.has_token ? "A token is stored in your Keychain. Enter a new one to replace it." : "Stored in your macOS Keychain"}><input type="password" value={connection.token || ""} onChange={event => setConnection({ ...connection, token: event.target.value })} placeholder={connection.has_token ? "••••••••" : "token"} /></Field>}
-    </div>
-    <div className="row"><button type="button" className="button secondary small" disabled={busy || !connection.url} onClick={() => save(false)}><RefreshCw size={13} />{connection.id ? "Refresh tools" : "Connect and list tools"}</button>{connection.status && <span className="muted small">{connection.status}</span>}</div>
-    {!!connection.tools?.length && <><h3 className="section-title">Tools</h3><p className="muted small">Write tools ask for approval on bots set to “Ask for risky actions”.</p>
-      <ul className="tool-table">{connection.tools.map(item => <li key={item.name}>
-        <label className="check"><input type="checkbox" checked={item.enabled} onChange={event => tool(item.name, { enabled: event.target.checked })} /><span><strong>{item.name}</strong><small>{item.description}</small></span></label>
-        <Select value={item.access} onChange={value => tool(item.name, { access: value as "read" | "write" })}><option value="read">Read</option><option value="write">Write</option></Select>
-      </li>)}</ul></>}
-  </Modal>;
-}
-
-export function SettingsView({ status, onSaved }: { status: Status | null; onSaved: (settings: Settings) => void }) {
+export function SettingsView({ status, initialTab, onSaved }: { status: Status | null; initialTab?: "models" | "tools" | "memory" | "about"; onSaved: (settings: Settings) => void }) {
   const [settings, setSettings] = useState<Settings | null>(null);
-  const [tab, setTab] = useState<"models" | "memory" | "connections" | "about">("models");
+  const [savedSettings, setSavedSettings] = useState<Settings | null>(null);
+  const [tab, setTab] = useState<"models" | "tools" | "memory" | "about">(initialTab || "models");
   const [refresh, setRefresh] = useState(0);
   const local = useModels("local", refresh);
+  const defaultModels = useModels(settings?.default_provider || "local", refresh);
   const [test, setTest] = useState<ProviderTest | null>(null);
   const [testing, setTesting] = useState(false);
   const [saving, setSaving] = useState(false);
   const [message, setMessage] = useState("");
   const [error, setError] = useState("");
-  const [connections, setConnections] = useState<MCPConnection[]>([]);
-  const [editing, setEditing] = useState<Partial<MCPConnection> | null>(null);
   const [browsers, setBrowsers] = useState<{ name: string; path: string }[]>([]);
   const [theme, setTheme] = useState<Theme>(loadTheme);
   useEffect(() => { api.browsers().then(setBrowsers).catch(() => undefined); }, []);
 
-  useEffect(() => { api.settings().then(setSettings).catch(caught => setError(errorMessage(caught))); }, []);
-  const loadConnections = useCallback(() => api.connections().then(setConnections).catch(() => undefined), []);
-  useEffect(() => { void loadConnections(); }, [loadConnections]);
+  useEffect(() => { api.settings().then(loaded => { setSettings(loaded); setSavedSettings(loaded); }).catch(caught => setError(errorMessage(caught))); }, []);
   if (!settings) return <div className="page"><div className="page-content"><LoaderCircle className="spin" /></div></div>;
 
-  const update = (patch: Partial<Settings>) => setSettings({ ...settings, ...patch });
+  const dirty = comparable(settings) !== comparable(savedSettings);
+  const update = (patch: Partial<Settings>) => { setSettings({ ...settings, ...patch }); setMessage(""); };
   const save = async () => {
     setSaving(true); setError(""); setMessage("");
     try {
       const saved = await api.saveSettings(settings);
-      setSettings(saved); onSaved(saved); setRefresh(value => value + 1);
+      setSettings(saved); setSavedSettings(saved); onSaved(saved); setRefresh(value => value + 1);
       setMessage("Saved. The bot engine restarts in the background if needed.");
     } catch (caught) { setError(errorMessage(caught)); } finally { setSaving(false); }
   };
+  const discard = () => { setSettings(savedSettings); setError(""); };
   const runTest = async () => {
     setTesting(true); setTest(null);
     try {
-      await api.saveSettings(settings);
+      const saved = await api.saveSettings(settings);
+      setSettings(saved); setSavedSettings(saved);
       setTest(await api.testProvider("local", settings.default_provider === "local" ? settings.default_model : ""));
       setRefresh(value => value + 1);
     } catch (caught) { setError(errorMessage(caught)); } finally { setTesting(false); }
   };
   const chatModels = local.models.filter(model => !model.embedding);
   const embeddingModels = local.models.filter(model => model.embedding);
+  const tabs = [["models", "Models"], ["tools", "Tools"], ["memory", "Memory"], ["about", "General"]] as const;
+  const searchOn = searchProviders.some(item => settings[item.key]?.configured);
+  const keyField = (key: "anthropic" | "openai" | "openrouter" | "tinyfish" | "exa" | "brave", placeholder: string, hint?: ReactNode, label = "API key") => {
+    const config = settings[key] || { base_url: "", configured: false };
+    return <Field label={label} hint={config.configured ? <span className="row">Stored in your macOS Keychain. <button type="button" className="link-button" onClick={() => update({ [key]: { ...config, clear_key: true, api_key: "" } } as Partial<Settings>)}>Remove</button></span> : hint || "Stored in your macOS Keychain"}>
+      <input type="password" placeholder={config.configured ? "••••••••" : placeholder} value={config.api_key || ""} onChange={event => update({ [key]: { ...config, api_key: event.target.value, clear_key: false } } as Partial<Settings>)} />
+    </Field>;
+  };
 
   return <div className="page">
     <SideList>
-      <header className="page-list-header"><h2>Settings</h2><small className="subtitle">Models, memory and connections</small></header>
+      <header className="page-list-header"><h2>Settings</h2><small className="subtitle">Models, tools, memory and appearance</small></header>
       <nav className="list">
-        {(["models", "memory", "connections", "about"] as const).map(item => <button type="button" key={item} className={`list-item compact ${tab === item ? "selected" : ""}`} onClick={() => setTab(item)}>
-          <span className="list-text"><strong>{item === "models" ? "Models" : item === "memory" ? "Memory" : item === "connections" ? "Connections" : "General"}</strong></span></button>)}
+        {tabs.map(([item, label]) => <button type="button" key={item} className={`list-item compact ${tab === item ? "selected" : ""}`} onClick={() => setTab(item)}>
+          <span className="list-text"><strong>{label}</strong></span></button>)}
       </nav>
     </SideList>
-    <section className="page-content narrow">
-      {error && <div className="inline-error">{error}</div>}
-      {message && <div className="inline-ok"><Check size={14} />{message}</div>}
+    <section className="page-content narrow settings-page">
+      {error && <div className="inline-error"><CircleAlert size={14} /><span>{error}</span></div>}
+      {message && !dirty && <div className="inline-ok"><Check size={14} />{message}</div>}
+
       {tab === "models" && <>
-        <h1>Models</h1>
-        <div className="card">
-          <h3 className="section-title">Local model server</h3>
-          <p className="muted small">LM Studio, Ollama or any OpenAI-compatible server on this Mac. Nothing leaves your computer.</p>
-          <Field label="Server URL" hint="LM Studio: http://127.0.0.1:1234/v1 · Ollama: http://127.0.0.1:11434/v1">
-            <input value={settings.local.base_url} onChange={event => update({ local: { ...settings.local, base_url: event.target.value } })} />
-          </Field>
-          <Field label="API key (optional)" hint={settings.local.configured ? "A key is stored in your Keychain." : undefined}>
-            <input type="password" value={settings.local.api_key || ""} placeholder={settings.local.configured ? "••••••••" : "none"} onChange={event => update({ local: { ...settings.local, api_key: event.target.value } })} />
-          </Field>
-          <div className="row"><button type="button" className="button secondary small" onClick={runTest} disabled={testing}>{testing ? <><LoaderCircle className="spin" size={13} />Testing (this can take a minute)…</> : "Test connection"}</button>
-            <span className="muted small">{local.error ? local.error : `${chatModels.length} chat models found`}</span></div>
-          <TestResult result={test} />
-        </div>
-        <div className="card">
-          <h3 className="section-title">Hosted providers</h3>
-          <p className="muted small">Keys are stored in your macOS Keychain and never shown again.</p>
-          {hosted.map(item => <Field key={item.key} label={item.label} hint={settings[item.key].configured ? <span className="row">Key stored. <button type="button" className="link-button" onClick={() => update({ [item.key]: { ...settings[item.key], clear_key: true } } as Partial<Settings>)}>Remove</button></span> : undefined}>
-            <input type="password" placeholder={settings[item.key].configured ? "••••••••" : item.placeholder} value={settings[item.key].api_key || ""} onChange={event => update({ [item.key]: { ...settings[item.key], api_key: event.target.value, clear_key: false } } as Partial<Settings>)} />
-          </Field>)}
-        </div>
-        <ChatGPTCard initial={settings.chatgpt} onChange={chatgpt => update({ chatgpt })} />
-        <div className="card">
-          <h3 className="section-title">Web search</h3>
-          <p className="muted small">Lets bots with web access search the internet, not only read pages they already know. Add at least one key; if a provider fails, the next one is tried. Keys are stored in your macOS Keychain.</p>
-          {searchProviders.map(item => {
-            const config = settings[item.key] || { base_url: "", configured: false };
-            return <Field key={item.key} label={item.label} hint={config.configured ? <span className="row">Key stored. <button type="button" className="link-button" onClick={() => update({ [item.key]: { ...config, clear_key: true } } as Partial<Settings>)}>Remove</button></span> : item.hint}>
-              <input type="password" placeholder={config.configured ? "••••••••" : item.placeholder} value={config.api_key || ""} onChange={event => update({ [item.key]: { ...config, api_key: event.target.value, clear_key: false } } as Partial<Settings>)} />
-            </Field>;
-          })}
-          {!searchProviders.some(item => settings[item.key]?.configured) && <div className="callout">Search is off: bots can still open and read web pages, but they can't look things up.</div>}
-        </div>
-        <div className="card">
-          <h3 className="section-title">Command review (TypeSafe)</h3>
-          <p className="muted small">Bots set to “Ask for risky actions” never ask about reading, browsing, screenshots or memory. File edits and commands ask, unless TypeSafe's jev model reviews them and finds a routine local step. Reviews send the proposed command and recent conversation context to TypeSafe. Deletions, pushes, installs and network commands always ask.</p>
-          <Field label="TypeSafe API key" hint={settings.typesafe?.configured ? <span className="row">Key stored in your Keychain. <button type="button" className="link-button" onClick={() => update({ typesafe: { ...settings.typesafe, clear_key: true } })}>Remove</button></span> : "Stored in your macOS Keychain"}>
-            <input type="password" placeholder={settings.typesafe?.configured ? "••••••••" : "ts_…"} value={settings.typesafe?.api_key || ""} onChange={event => update({ typesafe: { ...(settings.typesafe || { base_url: "", configured: false }), api_key: event.target.value, clear_key: false } })} />
-          </Field>
-          <Toggle label="Let TypeSafe approve routine steps" description="Without this, TypeSafe only adds extra checks; you still approve every edit and command" checked={settings.typesafe_auto_approve} disabled={!settings.typesafe?.configured && !settings.typesafe?.api_key} onChange={typesafe_auto_approve => update({ typesafe_auto_approve })} />
-        </div>
+        <PageHeader title="Models" description="Where your bots' thinking happens: a model server on this Mac, your API keys, or your ChatGPT plan. Keys never leave your Keychain except to call the provider." />
         <div className="card">
           <h3 className="section-title">Default for new bots</h3>
+          <p className="muted small">Bots without their own model use this one too.</p>
+          <ProviderPicker value={settings.default_provider} onChange={provider => update({ default_provider: provider, default_model: "" })}
+            providers={[{ id: "local" as Provider }, ...hosted.map(item => ({ id: item.key as Provider, note: settings[item.key].configured ? undefined : "Add a key below" })),
+              { id: "chatgpt" as Provider, note: settings.chatgpt?.connected ? undefined : "Sign in below" }]} />
+          <ModelPicker value={settings.default_model} models={defaultModels.models} error={defaultModels.error} onChange={default_model => update({ default_model })} defaultLabel="The provider's default" />
+        </div>
+
+        <h3 className="gallery-section-title">Providers</h3>
+        <div className="card provider-card">
+          <ProviderHead logo={providerLogos.local} title="Local model server" note="LM Studio, Ollama or any OpenAI-compatible server on this Mac. Nothing leaves your computer."
+            status={local.error ? <span className="chip warn" title={local.error}>Not running</span> : <span className="chip ok">{chatModels.length} models</span>} />
           <div className="two-col">
-            <Field label="Provider"><Select value={settings.default_provider} onChange={value => update({ default_provider: value as Provider, default_model: "" })}>
-              <option value="local">Local model server</option>{hosted.map(item => <option key={item.key} value={item.key}>{item.label}</option>)}{settings.chatgpt?.connected && <option value="chatgpt">ChatGPT subscription</option>}</Select></Field>
-            <Field label="Model">{settings.default_provider === "local" && chatModels.length ? <Select value={settings.default_model} onChange={value => update({ default_model: value })}><option value="">Choose…</option>{chatModels.map(model => <option key={model.id}>{model.id}</option>)}</Select>
-              : <input value={settings.default_model} onChange={event => update({ default_model: event.target.value })} placeholder="provider default" />}</Field>
+            <Field label="Server URL" hint="LM Studio: http://127.0.0.1:1234/v1 · Ollama: http://127.0.0.1:11434/v1">
+              <input value={settings.local.base_url} onChange={event => update({ local: { ...settings.local, base_url: event.target.value } })} />
+            </Field>
+            <Field label="API key (optional)" hint={settings.local.configured ? "A key is stored in your Keychain." : undefined}>
+              <input type="password" value={settings.local.api_key || ""} placeholder={settings.local.configured ? "••••••••" : "none"} onChange={event => update({ local: { ...settings.local, api_key: event.target.value } })} />
+            </Field>
           </div>
-          <Toggle label="Allow bots to use a browser" description="Each bot gets its own browser profile, separate from yours" checked={settings.browser_enabled} onChange={browser_enabled => update({ browser_enabled })} />
+          {local.error && !test && <p className="muted small">Rex can't reach a model server at this address. Start LM Studio or Ollama, then test again.</p>}
+          <div className="row"><button type="button" className="button secondary small" onClick={runTest} disabled={testing}>{testing ? <><LoaderCircle className="spin" size={13} />Testing (this can take a minute)…</> : "Test connection"}</button></div>
+          <TestResult result={test} />
+        </div>
+        {hosted.map(item => <div className="card provider-card" key={item.key}>
+          <ProviderHead logo={providerLogos[item.key]} title={item.label} status={keyChip(settings[item.key].configured && !settings[item.key].clear_key)}
+            note={item.key === "anthropic" ? "Claude models, with your Anthropic API key." : item.key === "openai" ? "GPT models, with your OpenAI API key." : "Hundreds of models from many labs, with one key."} />
+          {keyField(item.key, item.placeholder)}
+        </div>)}
+        <ChatGPTCard initial={settings.chatgpt} onChange={chatgpt => update({ chatgpt })} />
+      </>}
+
+      {tab === "tools" && <>
+        <PageHeader title="Tools" description="What bots can use beyond their model: searching the web, a browser of their own, and a second opinion on risky steps." />
+        <div className="card">
+          <div className="provider-head"><TileMark seed="search" icon={<Globe size={18} />} size={36} /><div className="grow"><strong>Web search</strong><small className="muted">Lets bots look things up, not only read pages they already know. If a provider fails, the next one is tried.</small></div>
+            {searchOn ? <span className="chip ok">On</span> : <span className="chip warn">Off</span>}</div>
+          {searchProviders.map(item => {
+            const config = settings[item.key] || { base_url: "", configured: false };
+            return <div className="provider-row" key={item.key}>
+              <AppMark app={providerLogos[item.key]} size={28} />
+              <div className="grow">{keyField(item.key, item.placeholder, item.hint, item.label)}</div>
+              {config.configured && <span className="chip ok"><Check size={11} />Stored</span>}
+            </div>;
+          })}
+          {!searchOn && <div className="callout">Search is off: bots can still open and read web pages, but they can't look things up. Add at least one key.</div>}
+        </div>
+        <div className="card">
+          <div className="provider-head"><TileMark seed="browser" icon={<Globe size={18} />} size={36} /><div className="grow"><strong>Browser</strong><small className="muted">Each bot gets its own browser profile, separate from yours, so its logins persist.</small></div>
+            {settings.browser_enabled ? <span className="chip ok">On</span> : <span className="chip">Off</span>}</div>
+          <Toggle label="Allow bots to use a browser" checked={settings.browser_enabled} onChange={browser_enabled => update({ browser_enabled })} />
           {settings.browser_enabled && <>
             <Field label="Browser for bots" hint="Any installed Chromium-based browser works. Safari and Firefox can't be automated.">
               <Select value={settings.browser_path || ""} onChange={value => update({ browser_path: value })}>
@@ -289,13 +268,23 @@ export function SettingsView({ status, onSaved }: { status: Status | null; onSav
             </div>
           </>}
         </div>
-        <div className="row"><span className="spacer" /><button type="button" className="button primary" onClick={save} disabled={saving}>{saving ? "Saving…" : "Save"}</button></div>
-      </>}
-      {tab === "memory" && <>
-        <h1>Memory</h1>
-        <p className="muted">After each answer, Rex reads what you said and keeps durable facts, such as preferences, people and plans, in a local database. This happens in the background and never delays a reply. Before each new message, relevant memories are given to the bot.</p>
         <div className="card">
+          <div className="provider-head"><TileMark seed="review" icon={<ShieldCheck size={18} />} size={36} /><div className="grow"><strong>Command review (TypeSafe)</strong><small className="muted">A second opinion on file edits and commands, so routine local steps don't need your approval.</small></div>
+            {keyChip(!!settings.typesafe?.configured)}</div>
+          <p className="muted small">Bots set to “Ask for risky actions” never ask about reading, browsing, screenshots or memory. File edits and commands ask, unless TypeSafe's jev model reviews them and finds a routine local step. Reviews send the proposed command and recent conversation context to TypeSafe. Deletions, pushes, installs and network commands always ask.</p>
+          <Field label="TypeSafe API key" hint={settings.typesafe?.configured ? <span className="row">Key stored in your Keychain. <button type="button" className="link-button" onClick={() => update({ typesafe: { ...settings.typesafe, clear_key: true } })}>Remove</button></span> : "Stored in your macOS Keychain"}>
+            <input type="password" placeholder={settings.typesafe?.configured ? "••••••••" : "ts_…"} value={settings.typesafe?.api_key || ""} onChange={event => update({ typesafe: { ...(settings.typesafe || { base_url: "", configured: false }), api_key: event.target.value, clear_key: false } })} />
+          </Field>
+          <Toggle label="Let TypeSafe approve routine steps" description="Without this, TypeSafe only adds extra checks; you still approve every edit and command" checked={settings.typesafe_auto_approve} disabled={!settings.typesafe?.configured && !settings.typesafe?.api_key} onChange={typesafe_auto_approve => update({ typesafe_auto_approve })} />
+        </div>
+      </>}
+
+      {tab === "memory" && <>
+        <PageHeader title="Memory" description="After each answer, Rex keeps durable facts from what you said, such as preferences, people and plans, in a local database. It happens in the background and never delays a reply. Before each new message, relevant memories are given to the bot." />
+        <div className="card">
+          <div className="row between"><h3 className="section-title">Status</h3><span className={`chip ${status?.memory.status === "ready" ? "ok" : "warn"}`}>Memory is {status?.memory.status || "starting"}</span></div>
           <Toggle label="Remember things automatically" checked={settings.memory.enabled} onChange={enabled => update({ memory: { ...settings.memory, enabled } })} />
+          {settings.memory.enabled && settings.memory.provider === "local" && local.error && <div className="callout warning"><CircleAlert size={15} /><span>Memories are saved with the local model server, which isn't running. Start it, or run memory with OpenAI below.</span></div>}
           <Field label="Run memory with"><Select value={settings.memory.provider} onChange={value => update({ memory: { ...settings.memory, provider: value as "local" | "openai" } })}><option value="local">Local model server</option><option value="openai" disabled={!settings.openai.configured}>OpenAI{settings.openai.configured ? "" : " (add key first)"}</option></Select></Field>
           <div className="two-col">
             <Field label="Model for saving memories" hint="Each bot's memories are extracted by its own chat model, so your model server never has to swap models. Finding memories only uses the embedding model.">{settings.memory.provider === "local" && chatModels.length ? <Select value={settings.memory.extraction_model} onChange={value => update({ memory: { ...settings.memory, extraction_model: value } })}><option value="">Each bot's own chat model</option>{chatModels.map(model => <option key={model.id}>{model.id}</option>)}</Select>
@@ -310,40 +299,30 @@ export function SettingsView({ status, onSaved }: { status: Status | null; onSav
           {settings.memory.embedding_source === "server" && <Field label="Embedding model on the server">{settings.memory.provider === "local" && embeddingModels.length ? <Select value={settings.memory.embedding_model} onChange={value => update({ memory: { ...settings.memory, embedding_model: value } })}><option value="">Choose…</option>{embeddingModels.map(model => <option key={model.id}>{model.id}</option>)}</Select>
               : <input value={settings.memory.embedding_model} onChange={event => update({ memory: { ...settings.memory, embedding_model: event.target.value } })} placeholder="text-embedding-3-small" />}</Field>}
           <p className="muted small">Changing how memories are found rebuilds memory: the old database is kept as a backup and every remembered source is learned again in the background.</p>
-          <p className="muted small memory-status"><span className={`status-dot ${status?.memory.status === "ready" ? "ok" : ""}`} />Memory is {status?.memory.status || "starting"}</p>
         </div>
-        <div className="row"><span className="spacer" /><button type="button" className="button primary" onClick={save} disabled={saving}>{saving ? "Saving…" : "Save"}</button></div>
       </>}
-      {tab === "connections" && <>
-        <div className="row between"><h1>Connections</h1><button type="button" className="button primary small" onClick={() => setEditing({ auth: "none", tools: [] })}><Plus size={14} />Add connection</button></div>
-        <p className="muted">Connect MCP servers to give bots tools such as notes, calendars or project trackers. Choose which bots use each connection in the bot's settings.</p>
-        {connections.length === 0 ? <div className="card muted">No connections yet.</div> : connections.map(connection => <div className="card connection" key={connection.id}>
-          <Plug size={16} /><div className="grow"><strong>{connection.name}</strong><small className="muted">{connection.url}</small><small className="muted">{connection.status}</small></div>
-          <button type="button" className="button secondary small" onClick={() => setEditing(connection)}>Manage</button>
-          <button type="button" className="icon-button ghost" onClick={async () => { if (window.confirm(`Remove ${connection.name}?`)) { await api.deleteConnection(connection.id); void loadConnections(); } }}><Trash2 size={14} /></button>
-        </div>)}
-      </>}
+
       {tab === "about" && <>
-        <h1>General</h1>
+        <PageHeader title="General" description="How Rex looks and when it gets your attention." />
         <div className="card">
-          <h3 className="section-title">Appearance</h3>
+          <div className="provider-head"><TileMark seed="appearance" icon={<Palette size={18} />} size={36} /><div className="grow"><strong>Appearance</strong><small className="muted">Auto follows your Mac's light or dark setting.</small></div></div>
           <div className="segmented">
-            {(["system", "light", "dark"] as const).map(option => <button type="button" key={option} className={theme === option ? "active" : ""} onClick={() => { setTheme(option); saveTheme(option); }}>{option === "system" ? "System" : option === "light" ? "Light" : "Dark"}</button>)}
+            {(["system", "light", "dark"] as const).map(option => <button type="button" key={option} className={theme === option ? "active" : ""} onClick={() => { setTheme(option); saveTheme(option); }}>{option === "system" ? "Auto" : option === "light" ? "Light" : "Dark"}</button>)}
           </div>
-          <p className="muted small">System follows your Mac's light or dark setting.</p>
         </div>
         <div className="card">
-          <h3 className="section-title">Notifications</h3>
-          <Toggle label="Notify me when a bot needs me" description="A Mac notification when a bot asks for approval or a question, or a routine finishes, while Rex is in the background. The Dock icon shows how many conversations are waiting."
+          <div className="provider-head"><TileMark seed="notify" icon={<Bell size={18} />} size={36} /><div className="grow"><strong>Notifications</strong><small className="muted">The Dock icon shows how many conversations are waiting.</small></div></div>
+          <Toggle label="Notify me when a bot needs me" description="A Mac notification when a bot asks for approval or a question, or a routine finishes, while Rex is in the background."
             checked={!settings.notifications_off} onChange={async on => {
               const next = { ...settings, notifications_off: !on };
               setSettings(next);
-              try { const saved = await api.saveSettings(next); setSettings(saved); onSaved(saved); } catch (caught) { setError(errorMessage(caught)); }
+              try { const saved = await api.saveSettings(next); setSettings(saved); setSavedSettings(saved); onSaved(saved); } catch (caught) { setError(errorMessage(caught)); }
             }} />
         </div>
         <div className="card">
+          <h3 className="section-title">About this Mac's Rex</h3>
           <dl className="facts-list">
-            <dt>Bot engine</dt><dd>{status?.runtime_ready ? "Running" : "Starting"}</dd>
+            <dt>Bot engine</dt><dd><span className={`chip ${status?.runtime_ready ? "ok" : "warn"}`}>{status?.runtime_ready ? "Running" : "Starting"}</span></dd>
             <dt>Data folder</dt><dd><code>{status?.data_dir}</code></dd>
             <dt>Bot workspaces</dt><dd><code>{status?.workspace_root}</code></dd>
             <dt>Credentials</dt><dd>macOS Keychain</dd>
@@ -352,7 +331,12 @@ export function SettingsView({ status, onSaved }: { status: Status | null; onSav
         </div>
         <p className="muted small">Rex runs bots on this Mac. A bot's workspace folder limits Rex's file tools but is not an operating-system sandbox. Routines need the Mac awake and Rex running.</p>
       </>}
+
+      {dirty && <div className="save-bar" role="status">
+        <span>You have unsaved changes</span><span className="spacer" />
+        <button type="button" className="button secondary small" onClick={discard} disabled={saving}>Discard</button>
+        <button type="button" className="button primary small" onClick={save} disabled={saving}>{saving ? "Saving…" : "Save changes"}</button>
+      </div>}
     </section>
-    {editing && <ConnectionEditor initial={editing} onClose={() => { setEditing(null); void loadConnections(); }} onSaved={() => { setEditing(null); void loadConnections(); }} />}
   </div>;
 }

@@ -230,6 +230,55 @@ func (h *Host) SendMessage(ctx context.Context, conversationID, content string) 
 	return h.deliver(ctx, conversationID, delivery{UserText: content, ModelText: content})
 }
 
+// EditLastMessage replaces the conversation's latest message with new text.
+// The old exchange is removed with anything remembered from it, and the bot
+// answers the new text in a new run that carries the conversation up to,
+// not including, the old message.
+func (h *Host) EditLastMessage(ctx context.Context, conversationID, turnID, content string) (*Run, *Turn, error) {
+	if strings.TrimSpace(content) == "" {
+		return nil, nil, errors.New("message content is required")
+	}
+	conversation, err := h.Store.GetConversation(ctx, conversationID)
+	if err != nil {
+		return nil, nil, err
+	}
+	latest, err := h.Store.LatestTurnForConversation(ctx, conversationID)
+	if err != nil || latest.ID != turnID {
+		return nil, nil, errors.New("only your latest message can be edited")
+	}
+	if latest.Origin != "" || strings.TrimSpace(latest.UserText) == "" {
+		return nil, nil, errors.New("only messages you wrote can be edited")
+	}
+	if conversation.ActiveRunID != nil {
+		if run, err := h.Runtime.GetRun(ctx, *conversation.ActiveRunID); err == nil && !run.Terminal() {
+			switch {
+			case run.Status == "queued" || run.Status == "running":
+				return nil, nil, ErrBusy
+			case run.Status == "paused" && run.PauseReason != "awaiting_user_message":
+				return nil, nil, errors.New("the bot is waiting for your approval or sign-in above; answer that first")
+			}
+			// The run holds the old exchange: close it, and carry the
+			// conversation forward without it.
+			_, _ = h.Runtime.CancelRun(ctx, run.ID)
+		}
+	}
+	if latest.RunID != "" {
+		if err := h.Store.AddContextCut(ctx, conversationID, latest.RunID, latest.StartedAt); err != nil {
+			return nil, nil, err
+		}
+	}
+	if err := h.Store.DetachRun(ctx, conversationID); err != nil {
+		return nil, nil, err
+	}
+	if latest.MemoryBank != "" {
+		_ = h.Memory.Forget(ctx, latest.MemoryBank, turnDocument(latest.ID))
+	}
+	if err := h.Store.DeleteTurn(ctx, latest.ID); err != nil {
+		return nil, nil, err
+	}
+	return h.SendMessage(ctx, conversationID, content)
+}
+
 // delivery is a message for a bot. The user's messages are shown and sent
 // as typed. Messages Rex writes itself (a task from the main bot, a
 // report back to it) carry an origin and reach the bot as a system
@@ -348,6 +397,9 @@ func (h *Host) instructionsWithHistory(ctx context.Context, conversation *Conver
 	messages, err := h.Runtime.ConversationTranscript(ctx, runIDs)
 	if err != nil {
 		return content
+	}
+	if cuts, err := h.Store.ContextCuts(ctx, conversation.ID); err == nil {
+		messages = withoutCuts(messages, cuts)
 	}
 	if carry := carryForward(messages); carry != "" {
 		// The transcript mixes in assistant and tool output, so it is marked
@@ -692,6 +744,21 @@ func (h *Host) recoverTurns(ctx context.Context) {
 		}
 		h.Watch(turn.RunID)
 	}
+}
+
+// withoutCuts drops what a run said from an edited message on.
+func withoutCuts(messages []Message, cuts map[string]time.Time) []Message {
+	if len(cuts) == 0 {
+		return messages
+	}
+	kept := make([]Message, 0, len(messages))
+	for _, message := range messages {
+		if after, ok := cuts[message.RunID]; ok && !message.CreatedAt.Before(after) {
+			continue
+		}
+		kept = append(kept, message)
+	}
+	return kept
 }
 
 func carryForward(messages []Message) string {

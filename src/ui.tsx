@@ -1,13 +1,24 @@
-import { type ReactNode, useEffect } from "react";
+import { type ReactNode, useEffect, useRef, useState } from "react";
 import ReactMarkdown from "react-markdown";
 import remarkGfm from "remark-gfm";
-import { X } from "lucide-react";
+import { ArrowLeft, Check, Copy, Search, X } from "lucide-react";
 import type { Bot } from "./types";
 import { BotFace } from "./BotFace";
 import { AppLogo } from "./AppLogo";
 
 export function Markdown({ children }: { children: string }) {
-  return <div className="markdown"><ReactMarkdown remarkPlugins={[remarkGfm]}>{children}</ReactMarkdown></div>;
+  return <div className="markdown"><ReactMarkdown remarkPlugins={[remarkGfm]} components={{ pre: CodeBlock }}>{children}</ReactMarkdown></div>;
+}
+
+// Code blocks get a copy button.
+function CodeBlock({ children }: { children?: ReactNode }) {
+  const ref = useRef<HTMLPreElement>(null);
+  const [copied, setCopied] = useState(false);
+  const copy = async () => {
+    try { await navigator.clipboard.writeText(ref.current?.innerText || ""); setCopied(true); window.setTimeout(() => setCopied(false), 1400); } catch { /* clipboard unavailable */ }
+  };
+  return <div className="code-block"><pre ref={ref}>{children}</pre>
+    <button type="button" className="code-copy" onClick={copy} aria-label="Copy code">{copied ? <Check size={12} /> : <Copy size={12} />}</button></div>;
 }
 
 /** Mixes a #rrggbb colour towards white (amount > 0) or black (< 0). */
@@ -28,14 +39,14 @@ export function Avatar({ bot, size = 36, round = false, working = false }: { bot
   return <BotFace icon={bot.emoji} color={bot.color} seed={bot.id || bot.name} size={size} working={working} />;
 }
 
-export function Modal({ title, subtitle, onClose, children, footer, wide }: { title: string; subtitle?: string; onClose: () => void; children: ReactNode; footer?: ReactNode; wide?: boolean }) {
+export function Modal({ title, subtitle, onClose, children, footer, wide, className = "" }: { title: string; subtitle?: string; onClose: () => void; children: ReactNode; footer?: ReactNode; wide?: boolean; className?: string }) {
   useEffect(() => {
     const onKey = (event: KeyboardEvent) => { if (event.key === "Escape") onClose(); };
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
   }, [onClose]);
   return <div className="modal-backdrop" onMouseDown={event => { if (event.target === event.currentTarget) onClose(); }}>
-    <section className={`modal ${wide ? "wide" : ""}`} role="dialog" aria-modal="true" aria-label={title}>
+    <section className={`modal ${wide ? "wide" : ""} ${className}`} role="dialog" aria-modal="true" aria-label={title}>
       <header className="modal-header">
         <div>{subtitle && <small className="eyebrow">{subtitle}</small>}<h2>{title}</h2></div>
         <button type="button" className="icon-button ghost" onClick={onClose} aria-label="Close"><X size={17} /></button>
@@ -106,4 +117,37 @@ export async function signInToConnection(id: string) {
   const { api } = await import("./api");
   const { url } = await api.startSignIn(id);
   await openExternal(url);
+}
+
+// --- page building blocks shared by Apps, Skills, Routines and Settings ---
+
+/** A page's title, what it is for, and its main actions. */
+export function PageHeader({ title, description, back, actions }: { title: ReactNode; description?: ReactNode; back?: { label: string; onClick: () => void }; actions?: ReactNode }) {
+  return <header className="gallery-header">
+    <div className="gallery-header-text">
+      {back && <button type="button" className="back-link" onClick={back.onClick}><ArrowLeft size={13} />{back.label}</button>}
+      <h1>{title}</h1>
+      {description && <p className="muted">{description}</p>}
+    </div>
+    {actions && <div className="gallery-header-actions">{actions}</div>}
+  </header>;
+}
+
+export function SearchBox({ value, onChange, placeholder }: { value: string; onChange: (value: string) => void; placeholder: string }) {
+  return <label className="gallery-search"><Search size={14} /><input value={value} onChange={event => onChange(event.target.value)} placeholder={placeholder} aria-label={placeholder} /></label>;
+}
+
+/** A soft hue that stays the same for the same seed. */
+export function seedHue(seed: string): number {
+  let hash = 0;
+  for (const char of seed) hash = (hash * 31 + char.charCodeAt(0)) | 0;
+  return Math.abs(hash) % 360;
+}
+
+/** A card's icon: a lucide icon or a letter on a tint picked from the seed. */
+export function TileMark({ seed, icon, label, size = 40 }: { seed: string; icon?: ReactNode; label?: string; size?: number }) {
+  const hue = seedHue(seed);
+  return <span className="tile-mark" style={{ width: size, height: size, borderRadius: Math.round(size * 0.26), "--tile-hue": hue } as React.CSSProperties}>
+    {icon || <span style={{ fontSize: Math.round(size * 0.42) }}>{(label || seed).trim().charAt(0).toUpperCase()}</span>}
+  </span>;
 }

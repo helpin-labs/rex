@@ -211,7 +211,7 @@ func (h *Host) MCPServersForBot(ctx context.Context, bot Bot) ([]RunMCPServer, e
 		token, expires, err := h.accessToken(ctx, *connection, false)
 		if err != nil {
 			if errors.Is(err, ErrSignInRequired) {
-				return nil, fmt.Errorf("sign in to %s again in Settings → Connections to use it", connection.Name)
+				return nil, fmt.Errorf("sign in to %s again in Apps to use it", connection.Name)
 			}
 			return nil, err
 		}

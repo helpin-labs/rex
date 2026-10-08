@@ -1,13 +1,11 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { BookOpen, FileText, FolderOpen, Plus, Trash2, Upload } from "lucide-react";
+import { BookOpen, Compass, FileText, FolderOpen, LoaderCircle, Plus, Trash2, Upload } from "lucide-react";
 import { api } from "./api";
-import { BotFace } from "./BotFace";
-import { AppLogo } from "./AppLogo";
 import { SideList } from "./SideList";
-import { CatalogDetail, CatalogList, SourcesPanel } from "./SkillCatalog";
+import { CatalogDetail, SourcesPanel, gist } from "./SkillCatalog";
 import { composeSkillDoc, parseSkillDoc, skillSlug, titleFromName, type SkillDoc } from "./skillDoc";
 import type { Bot, CatalogSkill, Skill, SkillSource } from "./types";
-import { Empty, Markdown, errorMessage } from "./ui";
+import { Avatar, Markdown, PageHeader, SearchBox, TileMark, errorMessage } from "./ui";
 
 // Skills are folders in ~/Rex/skills with a SKILL.md and any files it uses
 // (scripts, reference notes), in the Agent Skills format. The page edits a
@@ -37,7 +35,7 @@ export function SkillsView({ bots: initialBots, workspaceRoot, onBotsChanged }: 
   useEffect(() => setBots(initialBots), [initialBots]);
 
   // Browse: the skill catalog.
-  const [mode, setMode] = useState<"installed" | "browse">("installed");
+  const [mode, setMode] = useState<"installed" | "browse" | "sources">("installed");
   const [query, setQuery] = useState("");
   const [results, setResults] = useState<CatalogSkill[]>([]);
   const [sources, setSources] = useState<SkillSource[]>([]);
@@ -45,7 +43,7 @@ export function SkillsView({ bots: initialBots, workspaceRoot, onBotsChanged }: 
   const [searching, setSearching] = useState(false);
   const loadSources = useCallback(() => api.skillSources().then(setSources).catch(() => undefined), []);
   useEffect(() => {
-    if (mode !== "browse") return;
+    if (mode === "installed") return;
     void loadSources();
     setSearching(true);
     const timer = window.setTimeout(() => {
@@ -85,7 +83,6 @@ export function SkillsView({ bots: initialBots, workspaceRoot, onBotsChanged }: 
     setPreview(!!item);
     setError(""); setNotice("");
   }, []);
-  useEffect(() => { if (selected === null && skills.length) open(skills[0]); }, [skills, selected, open]);
 
   const composed = doc ? composeSkillDoc({ ...doc, name: doc.name || skillSlug(doc.title) }) : "";
   const dirty = doc !== null && composed !== saved;
@@ -124,44 +121,88 @@ export function SkillsView({ bots: initialBots, workspaceRoot, onBotsChanged }: 
   const update = (patch: Partial<SkillDoc>) => setDoc(current => current ? { ...current, ...patch } : current);
   const selectable = useMemo(() => bots.filter(bot => !bot.setup), [bots]);
 
+  // Leaving an edited skill asks first.
+  const close = () => {
+    if (dirty && !window.confirm("Discard your changes to this skill?")) return;
+    setSelected(null); setDoc(null);
+  };
+  const go = (next: "installed" | "browse" | "sources") => {
+    if (doc && dirty && !window.confirm("Discard your changes to this skill?")) return;
+    setMode(next); setSelected(null); setDoc(null); setPicked(null);
+  };
+  const [filterText, setFilterText] = useState("");
+  const shownSkills = skills.filter(item => `${skillTitle(item)} ${item.description || ""}`.toLowerCase().includes(filterText.trim().toLowerCase()));
+  const sourcesOn = sources.filter(source => source.enabled).length;
+
+  const skillCard = (item: Skill) => {
+    const users = usedBy(bots, item.id);
+    return <article key={item.id} className="gallery-card">
+      <button type="button" className="gallery-card-main" onClick={() => open(item)}>
+        <TileMark seed={item.id} label={skillTitle(item)} />
+        <span className="gallery-card-text"><strong>{skillTitle(item)}</strong><small className="clamp">{item.description ? gist(item.description) : "No description yet"}</small></span>
+      </button>
+      <footer className="gallery-card-footer">
+        {users.length > 0 ? <span className="tile-users" title={`Used by ${users.map(bot => bot.name).join(", ")}`}>{users.slice(0, 4).map(bot => <Avatar key={bot.id} bot={bot} size={18} />)}</span> : <span className="muted small">Not used yet</span>}
+        <span className="spacer" />
+        <span className="chip" title={item.source ? `${item.source.repo} at ${item.source.commit.slice(0, 7)}` : "Written here"}>{item.source ? item.source.repo.split("/")[0] : "Yours"}</span>
+      </footer>
+    </article>;
+  };
+
+  const catalogCard = (item: CatalogSkill) => <article key={item.id} className="gallery-card">
+    <button type="button" className="gallery-card-main" onClick={() => setPicked(item)}>
+      <TileMark seed={item.id} label={item.name} />
+      <span className="gallery-card-text"><strong>{titleFromName(item.name)}</strong><small className="clamp">{item.description ? gist(item.description) : item.repo}</small></span>
+    </button>
+    <footer className="gallery-card-footer">
+      <span className="gallery-card-meta"><span>{item.repo}</span></span>
+      <span className="spacer" />
+      {item.installed ? <span className="chip ok">Installed</span> : <button type="button" className="button secondary small" onClick={() => setPicked(item)}>View</button>}
+    </footer>
+  </article>;
+
   return <div className="page skills-page">
     <SideList>
-      <header className="page-list-header row between">
-        <div><h2>Skills</h2><small className="subtitle">Reusable know-how for bots</small></div>
-        <div className="row">
-          <button type="button" className="icon-button" title="Import a skill (.zip)" aria-label="Import a skill" onClick={() => fileInput.current?.click()}><Upload size={15} /></button>
-          <button type="button" className="icon-button" title="New skill" aria-label="New skill" onClick={() => open(null)}><Plus size={16} /></button>
-        </div>
-        <input ref={fileInput} type="file" accept=".zip,application/zip" hidden onChange={event => { void importZip(event.target.files?.[0]); event.target.value = ""; }} />
-      </header>
-      <div className="segmented wide skill-tabs">
-        <button type="button" className={mode === "installed" ? "active" : ""} onClick={() => setMode("installed")}>Installed</button>
-        <button type="button" className={mode === "browse" ? "active" : ""} onClick={() => setMode("browse")}>Browse</button>
-      </div>
-      {mode === "browse" ? <CatalogList results={results} query={query} onQuery={setQuery} selected={picked?.id ?? null} onSelect={setPicked} loading={searching}
-        sourcesOn={sources.filter(source => source.enabled).length} onSources={() => setPicked(null)} />
-      : <nav className="list skill-list">
-        {isNew && <button type="button" className="list-item selected"><span className="list-icon"><Plus size={15} /></span><span className="list-text"><strong>{doc?.title || "New skill"}</strong><small>Not saved yet</small></span></button>}
-        {skills.map(item => {
-          const users = usedBy(bots, item.id);
-          return <button type="button" key={item.id} className={`list-item ${selected === item.id ? "selected" : ""}`} onClick={() => open(item)}>
-            <span className="list-icon"><BookOpen size={15} /></span>
-            <span className="list-text"><strong>{skillTitle(item)}</strong>
-              <small>{users.length === 0 ? "Not used yet" : `Used by ${users.length === 1 ? users[0].name : `${users.length} bots`}`}{item.files?.length ? ` · ${item.files.length + 1} files` : ""}</small></span>
-          </button>;
-        })}
-        {skills.length === 0 && !isNew && <p className="muted small skill-list-empty">No skills yet. Browse the catalog, or create one.</p>}
-      </nav>}
+      <header className="page-list-header"><h2>Skills</h2><small className="subtitle">Reusable know-how for bots</small></header>
+      <nav className="list">
+        <button type="button" className={`list-item compact ${mode === "installed" ? "selected" : ""}`} onClick={() => go("installed")}><span className="list-text"><strong>Your skills</strong></span>{skills.length > 0 && <span className="count">{skills.length}</span>}</button>
+        <button type="button" className={`list-item compact ${mode === "browse" ? "selected" : ""}`} onClick={() => go("browse")}><span className="list-text"><strong>Browse catalog</strong></span></button>
+        <button type="button" className={`list-item compact ${mode === "sources" ? "selected" : ""}`} onClick={() => go("sources")}><span className="list-text"><strong>Sources</strong></span>{sourcesOn > 0 && <span className="count">{sourcesOn}</span>}</button>
+      </nav>
+      <input ref={fileInput} type="file" accept=".zip,application/zip" hidden onChange={event => { void importZip(event.target.files?.[0]); event.target.value = ""; }} />
     </SideList>
 
-    <section className="page-content">
-      {mode === "browse" ? (picked ? <CatalogDetail key={picked.id} item={picked} bots={bots} onInstalled={result => void installed(result)} />
-        : <SourcesPanel sources={sources} onChanged={() => void sourcesChanged()} />)
-      : !doc ? <Empty icon={<BookOpen size={22} />} title="No skill selected">A skill teaches a bot how to do something, for example publish to your blog or write a research report. Create one, or import a skill .zip.</Empty>
+    <section className="page-content gallery-page">
+      {mode === "sources" ? <SourcesPanel sources={sources} onChanged={() => void sourcesChanged()} />
+      : mode === "browse" ? (picked ? <CatalogDetail key={picked.id} item={picked} bots={bots} onBack={() => setPicked(null)} onInstalled={result => void installed(result)} />
+        : <>
+          <PageHeader title="Browse skills" description={<>Skills from {sourcesOn} GitHub collection{sourcesOn === 1 ? "" : "s"}. Read one before installing it: it becomes instructions your bots follow. <button type="button" className="link-button" onClick={() => go("sources")}>Manage sources</button></>}
+            actions={<SearchBox value={query} onChange={setQuery} placeholder="Search, e.g. pdf, seo, cold email" />} />
+          {error && <div className="inline-error">{error}</div>}
+          {searching && results.length === 0 ? <LoaderCircle className="spin" />
+            : results.length === 0 ? <div className="gallery-empty"><Compass size={22} /><strong>{sourcesOn === 0 ? "No sources are on" : query ? "No skills match" : "Reading sources…"}</strong><span className="muted small">{sourcesOn === 0 ? "Turn on a source to browse its skills." : query ? "Try other words." : "This takes a moment the first time."}</span></div>
+            : <div className="gallery-grid">{results.map(catalogCard)}</div>}
+        </>)
+      : !doc ? <>
+        <PageHeader title="Your skills" description={<>A skill teaches a bot how to do something, like publishing to your blog or writing a research report. Skills live in <code>{workspaceRoot}/skills</code>.</>}
+          actions={<>
+            {skills.length > 3 && <SearchBox value={filterText} onChange={setFilterText} placeholder="Filter skills" />}
+            <button type="button" className="button secondary small" onClick={() => fileInput.current?.click()}><Upload size={13} />Import .zip</button>
+            <button type="button" className="button primary small" onClick={() => open(null)}><Plus size={14} />New skill</button>
+          </>} />
+        {error && <div className="inline-error">{error}</div>}
+        {skills.length === 0 ? <div className="gallery-empty"><BookOpen size={22} /><strong>No skills yet</strong><span className="muted small">Install one from the catalog, or write your own.</span>
+          <div className="row"><button type="button" className="button secondary small" onClick={() => go("browse")}><Compass size={13} />Browse catalog</button><button type="button" className="button primary small" onClick={() => open(null)}><Plus size={13} />New skill</button></div></div>
+          : <div className="gallery-grid">{shownSkills.map(skillCard)}</div>}
+      </>
         : <div className="skill-editor">
           <header className="skill-header">
             <div className="skill-header-text">
-              <input className="skill-title-input" value={doc.title} onChange={event => update({ title: event.target.value })} placeholder={isNew ? "Name the skill" : titleFromName(doc.name)} aria-label="Title" />
+              <button type="button" className="back-link" onClick={close}>← Your skills</button>
+              <div className="row skill-title-row">
+                <TileMark seed={isNew ? "new" : selected!} label={doc.title || "?"} size={36} />
+                <input className="skill-title-input" value={doc.title} onChange={event => update({ title: event.target.value })} placeholder={isNew ? "Name the skill" : titleFromName(doc.name)} aria-label="Title" autoFocus={isNew} />
+              </div>
               <small className="muted">{skill?.source ? <>From {skill.source.repo} · {skill.source.commit.slice(0, 7)} · </> : null}{isNew ? (skillSlug(doc.title) ? `Saved as ${workspaceRoot}/skills/${skillSlug(doc.title)}` : "Saved in a folder under " + workspaceRoot + "/skills") : `${workspaceRoot}/skills/${doc.name}`}</small>
             </div>
             <div className="row skill-actions">
@@ -172,9 +213,19 @@ export function SkillsView({ bots: initialBots, workspaceRoot, onBotsChanged }: 
           </header>
           {error && <div className="inline-error">{error}</div>}
 
+          {!isNew && <div className="skill-section">
+            <span className="field-label">Used by</span>
+            <div className="bot-picker">
+              {selectable.map(bot => { const on = bot.skills.includes(selected!); return <button type="button" key={bot.id} className={`bot-chip ${on ? "on" : ""}`} aria-pressed={on} onClick={() => void toggleBot(bot, !on)}>
+                <Avatar bot={bot} size={20} /><span>{bot.name}</span>
+              </button>; })}
+            </div>
+            <span className="field-hint">Takes effect from each bot's next message. You can also turn skills on in a bot's settings.</span>
+          </div>}
+
           <label className="field">
             <span className="field-label">When should a bot use it?</span>
-            <textarea rows={2} value={doc.description} onChange={event => update({ description: event.target.value })} placeholder="For example: Use when the user asks to publish or update a page on the blog." />
+            <textarea rows={3} value={doc.description} onChange={event => update({ description: event.target.value })} placeholder="For example: Use when the user asks to publish or update a page on the blog." />
             <span className={`field-hint ${doc.description.trim().length < 40 ? "warn" : ""}`}>{doc.description.trim().length < 40 ? "Too short for bots to know when to use it. Name the situations and words that should trigger it." : "Bots read this to decide when the skill applies, so name the situations and words that should trigger it."}</span>
           </label>
 
@@ -189,18 +240,6 @@ export function SkillsView({ bots: initialBots, workspaceRoot, onBotsChanged }: 
               : <textarea className="code skill-instructions" rows={18} value={doc.instructions} onChange={event => update({ instructions: event.target.value })} spellCheck={false} />}
             <span className="field-hint">Step-by-step know-how in Markdown. Long reference material belongs in files next to it.</span>
           </div>
-
-          {!isNew && <div className="skill-section">
-            <span className="field-label">Used by</span>
-            <div className="skill-bots">
-              {selectable.map(bot => <label key={bot.id} className={`skill-bot ${bot.skills.includes(selected!) ? "on" : ""}`}>
-                <input type="checkbox" checked={bot.skills.includes(selected!)} onChange={event => void toggleBot(bot, event.target.checked)} />
-                {bot.role === "main" ? <AppLogo size={22} /> : <BotFace icon={bot.emoji} color={bot.color} seed={bot.id} size={22} />}
-                <span>{bot.name}</span>
-              </label>)}
-            </div>
-            <span className="field-hint">Turned on here or in each bot's settings; it takes effect from the bot's next message.</span>
-          </div>}
 
           {!isNew && skill && <div className="skill-section">
             <div className="row between"><span className="field-label">Files</span><button type="button" className="link-button" onClick={() => api.revealSkills()}><FolderOpen size={13} /> Show in Finder</button></div>

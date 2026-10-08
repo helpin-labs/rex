@@ -338,6 +338,11 @@ func (c *RuntimeClient) ConversationTranscript(ctx context.Context, runIDs []str
 		if err != nil {
 			return nil, err
 		}
+		for index := range items {
+			if items[index].RunID == "" {
+				items[index].RunID = id
+			}
+		}
 		all = append(all, items...)
 	}
 	sort.SliceStable(all, func(i, j int) bool { return all[i].CreatedAt.Before(all[j].CreatedAt) })

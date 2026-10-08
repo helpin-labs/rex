@@ -47,6 +47,8 @@ export type Status = {
   web_search?: boolean;
   // True when bots browse in Kernel's cloud, which can't be taken over.
   cloud_browsers?: boolean;
+  // The Mac account's name, for the profile button.
+  user_name?: string;
 };
 
 export type ProviderConfig = { base_url: string; configured: boolean; api_key?: string; clear_key?: boolean };
@@ -77,7 +79,15 @@ export type Settings = {
   onboarded: boolean;
 };
 
-export type ModelInfo = { id: string; embedding: boolean };
+export type ModelInfo = {
+  id: string; embedding: boolean;
+  // Details the provider gives, where it gives them (OpenRouter most).
+  name?: string; context?: number; vision?: boolean;
+  // False only when the provider says the model can't call tools.
+  tools?: boolean;
+  // US dollars per million input and output tokens.
+  price_in?: number; price_out?: number;
+};
 
 export type ProviderTest = { ok: boolean; reachable: boolean; tool_calls: boolean; models: number; message: string; latency_ms: number };
 
