@@ -70,6 +70,9 @@ export default function App() {
     return () => window.clearInterval(timer);
   }, [refreshStatus, refreshThreads, refreshBots]);
 
+  // Going anywhere else closes a bot's settings.
+  useEffect(() => { setEditing(null); }, [view]);
+
   useEffect(() => {
     try { if (view) localStorage.setItem("rex.view", JSON.stringify(view)); } catch { /* ignore */ }
     if (view?.kind === "bot") lastBotId.current = view.botId;
@@ -162,18 +165,23 @@ export default function App() {
 
     {error && <div className="toast" role="alert"><span>{error}</span><button type="button" className="link-button" onClick={() => setError("")}>Dismiss</button></div>}
 
-    {view?.kind === "bot" && bot && <main className="main">
-      {thread ? <Chat key={thread.id} bot={bot} bots={bots} conversationId={thread.id} status={status} pending={attention.filter(item => (item.kind === "missed" || item.kind === "proposal") && item.bot_id === bot.id)} onEdit={() => setEditing(bot)} onChanged={() => void refreshThreads()} />
-        : <Empty icon={<LoaderCircle className="spin" size={20} />} title={`Opening ${bot.name}…`} />}
-    </main>}
-    {view?.kind === "routines" && <main className="main wide"><RoutinesView bots={bots} onOpenConversation={async id => { await refreshThreads(); await openConversation(id); }} /></main>}
-    {view?.kind === "skills" && <main className="main wide"><SkillsView bots={bots} workspaceRoot={status?.workspace_root || "~/Rex"} onBotsChanged={() => void refreshBots()} /></main>}
-    {view?.kind === "apps" && <main className="main wide"><AppsView bots={bots} onBotsChanged={() => void refreshBots()} /></main>}
-    {view?.kind === "settings" && <main className="main wide"><SettingsView status={status} onSaved={saved => { setSettings(saved); void refreshStatus(); }} /></main>}
+    {editing ? <main className="main wide"><BotEditor key={editing.id || "new"} initial={editing} settings={settings} status={status} onClose={() => setEditing(null)}
+      onSaved={async saved => {
+        await refreshBots(); await refreshThreads();
+        // A new bot opens its conversation; an edited one stays on its settings.
+        if (!editing.id) { setEditing(null); setView({ kind: "bot", botId: saved.id }); }
+      }}
+      onDeleted={async () => { setEditing(null); const list = await refreshBots(); await refreshThreads(); setView(list[0] ? { kind: "bot", botId: list[0].id } : { kind: "settings" }); }} /></main> : <>
+      {view?.kind === "bot" && bot && <main className="main">
+        {thread ? <Chat key={thread.id} bot={bot} bots={bots} conversationId={thread.id} status={status} pending={attention.filter(item => (item.kind === "missed" || item.kind === "proposal") && item.bot_id === bot.id)} onEdit={() => setEditing(bot)} onChanged={() => void refreshThreads()} />
+          : <Empty icon={<LoaderCircle className="spin" size={20} />} title={`Opening ${bot.name}…`} />}
+      </main>}
+      {view?.kind === "routines" && <main className="main wide"><RoutinesView bots={bots} onOpenConversation={async id => { await refreshThreads(); await openConversation(id); }} /></main>}
+      {view?.kind === "skills" && <main className="main wide"><SkillsView bots={bots} workspaceRoot={status?.workspace_root || "~/Rex"} onBotsChanged={() => void refreshBots()} /></main>}
+      {view?.kind === "apps" && <main className="main wide"><AppsView bots={bots} onBotsChanged={() => void refreshBots()} /></main>}
+      {view?.kind === "settings" && <main className="main wide"><SettingsView status={status} onSaved={saved => { setSettings(saved); void refreshStatus(); }} /></main>}
+    </>}
 
     {naming && <NewBotDialog onCreate={createBot} onClose={() => setNaming(false)} onManual={(name, color) => { setNaming(false); setEditing({ ...newBot(settings), name, color }); }} />}
-    {editing && <BotEditor initial={editing} settings={settings} status={status} onClose={() => setEditing(null)}
-      onSaved={async saved => { setEditing(null); await refreshBots(); await refreshThreads(); setView({ kind: "bot", botId: saved.id }); }}
-      onDeleted={async () => { setEditing(null); const list = await refreshBots(); await refreshThreads(); setView(list[0] ? { kind: "bot", botId: list[0].id } : { kind: "settings" }); }} />}
   </div></SideSlot.Provider>;
 }
