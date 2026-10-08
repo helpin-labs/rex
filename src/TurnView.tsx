@@ -1,5 +1,5 @@
 import { memo, useEffect, useMemo, useState } from "react";
-import { Brain, Check, ChevronRight, CircleAlert, Copy, LoaderCircle, RotateCcw } from "lucide-react";
+import { Brain, Check, ChevronRight, CircleAlert, Copy, LoaderCircle, Pencil, RotateCcw } from "lucide-react";
 import { applyRunEvent, emptyRunStreamState } from "./runStream";
 import { formatElapsed, isControlTool, stepLabel } from "./steps";
 import { bankLabel } from "./MemoryPanel";
@@ -59,6 +59,8 @@ type TurnViewProps = {
   memoryWhere: string; overview: MemoryOverview | null; onShowMemory: (documentId?: string) => void;
   // Why the turn's run failed, and how to send its message again.
   error?: string; onRetry?: (text: string) => void;
+  // Set on the latest message the user may still edit.
+  onEditMessage?: (turnId: string, text: string) => Promise<void>;
 };
 
 // The conversation is polled every few seconds, which hands every turn a
@@ -68,7 +70,7 @@ function sameTurn(a: TurnViewProps, b: TurnViewProps) {
     a.turn.id === b.turn.id && a.turn.status === b.turn.status && a.turn.assistant_text === b.turn.assistant_text &&
     a.turn.settled_at === b.turn.settled_at && a.turn.memory_status === b.turn.memory_status && a.turn.memory_facts === b.turn.memory_facts &&
     a.turn.run_id === b.turn.run_id && (a.turn.recalled?.length ?? 0) === (b.turn.recalled?.length ?? 0) &&
-    a.memoryWhere === b.memoryWhere && a.overview === b.overview && a.onShowMemory === b.onShowMemory && a.error === b.error && a.onRetry === b.onRetry;
+    a.memoryWhere === b.memoryWhere && a.overview === b.overview && a.onShowMemory === b.onShowMemory && a.error === b.error && a.onRetry === b.onRetry && a.onEditMessage === b.onEditMessage;
 }
 
 // UsedMemories lists what the bot remembered when it answered.
@@ -104,7 +106,14 @@ function UserText({ text }: { text: string }) {
   </>;
 }
 
-export const TurnView = memo(function TurnView({ turn, bot, events, working, memoryWhere, overview, onShowMemory, error, onRetry }: TurnViewProps) {
+export const TurnView = memo(function TurnView({ turn, bot, events, working, memoryWhere, overview, onShowMemory, error, onRetry, onEditMessage }: TurnViewProps) {
+  const [editing, setEditing] = useState<string | null>(null);
+  const [saving, setSaving] = useState(false);
+  const resend = async () => {
+    if (!onEditMessage || !editing?.trim()) return;
+    setSaving(true);
+    try { await onEditMessage(turn.id, editing.trim()); setEditing(null); } finally { setSaving(false); }
+  };
   // Events arrive in order (stored by sequence, live by arrival).
   const state = useMemo(() => events.reduce((current, event) => applyRunEvent(current, event, event.sent_at || new Date().toISOString()), emptyRunStreamState()), [events]);
   const [open, setOpen] = useState(false);
@@ -155,11 +164,20 @@ export const TurnView = memo(function TurnView({ turn, bot, events, working, mem
     workRow = <StepRow tool={tools[0]} />;
   }
 
-  return <div className="turn">
-    {turn.user_text && <div className={`bubble user ${turn.origin === "rex" ? "from-rex" : ""}`} title={clock(turn.started_at)}>
-      {turn.origin === "rex" && <small className="bubble-from">From Rex</small>}
-      <UserText text={turn.user_text} />
-    </div>}
+  return <div className="turn" data-turn={turn.id}>
+    {turn.user_text && (editing !== null ? <div className="bubble-edit">
+      <textarea value={editing} autoFocus rows={Math.min(10, editing.split("\n").length + 1)} onChange={event => setEditing(event.target.value)}
+        onKeyDown={event => { if (event.key === "Enter" && !event.shiftKey && !event.nativeEvent.isComposing) { event.preventDefault(); void resend(); } if (event.key === "Escape") setEditing(null); }} />
+      <div className="row"><small className="muted">{bot.name} answers the edited message instead; the old answer is removed.</small><span className="spacer" />
+        <button type="button" className="link-button" onClick={() => setEditing(null)}>Cancel</button>
+        <button type="button" className="button primary small" disabled={saving || !editing.trim() || editing.trim() === turn.user_text.trim()} onClick={() => void resend()}>{saving ? "Sending…" : "Save and resend"}</button></div>
+    </div> : <div className="user-row">
+      {onEditMessage && <button type="button" className="reply-action edit-message" title="Edit and resend" aria-label="Edit message" onClick={() => setEditing(turn.user_text)}><Pencil size={12} /></button>}
+      <div className={`bubble user ${turn.origin === "rex" ? "from-rex" : ""}`} title={clock(turn.started_at)}>
+        {turn.origin === "rex" && <small className="bubble-from">From Rex</small>}
+        <UserText text={turn.user_text} />
+      </div>
+    </div>)}
     <div className="bot-reply">
       <div className="reply-meta"><span className="reply-name">{bot.role === "main" ? <AppLogo size={18} /> : <BotFace icon={bot.emoji} color={bot.color} seed={bot.id} size={18} />} {bot.name}</span>
         {turn.origin?.startsWith("report:") && <span className="reply-tag">Report from {turn.origin.slice("report:".length)}</span>}</div>

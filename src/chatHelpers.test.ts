@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { starterPrompts, turnFailure } from "./chatHelpers";
+import { searchTurns, starterPrompts, turnFailure } from "./chatHelpers";
 import type { Bot } from "./types";
 
 const caps = (patch: Partial<Bot["capabilities"]> = {}) => ({ files_read: false, files_write: false, shell: false, web: false, browser: false, memory: true, ...patch });
@@ -28,4 +28,13 @@ describe("turn failures", () => {
     expect(turnFailure(undefined)).toBe("The bot could not finish this message.");
     expect(turnFailure("x".repeat(300))).toHaveLength(201);
   });
+});
+
+describe("conversation search", () => {
+  const turns = [{ user_text: "Plan a trip to Lisbon", assistant_text: "Sure." }, { user_text: "Hotels?", assistant_text: "Three in lisbon's Alfama." }, { user_text: "Thanks", assistant_text: "" }];
+  it("finds messages and answers, ignoring case", () => {
+    expect(searchTurns(turns, "LISBON")).toEqual([0, 1]);
+    expect(searchTurns(turns, "alfama")).toEqual([1]);
+  });
+  it("finds nothing for an empty query", () => expect(searchTurns(turns, "  ")).toEqual([]));
 });

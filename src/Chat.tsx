@@ -1,10 +1,11 @@
 import { Fragment, type KeyboardEvent, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { JsonBlock, TextWithJson } from "./JsonBlock";
-import { AlarmClock, ArrowDown, ArrowUp, BookOpen, Brain, CircleAlert, ExternalLink, Eye, FileCode2, FileText, FolderOpen, Hand, KeyRound, MousePointerClick, Paperclip, RotateCcw, ShieldCheck, SlidersHorizontal, Square, X } from "lucide-react";
+import { AlarmClock, ArrowDown, ArrowUp, Search, BookOpen, Brain, CircleAlert, ExternalLink, Eye, FileCode2, FileText, FolderOpen, Hand, KeyRound, MousePointerClick, Paperclip, RotateCcw, ShieldCheck, SlidersHorizontal, Square, X } from "lucide-react";
 import { api } from "./api";
 import { BrowserView } from "./BrowserView";
 import { MemoryPanel, memoryHome, memoryWhereLabel } from "./MemoryPanel";
-import { starterPrompts } from "./chatHelpers";
+import { searchTurns, starterPrompts } from "./chatHelpers";
+import { ChatSearch } from "./ChatSearch";
 import { describeApproval, instructionChanges, looksLikePassword } from "./steps";
 import { TurnView } from "./TurnView";
 import { useLiveEvents } from "./useLiveEvents";
@@ -270,6 +271,9 @@ export function Chat({ bot, bots, conversationId, status, pending: waiting, defa
   const fileInput = useRef<HTMLInputElement>(null);
   const composerRef = useRef<HTMLTextAreaElement>(null);
   const [showJump, setShowJump] = useState(false);
+  const [searching, setSearching] = useState(false);
+  const [query, setQuery] = useState("");
+  const [matchIndex, setMatchIndex] = useState(0);
   const [dragging, setDragging] = useState(false);
   const timelineCursor = useRef<Record<string, number>>({});
   const timelineBusy = useRef<Record<string, boolean>>({});
@@ -312,6 +316,26 @@ export function Chat({ bot, bots, conversationId, status, pending: waiting, defa
 
   const turns = detail?.turns || [];
   const lastTurn = turns.at(-1);
+  const matchTurns = useMemo(() => searchTurns(turns, query).map(index => turns[index].id), [turns, query]);
+  // Matches run newest first, as people usually look for something recent.
+  const matches = useMemo(() => [...matchTurns].reverse(), [matchTurns]);
+  useEffect(() => { setMatchIndex(0); }, [query]);
+  const moveMatch = (step: 1 | -1) => setMatchIndex(current => matches.length ? (current + step + matches.length) % matches.length : 0);
+  // A match in an older, folded message loads enough of the conversation.
+  useEffect(() => {
+    const id = matches[matchIndex];
+    if (!id) return;
+    const index = turns.findIndex(turn => turn.id === id);
+    if (index >= 0 && index < turns.length - shown) setShown(turns.length - index + 5);
+  }, [matches, matchIndex, turns, shown]);
+  const closeSearch = () => { setSearching(false); setQuery(""); };
+  useEffect(() => {
+    const onKey = (event: globalThis.KeyboardEvent) => {
+      if ((event.metaKey || event.ctrlKey) && event.key.toLowerCase() === "f") { event.preventDefault(); setSearching(true); }
+    };
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, []);
   const activeRun = detail?.runs.find(run => run.id === detail.conversation.active_run_id);
   const working = !!lastTurn && lastTurn.status === "working" && (!activeRun || activeRun.status === "running" || activeRun.status === "queued");
   const pending = detail?.interactions || [];
@@ -380,6 +404,14 @@ export function Chat({ bot, bots, conversationId, status, pending: waiting, defa
   const sendRef = useRef(send);
   sendRef.current = send;
   const retry = useCallback((text: string) => { void sendRef.current(text); }, []);
+  const editMessage = useCallback(async (turnId: string, text: string) => {
+    setError(""); pinned.current = true;
+    try { await api.editMessage(conversationId, turnId, text); await loadRef.current(); onChangedRef.current(); } catch (caught) { setError(errorMessage(caught)); throw caught; }
+  }, [conversationId]);
+  const loadRef = useRef(load);
+  loadRef.current = load;
+  const onChangedRef = useRef(onChanged);
+  onChangedRef.current = onChanged;
   const suggest = (prompt: string) => { setDraft(prompt); window.setTimeout(() => { const box = composerRef.current; if (box) { box.focus(); box.setSelectionRange(prompt.length, prompt.length); } }, 0); };
 
   const onKeyDown = (event: KeyboardEvent<HTMLTextAreaElement>) => {
@@ -429,7 +461,7 @@ export function Chat({ bot, bots, conversationId, status, pending: waiting, defa
   }, [bot]);
 
   return <div className={`chat ${panel === "files" || panel === "memory" ? "with-drawer" : ""} ${panel === "browser" ? "with-browser" : ""}`}>
-    <div className={`chat-main ${dragging ? "dragging" : ""}`}
+    <div className={`chat-main ${dragging ? "dragging" : ""} ${searching ? "searching" : ""}`}
       onDragOver={event => { if (event.dataTransfer.types.includes("Files")) { event.preventDefault(); setDragging(true); } }}
       onDragLeave={event => { if (event.currentTarget === event.target || !event.currentTarget.contains(event.relatedTarget as Node)) setDragging(false); }}
       onDrop={event => { if (event.dataTransfer.files.length) { event.preventDefault(); setDragging(false); void attach(event.dataTransfer.files); } }}>
@@ -441,17 +473,19 @@ export function Chat({ bot, bots, conversationId, status, pending: waiting, defa
         </div>
         <div className="row chat-tools">
           {bot.capabilities.browser && !status?.cloud_browsers && <button type="button" className={`button ${browserHeld ? "warning" : "secondary"} small`} onClick={toggleBrowser} title={browserHeld ? "Hand the browser back to the bot" : "Take control of the bot's browser, for example to sign in"}><MousePointerClick size={14} /><span className="button-label">{browserHeld ? "Hand back browser" : "Take over browser"}</span></button>}
-          <div className="tool-group" role="group" aria-label="Panels">
+          {(bot.capabilities.browser || bot.capabilities.files_read || !!home) && <div className="tool-group" role="group" aria-label="Panels">
             {bot.capabilities.browser && <button type="button" className={`tool ${panel === "browser" ? "active" : ""}`} title="Watch the bot's browser" aria-label="Browser" aria-pressed={panel === "browser"} onClick={() => togglePanel("browser")}><Eye size={15} /></button>}
             {bot.capabilities.files_read && <button type="button" className={`tool ${panel === "files" ? "active" : ""}`} title="Workspace files" aria-label="Files" aria-pressed={panel === "files"} onClick={() => togglePanel("files")}><FolderOpen size={15} /></button>}
             {home && <button type="button" className={`tool ${panel === "memory" ? "active" : ""}`} title={`Memory · ${memoryWhereLabel(home, bot)}`} aria-label="Memory" aria-pressed={panel === "memory"} onClick={() => togglePanel("memory")}><Brain size={15} /></button>}
-          </div>
+          </div>}
           <div className="tool-group" role="group" aria-label="Conversation">
+            <button type="button" className={`tool ${searching ? "active" : ""}`} title="Find in conversation (⌘F)" aria-label="Find in conversation" aria-pressed={searching} onClick={() => searching ? closeSearch() : setSearching(true)} disabled={!turns.length}><Search size={15} /></button>
             <button type="button" className="tool" title="Start fresh: keep this conversation on screen, but don't carry it into what the bot remembers right now" aria-label="Start fresh" onClick={startFresh} disabled={working || turns.length === 0}><RotateCcw size={15} /></button>
             <button type="button" className="tool" title="Bot settings" aria-label="Edit bot" onClick={onEdit}><SlidersHorizontal size={15} /></button>
           </div>
         </div>
       </header>
+      {searching && <ChatSearch query={query} onQuery={setQuery} matches={matches} current={matchIndex} onMove={moveMatch} onClose={closeSearch} container={contentRef.current} renderKey={`${shown}:${turns.length}`} />}
       {status && !status.runtime_ready && <div className="banner">Starting the bot engine…</div>}
       {browserHeld && <div className="banner warning">You have control of {bot.name}'s browser. The bot waits until you hand it back.</div>}
       <div className="transcript" ref={scrollRef} onScroll={onScroll} onPointerDown={() => { clicked.current = Date.now(); }}><div className="transcript-content" ref={contentRef}>
@@ -466,7 +500,8 @@ export function Chat({ bot, bots, conversationId, status, pending: waiting, defa
           {turn.section && <div className="section-divider"><span>{turn.section} · {new Date(turn.started_at).toLocaleDateString(undefined, { day: "numeric", month: "short" })}</span></div>}
           <TurnView turn={turn} bot={bot} events={eventsByTurn[index]} working={index === turns.length - 1 && working}
             memoryWhere={memoryWhereLabel(home, bot)} overview={overview} onShowMemory={showMemory}
-            error={turn.status === "failed" ? detail?.runs.find(run => run.id === turn.run_id)?.error_message : undefined} onRetry={retry} />
+            error={turn.status === "failed" ? detail?.runs.find(run => run.id === turn.run_id)?.error_message : undefined} onRetry={retry}
+            onEditMessage={index === turns.length - 1 && !working && pending.length === 0 && !turn.origin && turn.user_text ? editMessage : undefined} />
         </Fragment>)}
         {detail?.conversation.context_start && lastTurn && lastTurn.started_at < detail.conversation.context_start && <p className="fresh-note">Fresh start. {bot.name} won't carry the conversation above into new messages; memories still apply.</p>}
         {proposals.map(proposal => <ProposalCard key={proposal.id} bot={bot} proposal={proposal} onAnswered={() => { setProposals(current => current.filter(item => item.id !== proposal.id)); onChanged(); }} />)}

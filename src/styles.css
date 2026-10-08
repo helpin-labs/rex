@@ -961,3 +961,22 @@ textarea { resize: vertical; line-height: 1.5; }
 .drop-overlay { position: absolute; inset: 10px; z-index: 6; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 6px; border: 2px dashed var(--accent); border-radius: 18px; background: color-mix(in srgb, var(--accent) 7%, var(--surface)); color: var(--accent-text); pointer-events: none; }
 .drop-overlay small { color: var(--muted); }
 .composer-hint .model-name { font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: 10.5px; }
+.modal.new-bot-modal { width: min(760px, 100%); }
+.new-bot-modal .new-bot-preview { width: 190px; }
+
+/* find in conversation */
+.chat-search { position: absolute; top: 80px; right: 22px; z-index: 5; display: flex; align-items: center; gap: 2px; padding: 4px 4px 4px 11px; border: 1px solid var(--border-strong); border-radius: 12px; background: var(--surface); box-shadow: var(--shadow); color: var(--muted); animation: menu-in .12s ease-out; }
+.chat-search input:not([type=checkbox]) { width: 220px; margin-left: 6px; padding: 5px 0; border: 0; background: none; box-shadow: none; }
+.chat-search-count { min-width: 70px; padding-right: 4px; color: var(--muted); font-size: 12px; text-align: right; white-space: nowrap; }
+::highlight(chat-search) { background-color: #ffe58a; color: #1f2125; }
+::highlight(chat-search-current) { background-color: #ffb547; color: #1f2125; }
+
+/* edit and resend */
+.user-row { display: flex; justify-content: flex-end; align-items: flex-start; gap: 6px; }
+.user-row .bubble.user { margin-left: 0; }
+.edit-message { margin-top: 8px; opacity: 0; }
+.turn:hover .edit-message, .edit-message:focus-visible { opacity: 1; }
+.bubble-edit { display: flex; flex-direction: column; gap: 8px; width: min(78%, 620px); margin: 0 0 14px auto; padding: 10px; border: 1px solid var(--accent); border-radius: 16px; background: var(--surface); box-shadow: 0 0 0 3px var(--accent-soft); }
+.bubble-edit textarea:not([type=checkbox]) { padding: 2px 4px; border: 0; background: none; box-shadow: none; resize: none; font-size: 14px; line-height: 1.5; field-sizing: content; max-height: 40vh; }
+.bubble-edit small { font-size: 11.5px; }
+.chat-main.searching .transcript { padding-top: 66px; }

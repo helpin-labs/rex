@@ -1,4 +1,4 @@
-import type { Bot } from "./types";
+import type { Bot, Turn } from "./types";
 
 // Suggestions for an empty conversation, from what the bot can do. They fill
 // the composer rather than send, so the user finishes the sentence.
@@ -24,4 +24,13 @@ export function turnFailure(error?: string): string {
   if (/model.*(not found|does not exist|unavailable)|no such model|\b404\b/i.test(error)) return "This model isn't available. Pick another in the bot's settings.";
   if (/no such host|network is unreachable|connection refused|i\/o timeout|dial tcp|timed out/i.test(error)) return "Couldn't reach the model provider. Check the connection, then try again.";
   return error.length > 200 ? `${error.slice(0, 200)}…` : error;
+}
+
+/** The turns whose message or answer contains the query, oldest first. */
+export function searchTurns(turns: Pick<Turn, "user_text" | "assistant_text">[], query: string): number[] {
+  const needle = query.trim().toLowerCase();
+  if (!needle) return [];
+  const found: number[] = [];
+  turns.forEach((turn, index) => { if (`${turn.user_text}\n${turn.assistant_text}`.toLowerCase().includes(needle)) found.push(index); });
+  return found;
 }

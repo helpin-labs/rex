@@ -151,6 +151,10 @@ CREATE TABLE catalog_skills (id TEXT PRIMARY KEY, source_id TEXT NOT NULL REFERE
 	files TEXT NOT NULL DEFAULT '[]', commit_sha TEXT NOT NULL);
 ALTER TABLE instruction_proposals ADD COLUMN kind TEXT NOT NULL DEFAULT 'instructions';
 ALTER TABLE instruction_proposals ADD COLUMN catalog_id TEXT NOT NULL DEFAULT '';`,
+	// Edited messages: what a run said from an edited message on is left
+	// out when a later run carries the conversation forward.
+	`CREATE TABLE context_cuts (conversation_id TEXT NOT NULL REFERENCES conversations(id) ON DELETE CASCADE, run_id TEXT NOT NULL,
+	after DATETIME NOT NULL, PRIMARY KEY (conversation_id, run_id));`,
 }
 
 func (s *Store) migrate(ctx context.Context) error {
@@ -483,6 +487,33 @@ func (s *Store) SetTurnRun(ctx context.Context, turnID, runID string) error {
 func (s *Store) DeleteTurn(ctx context.Context, turnID string) error {
 	_, err := s.db.ExecContext(ctx, `DELETE FROM turns WHERE id=?`, turnID)
 	return err
+}
+
+// AddContextCut leaves a run's transcript from after on out of the
+// conversation's carried-forward context. The earliest cut of a run wins.
+func (s *Store) AddContextCut(ctx context.Context, conversationID, runID string, after time.Time) error {
+	_, err := s.db.ExecContext(ctx, `INSERT INTO context_cuts (conversation_id, run_id, after) VALUES (?, ?, ?)
+		ON CONFLICT (conversation_id, run_id) DO UPDATE SET after=min(after, excluded.after)`, conversationID, runID, after.UTC())
+	return err
+}
+
+// ContextCuts returns the cuts of a conversation, by run.
+func (s *Store) ContextCuts(ctx context.Context, conversationID string) (map[string]time.Time, error) {
+	rows, err := s.db.QueryContext(ctx, `SELECT run_id, after FROM context_cuts WHERE conversation_id=?`, conversationID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	cuts := map[string]time.Time{}
+	for rows.Next() {
+		var runID string
+		var after time.Time
+		if err := rows.Scan(&runID, &after); err != nil {
+			return nil, err
+		}
+		cuts[runID] = after
+	}
+	return cuts, rows.Err()
 }
 
 func (s *Store) GetTurn(ctx context.Context, id string) (*Turn, error) {

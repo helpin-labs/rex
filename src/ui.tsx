@@ -39,14 +39,14 @@ export function Avatar({ bot, size = 36, round = false, working = false }: { bot
   return <BotFace icon={bot.emoji} color={bot.color} seed={bot.id || bot.name} size={size} working={working} />;
 }
 
-export function Modal({ title, subtitle, onClose, children, footer, wide }: { title: string; subtitle?: string; onClose: () => void; children: ReactNode; footer?: ReactNode; wide?: boolean }) {
+export function Modal({ title, subtitle, onClose, children, footer, wide, className = "" }: { title: string; subtitle?: string; onClose: () => void; children: ReactNode; footer?: ReactNode; wide?: boolean; className?: string }) {
   useEffect(() => {
     const onKey = (event: KeyboardEvent) => { if (event.key === "Escape") onClose(); };
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
   }, [onClose]);
   return <div className="modal-backdrop" onMouseDown={event => { if (event.target === event.currentTarget) onClose(); }}>
-    <section className={`modal ${wide ? "wide" : ""}`} role="dialog" aria-modal="true" aria-label={title}>
+    <section className={`modal ${wide ? "wide" : ""} ${className}`} role="dialog" aria-modal="true" aria-label={title}>
       <header className="modal-header">
         <div>{subtitle && <small className="eyebrow">{subtitle}</small>}<h2>{title}</h2></div>
         <button type="button" className="icon-button ghost" onClick={onClose} aria-label="Close"><X size={17} /></button>

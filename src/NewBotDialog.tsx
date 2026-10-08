@@ -19,7 +19,7 @@ export function NewBotDialog({ onCreate, onManual, onClose }: { onCreate: (name:
     setBusy(true);
     try { await onCreate(name.trim(), face, color); } finally { setBusy(false); }
   };
-  return <Modal title="New bot" subtitle="Create" onClose={onClose}
+  return <Modal title="New bot" subtitle="Create" onClose={onClose} className="new-bot-modal"
     footer={<>
       <button type="button" className="button secondary" onClick={() => onManual(name.trim(), color)}><SlidersHorizontal size={14} />Set up manually</button>
       <span className="spacer" />
