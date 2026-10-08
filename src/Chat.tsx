@@ -1,9 +1,10 @@
 import { Fragment, type KeyboardEvent, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { JsonBlock, TextWithJson } from "./JsonBlock";
-import { AlarmClock, ArrowUp, BookOpen, Brain, CircleAlert, ExternalLink, Eye, FileCode2, FileText, FolderOpen, Hand, KeyRound, MousePointerClick, Paperclip, RotateCcw, ShieldCheck, SlidersHorizontal, Square, X } from "lucide-react";
+import { AlarmClock, ArrowDown, ArrowUp, BookOpen, Brain, CircleAlert, ExternalLink, Eye, FileCode2, FileText, FolderOpen, Hand, KeyRound, MousePointerClick, Paperclip, RotateCcw, ShieldCheck, SlidersHorizontal, Square, X } from "lucide-react";
 import { api } from "./api";
 import { BrowserView } from "./BrowserView";
 import { MemoryPanel, memoryHome, memoryWhereLabel } from "./MemoryPanel";
+import { starterPrompts } from "./chatHelpers";
 import { describeApproval, instructionChanges, looksLikePassword } from "./steps";
 import { TurnView } from "./TurnView";
 import { useLiveEvents } from "./useLiveEvents";
@@ -239,7 +240,7 @@ function useTurnEvents(turns: Turn[], timelines: Record<string, { events: RunEve
 // A bot's thread can grow long; it opens on its latest turns.
 const TURNS_SHOWN = 30;
 
-export function Chat({ bot, bots, conversationId, status, pending: waiting, onChanged, onEdit, onOpenSettings }: { bot: Bot; bots: Bot[]; conversationId: string; status: Status | null; pending: AttentionItem[]; onChanged: () => void; onEdit: () => void; onOpenSettings?: (tab: "memory") => void }) {
+export function Chat({ bot, bots, conversationId, status, pending: waiting, defaultModel, onChanged, onEdit, onOpenSettings }: { bot: Bot; bots: Bot[]; conversationId: string; status: Status | null; pending: AttentionItem[]; defaultModel?: string; onChanged: () => void; onEdit: () => void; onOpenSettings?: (tab: "memory") => void }) {
   const missed = waiting.filter(item => item.kind === "missed");
   const proposalKey = waiting.filter(item => item.kind === "proposal").map(item => item.id).join(",");
   const [proposals, setProposals] = useState<InstructionProposal[]>([]);
@@ -267,6 +268,9 @@ export function Chat({ bot, bots, conversationId, status, pending: waiting, onCh
   const [shown, setShown] = useState(TURNS_SHOWN);
   const scrollRef = useRef<HTMLDivElement>(null);
   const fileInput = useRef<HTMLInputElement>(null);
+  const composerRef = useRef<HTMLTextAreaElement>(null);
+  const [showJump, setShowJump] = useState(false);
+  const [dragging, setDragging] = useState(false);
   const timelineCursor = useRef<Record<string, number>>({});
   const timelineBusy = useRef<Record<string, boolean>>({});
 
@@ -350,8 +354,11 @@ export function Chat({ bot, bots, conversationId, status, pending: waiting, onCh
   }, [toBottom]);
   const onScroll = () => {
     const element = scrollRef.current;
-    if (element) pinned.current = element.scrollHeight - element.scrollTop - element.clientHeight < 80;
+    if (!element) return;
+    pinned.current = element.scrollHeight - element.scrollTop - element.clientHeight < 80;
+    setShowJump(!pinned.current && element.scrollHeight - element.scrollTop - element.clientHeight > 400);
   };
+  const jumpToLatest = () => { pinned.current = true; setShowJump(false); scrollRef.current?.scrollTo({ top: scrollRef.current.scrollHeight, behavior: "smooth" }); };
 
   const send = async (text?: string) => {
     const body = (text ?? draft).trim();
@@ -368,6 +375,12 @@ export function Chat({ bot, bots, conversationId, status, pending: waiting, onCh
       onChanged();
     } catch (caught) { setError(errorMessage(caught)); } finally { setSending(false); }
   };
+
+  // Turns are memoised, so the retry they get must not change every render.
+  const sendRef = useRef(send);
+  sendRef.current = send;
+  const retry = useCallback((text: string) => { void sendRef.current(text); }, []);
+  const suggest = (prompt: string) => { setDraft(prompt); window.setTimeout(() => { const box = composerRef.current; if (box) { box.focus(); box.setSelectionRange(prompt.length, prompt.length); } }, 0); };
 
   const onKeyDown = (event: KeyboardEvent<HTMLTextAreaElement>) => {
     if (event.key === "Enter" && !event.shiftKey && !event.nativeEvent.isComposing) { event.preventDefault(); void send(); }
@@ -416,19 +429,27 @@ export function Chat({ bot, bots, conversationId, status, pending: waiting, onCh
   }, [bot]);
 
   return <div className={`chat ${panel === "files" || panel === "memory" ? "with-drawer" : ""} ${panel === "browser" ? "with-browser" : ""}`}>
-    <div className="chat-main">
+    <div className={`chat-main ${dragging ? "dragging" : ""}`}
+      onDragOver={event => { if (event.dataTransfer.types.includes("Files")) { event.preventDefault(); setDragging(true); } }}
+      onDragLeave={event => { if (event.currentTarget === event.target || !event.currentTarget.contains(event.relatedTarget as Node)) setDragging(false); }}
+      onDrop={event => { if (event.dataTransfer.files.length) { event.preventDefault(); setDragging(false); void attach(event.dataTransfer.files); } }}>
+      {dragging && <div className="drop-overlay"><Paperclip size={20} /><strong>Drop to attach</strong><small>{bot.capabilities.files_read ? `Saved to ${bot.name}'s workspace` : "Small text files are added to the message"}</small></div>}
       <header className="chat-header">
         <div className="chat-title">
           <Avatar bot={bot} size={bot.role === "main" ? 50 : 40} working={working} />
           <div><h2>{bot.name}</h2><div className="badges">{capabilityBadges.map(badge => <span className="badge" key={badge}>{badge}</span>)}</div></div>
         </div>
-        <div className="row">
-          {bot.capabilities.browser && <button type="button" className={`icon-button ${panel === "browser" ? "active" : ""}`} title="Watch the bot's browser" onClick={() => togglePanel("browser")}><Eye size={16} /></button>}
+        <div className="row chat-tools">
           {bot.capabilities.browser && !status?.cloud_browsers && <button type="button" className={`button ${browserHeld ? "warning" : "secondary"} small`} onClick={toggleBrowser} title={browserHeld ? "Hand the browser back to the bot" : "Take control of the bot's browser, for example to sign in"}><MousePointerClick size={14} /><span className="button-label">{browserHeld ? "Hand back browser" : "Take over browser"}</span></button>}
-          {bot.capabilities.files_read && <button type="button" className={`icon-button ${panel === "files" ? "active" : ""}`} title="Workspace files" onClick={() => togglePanel("files")}><FolderOpen size={16} /></button>}
-          {home && <button type="button" className={`icon-button ${panel === "memory" ? "active" : ""}`} title={`Memory · ${memoryWhereLabel(home, bot)}`} aria-label="Memory" onClick={() => togglePanel("memory")}><Brain size={16} /></button>}
-          <button type="button" className="icon-button" title="Start fresh: keep this conversation on screen, but don't carry it into what the bot remembers right now" aria-label="Start fresh" onClick={startFresh} disabled={working || turns.length === 0}><RotateCcw size={16} /></button>
-          <button type="button" className="icon-button" title="Edit bot" aria-label="Edit bot" onClick={onEdit}><SlidersHorizontal size={16} /></button>
+          <div className="tool-group" role="group" aria-label="Panels">
+            {bot.capabilities.browser && <button type="button" className={`tool ${panel === "browser" ? "active" : ""}`} title="Watch the bot's browser" aria-label="Browser" aria-pressed={panel === "browser"} onClick={() => togglePanel("browser")}><Eye size={15} /></button>}
+            {bot.capabilities.files_read && <button type="button" className={`tool ${panel === "files" ? "active" : ""}`} title="Workspace files" aria-label="Files" aria-pressed={panel === "files"} onClick={() => togglePanel("files")}><FolderOpen size={15} /></button>}
+            {home && <button type="button" className={`tool ${panel === "memory" ? "active" : ""}`} title={`Memory · ${memoryWhereLabel(home, bot)}`} aria-label="Memory" aria-pressed={panel === "memory"} onClick={() => togglePanel("memory")}><Brain size={15} /></button>}
+          </div>
+          <div className="tool-group" role="group" aria-label="Conversation">
+            <button type="button" className="tool" title="Start fresh: keep this conversation on screen, but don't carry it into what the bot remembers right now" aria-label="Start fresh" onClick={startFresh} disabled={working || turns.length === 0}><RotateCcw size={15} /></button>
+            <button type="button" className="tool" title="Bot settings" aria-label="Edit bot" onClick={onEdit}><SlidersHorizontal size={15} /></button>
+          </div>
         </div>
       </header>
       {status && !status.runtime_ready && <div className="banner">Starting the bot engine…</div>}
@@ -438,12 +459,14 @@ export function Chat({ bot, bots, conversationId, status, pending: waiting, onCh
           <Avatar bot={bot} size={84} />
           <h3>{bot.name}</h3>
           <p>{bot.instructions ? intro(bot.instructions) : "Ask me anything."}</p>
+          <div className="starters">{starterPrompts(bot).map(prompt => <button type="button" key={prompt} className="starter" onClick={() => suggest(prompt)}>{prompt.trim().replace(/:$/, "")}{prompt.endsWith(" ") ? "…" : ""}</button>)}</div>
         </div>}
         {turns.length > shown && <button type="button" className="show-earlier" onClick={() => setShown(value => value + TURNS_SHOWN)}>Show earlier messages</button>}
         {turns.map((turn, index) => index < turns.length - shown ? null : <Fragment key={turn.id}>
           {turn.section && <div className="section-divider"><span>{turn.section} · {new Date(turn.started_at).toLocaleDateString(undefined, { day: "numeric", month: "short" })}</span></div>}
           <TurnView turn={turn} bot={bot} events={eventsByTurn[index]} working={index === turns.length - 1 && working}
-            memoryWhere={memoryWhereLabel(home, bot)} overview={overview} onShowMemory={showMemory} />
+            memoryWhere={memoryWhereLabel(home, bot)} overview={overview} onShowMemory={showMemory}
+            error={turn.status === "failed" ? detail?.runs.find(run => run.id === turn.run_id)?.error_message : undefined} onRetry={retry} />
         </Fragment>)}
         {detail?.conversation.context_start && lastTurn && lastTurn.started_at < detail.conversation.context_start && <p className="fresh-note">Fresh start. {bot.name} won't carry the conversation above into new messages; memories still apply.</p>}
         {proposals.map(proposal => <ProposalCard key={proposal.id} bot={bot} proposal={proposal} onAnswered={() => { setProposals(current => current.filter(item => item.id !== proposal.id)); onChanged(); }} />)}
@@ -452,19 +475,20 @@ export function Chat({ bot, bots, conversationId, status, pending: waiting, onCh
         {approvals.map(interaction => <ApprovalCard key={interaction.id} interaction={interaction} onRespond={(intent, content) => respond(interaction, intent, content)} />)}
         {questions.map(interaction => <QuestionCard key={interaction.id} interaction={interaction} onAnswer={text => void send(text)} />)}
       </div></div>
+      {showJump && <button type="button" className="jump-latest" onClick={jumpToLatest}><ArrowDown size={14} />Jump to latest</button>}
       <footer className="composer-wrap">
         {error && <div className="inline-error"><CircleAlert size={14} /><span>{error}</span><button type="button" className="icon-button ghost tiny" onClick={() => setError("")}><X size={12} /></button></div>}
         {attachments.length > 0 && <div className="attachments">{attachments.map((item, index) => <span className="attachment" key={index}><Paperclip size={12} />{item.name}<button type="button" onClick={() => setAttachments(current => current.filter((_, i) => i !== index))} aria-label={`Remove ${item.name}`}><X size={11} /></button></span>)}</div>}
         <div className="composer">
           <button type="button" className="icon-button ghost" title="Attach files" onClick={() => fileInput.current?.click()}><Paperclip size={17} /></button>
           <input ref={fileInput} type="file" multiple hidden onChange={event => { void attach(event.target.files); event.target.value = ""; }} />
-          <textarea value={draft} onChange={event => setDraft(event.target.value)} onKeyDown={onKeyDown} rows={1}
+          <textarea ref={composerRef} value={draft} onChange={event => setDraft(event.target.value)} onKeyDown={onKeyDown} rows={1}
             placeholder={questions.length ? "Answer the bot…" : approvals.length ? "Answer the approval above first" : `Message ${bot.name}`}
             disabled={approvals.length > 0} />
           {working ? <button type="button" className="send stop" title="Stop" onClick={() => activeRun && api.cancel(activeRun.id).then(load)}><Square size={14} /></button>
             : <button type="button" className="send" title="Send" disabled={sending || (!draft.trim() && !attachments.length) || approvals.length > 0} onClick={() => void send()}><ArrowUp size={17} /></button>}
         </div>
-        <div className="composer-hint">{bot.model || "default model"} · Enter to send, Shift+Enter for a new line</div>
+        <div className="composer-hint"><span className="model-name">{bot.model || defaultModel || "provider default"}</span> · Enter to send, Shift+Enter for a new line · drop files to attach</div>
       </footer>
     </div>
     {panel === "files" && <FilesDrawer bot={bot} onClose={() => setPanel(null)} refreshKey={refreshKey} />}

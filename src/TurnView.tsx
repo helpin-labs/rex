@@ -1,5 +1,5 @@
 import { memo, useEffect, useMemo, useState } from "react";
-import { Brain, Check, ChevronRight, CircleAlert, LoaderCircle } from "lucide-react";
+import { Brain, Check, ChevronRight, CircleAlert, Copy, LoaderCircle, RotateCcw } from "lucide-react";
 import { applyRunEvent, emptyRunStreamState } from "./runStream";
 import { formatElapsed, isControlTool, stepLabel } from "./steps";
 import { bankLabel } from "./MemoryPanel";
@@ -8,6 +8,7 @@ import { Markdown } from "./ui";
 import { AppLogo } from "./AppLogo";
 import { BotFace } from "./BotFace";
 import { TextWithJson } from "./JsonBlock";
+import { turnFailure } from "./chatHelpers";
 
 // TurnView renders one exchange in the style of Helpin's transcript: the
 // user's message; the bot's work (thinking, tool steps, narration) collapsed
@@ -56,6 +57,8 @@ type TurnViewProps = {
   turn: Turn; bot: Bot; events: RunEventEnvelope[]; working: boolean;
   // Where this bot's memories are kept, e.g. "Only Spain trip".
   memoryWhere: string; overview: MemoryOverview | null; onShowMemory: (documentId?: string) => void;
+  // Why the turn's run failed, and how to send its message again.
+  error?: string; onRetry?: (text: string) => void;
 };
 
 // The conversation is polled every few seconds, which hands every turn a
@@ -65,7 +68,7 @@ function sameTurn(a: TurnViewProps, b: TurnViewProps) {
     a.turn.id === b.turn.id && a.turn.status === b.turn.status && a.turn.assistant_text === b.turn.assistant_text &&
     a.turn.settled_at === b.turn.settled_at && a.turn.memory_status === b.turn.memory_status && a.turn.memory_facts === b.turn.memory_facts &&
     a.turn.run_id === b.turn.run_id && (a.turn.recalled?.length ?? 0) === (b.turn.recalled?.length ?? 0) &&
-    a.memoryWhere === b.memoryWhere && a.overview === b.overview && a.onShowMemory === b.onShowMemory;
+    a.memoryWhere === b.memoryWhere && a.overview === b.overview && a.onShowMemory === b.onShowMemory && a.error === b.error && a.onRetry === b.onRetry;
 }
 
 // UsedMemories lists what the bot remembered when it answered.
@@ -80,6 +83,16 @@ function UsedMemories({ recalled, overview }: { recalled: { text: string; bank: 
   </div>;
 }
 
+const clock = (at?: string) => at ? new Date(at).toLocaleTimeString(undefined, { hour: "2-digit", minute: "2-digit" }) : "";
+
+function CopyButton({ text }: { text: string }) {
+  const [copied, setCopied] = useState(false);
+  const copy = async () => {
+    try { await navigator.clipboard.writeText(text); setCopied(true); window.setTimeout(() => setCopied(false), 1400); } catch { /* clipboard unavailable */ }
+  };
+  return <button type="button" className="reply-action" onClick={copy} aria-label="Copy answer">{copied ? <Check size={12} /> : <Copy size={12} />}{copied ? "Copied" : "Copy"}</button>;
+}
+
 // Long pasted messages fold to their first lines; the whole text is a click away.
 const FOLD_LINES = 10;
 function UserText({ text }: { text: string }) {
@@ -91,7 +104,7 @@ function UserText({ text }: { text: string }) {
   </>;
 }
 
-export const TurnView = memo(function TurnView({ turn, bot, events, working, memoryWhere, overview, onShowMemory }: TurnViewProps) {
+export const TurnView = memo(function TurnView({ turn, bot, events, working, memoryWhere, overview, onShowMemory, error, onRetry }: TurnViewProps) {
   // Events arrive in order (stored by sequence, live by arrival).
   const state = useMemo(() => events.reduce((current, event) => applyRunEvent(current, event, event.sent_at || new Date().toISOString()), emptyRunStreamState()), [events]);
   const [open, setOpen] = useState(false);
@@ -143,7 +156,7 @@ export const TurnView = memo(function TurnView({ turn, bot, events, working, mem
   }
 
   return <div className="turn">
-    {turn.user_text && <div className={`bubble user ${turn.origin === "rex" ? "from-rex" : ""}`}>
+    {turn.user_text && <div className={`bubble user ${turn.origin === "rex" ? "from-rex" : ""}`} title={clock(turn.started_at)}>
       {turn.origin === "rex" && <small className="bubble-from">From Rex</small>}
       <UserText text={turn.user_text} />
     </div>}
@@ -151,9 +164,17 @@ export const TurnView = memo(function TurnView({ turn, bot, events, working, mem
       <div className="reply-meta"><span className="reply-name">{bot.role === "main" ? <AppLogo size={18} /> : <BotFace icon={bot.emoji} color={bot.color} seed={bot.id} size={18} />} {bot.name}</span>
         {turn.origin?.startsWith("report:") && <span className="reply-tag">Report from {turn.origin.slice("report:".length)}</span>}</div>
       {workRow}
-      {answerText && <div className={`bubble bot ${turn.status === "failed" ? "failed" : ""}`}><Markdown>{answerText}</Markdown>{working && answer?.status !== "completed" && <span className="caret" />}</div>}
-      {turn.status === "failed" && !answerText && <div className="bubble bot failed"><CircleAlert size={14} /> The bot could not finish this message.</div>}
+      {answerText && <div className="bubble bot"><Markdown>{answerText}</Markdown>{working && answer?.status !== "completed" && <span className="caret" />}</div>}
+      {turn.status === "failed" && <div className="turn-failure" title={error}>
+        <CircleAlert size={15} />
+        <div className="grow"><strong>{answerText ? "The bot stopped before finishing" : "This message didn't go through"}</strong><span>{turnFailure(error)}</span></div>
+        {onRetry && turn.user_text && <button type="button" className="button secondary small" onClick={() => onRetry(turn.user_text)}><RotateCcw size={12} />Try again</button>}
+      </div>}
       {turn.status === "cancelled" && <div className="turn-note">Stopped.</div>}
+      {!working && answerText && turn.status !== "failed" && <div className="reply-actions">
+        <CopyButton text={answerText} />
+        {turn.settled_at && <span className="reply-time">{clock(turn.settled_at)}</span>}
+      </div>}
       <div className="memory-notes">
         {!!turn.recalled?.length && <UsedMemories recalled={turn.recalled} overview={overview} />}
         {turn.memory_status === "retained" && turn.memory_facts > 0 && <button type="button" className="memory-chip saved" title="Show what was remembered" onClick={() => onShowMemory(`turn/${turn.id}`)}>

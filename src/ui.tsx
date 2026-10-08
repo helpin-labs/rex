@@ -1,13 +1,24 @@
-import { type ReactNode, useEffect } from "react";
+import { type ReactNode, useEffect, useRef, useState } from "react";
 import ReactMarkdown from "react-markdown";
 import remarkGfm from "remark-gfm";
-import { ArrowLeft, Search, X } from "lucide-react";
+import { ArrowLeft, Check, Copy, Search, X } from "lucide-react";
 import type { Bot } from "./types";
 import { BotFace } from "./BotFace";
 import { AppLogo } from "./AppLogo";
 
 export function Markdown({ children }: { children: string }) {
-  return <div className="markdown"><ReactMarkdown remarkPlugins={[remarkGfm]}>{children}</ReactMarkdown></div>;
+  return <div className="markdown"><ReactMarkdown remarkPlugins={[remarkGfm]} components={{ pre: CodeBlock }}>{children}</ReactMarkdown></div>;
+}
+
+// Code blocks get a copy button.
+function CodeBlock({ children }: { children?: ReactNode }) {
+  const ref = useRef<HTMLPreElement>(null);
+  const [copied, setCopied] = useState(false);
+  const copy = async () => {
+    try { await navigator.clipboard.writeText(ref.current?.innerText || ""); setCopied(true); window.setTimeout(() => setCopied(false), 1400); } catch { /* clipboard unavailable */ }
+  };
+  return <div className="code-block"><pre ref={ref}>{children}</pre>
+    <button type="button" className="code-copy" onClick={copy} aria-label="Copy code">{copied ? <Check size={12} /> : <Copy size={12} />}</button></div>;
 }
 
 /** Mixes a #rrggbb colour towards white (amount > 0) or black (< 0). */
