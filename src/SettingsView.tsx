@@ -131,10 +131,10 @@ function TestResult({ result }: { result: ProviderTest | null }) {
   return <div className={`test-result ${result.ok ? "ok" : "bad"}`}>{result.ok ? <Check size={14} /> : <CircleAlert size={14} />}<span>{result.message}</span></div>;
 }
 
-export function SettingsView({ status, onSaved }: { status: Status | null; onSaved: (settings: Settings) => void }) {
+export function SettingsView({ status, initialTab, onSaved }: { status: Status | null; initialTab?: "models" | "tools" | "memory" | "about"; onSaved: (settings: Settings) => void }) {
   const [settings, setSettings] = useState<Settings | null>(null);
   const [savedSettings, setSavedSettings] = useState<Settings | null>(null);
-  const [tab, setTab] = useState<"models" | "tools" | "memory" | "about">("models");
+  const [tab, setTab] = useState<"models" | "tools" | "memory" | "about">(initialTab || "models");
   const [refresh, setRefresh] = useState(0);
   const local = useModels("local", refresh);
   const defaultModels = useModels(settings?.default_provider || "local", refresh);

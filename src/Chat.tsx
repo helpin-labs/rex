@@ -239,7 +239,7 @@ function useTurnEvents(turns: Turn[], timelines: Record<string, { events: RunEve
 // A bot's thread can grow long; it opens on its latest turns.
 const TURNS_SHOWN = 30;
 
-export function Chat({ bot, bots, conversationId, status, pending: waiting, onChanged, onEdit }: { bot: Bot; bots: Bot[]; conversationId: string; status: Status | null; pending: AttentionItem[]; onChanged: () => void; onEdit: () => void }) {
+export function Chat({ bot, bots, conversationId, status, pending: waiting, onChanged, onEdit, onOpenSettings }: { bot: Bot; bots: Bot[]; conversationId: string; status: Status | null; pending: AttentionItem[]; onChanged: () => void; onEdit: () => void; onOpenSettings?: (tab: "memory") => void }) {
   const missed = waiting.filter(item => item.kind === "missed");
   const proposalKey = waiting.filter(item => item.kind === "proposal").map(item => item.id).join(",");
   const [proposals, setProposals] = useState<InstructionProposal[]>([]);
@@ -469,6 +469,6 @@ export function Chat({ bot, bots, conversationId, status, pending: waiting, onCh
     </div>
     {panel === "files" && <FilesDrawer bot={bot} onClose={() => setPanel(null)} refreshKey={refreshKey} />}
     {panel === "browser" && <BrowserView bot={bot} onClose={() => setPanel(null)} />}
-    {panel === "memory" && home && <MemoryPanel bot={bot} home={home} focusDocument={memoryFocus} onClose={() => setPanel(null)} />}
+    {panel === "memory" && home && <MemoryPanel bot={bot} home={home} focusDocument={memoryFocus} onClose={() => setPanel(null)} onOpenSettings={onOpenSettings && (() => onOpenSettings("memory"))} />}
   </div>;
 }
