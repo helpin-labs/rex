@@ -47,11 +47,11 @@ if [ ! -d "$src/.git" ] || [ "$(git -C "$src" describe --tags 2>/dev/null)" != "
 fi
 generator=()
 if command -v ninja >/dev/null 2>&1; then generator=(-G Ninja); fi
-"$cmake_bin" -S "$src" -B "$src/build" "${generator[@]}" \
+"$cmake_bin" -S "$src" -B "$src/build" ${generator[@]+"${generator[@]}"} \
   -DCMAKE_BUILD_TYPE=Release \
   -DBUILD_SHARED_LIBS=OFF \
   -DGGML_METAL=ON -DGGML_METAL_EMBED_LIBRARY=ON \
-  -DGGML_NATIVE=OFF \
+  -DGGML_NATIVE=OFF -DGGML_OPENMP=OFF \
   -DLLAMA_CURL=OFF -DLLAMA_OPENSSL=OFF \
   -DLLAMA_BUILD_TESTS=OFF -DLLAMA_BUILD_EXAMPLES=OFF -DLLAMA_BUILD_SERVER=ON >/dev/null
 "$cmake_bin" --build "$src/build" --target llama-server -j >/dev/null
