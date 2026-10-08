@@ -354,6 +354,10 @@ export function Chat({ bot, bots, conversationId, status, pending: waiting, defa
   // The working turn streams from the run's live events.
   const liveEvents = useLiveEvents(working ? activeRun?.id : undefined);
   const eventsByTurn = useTurnEvents(turns, timelines, working ? lastTurn?.id : undefined, liveEvents);
+  // When the stream says the run stopped, refresh now rather than at the
+  // next poll, so the turn settles as soon as the answer is complete.
+  const stopped = liveEvents.some(event => event.type === "run.paused" || event.type === "run.completed" || event.type === "run.failed" || event.type === "run.cancelled");
+  useEffect(() => { if (stopped) void load(); }, [stopped, load]);
 
   // The transcript stays at its latest message while the reader is there:
   // steps, answers and cards load after the turns, and each one would

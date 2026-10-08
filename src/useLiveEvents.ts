@@ -6,9 +6,8 @@ import type { RunEventEnvelope } from "./types";
 // useLiveEvents follows a working run's live stream. Streaming text deltas
 // are only sent live (they are not stored), so the active turn reads them
 // from here; stored events come from the timeline. Events arrive many times
-// a second while the model writes, so they are applied in small batches.
-
-const FLUSH_MS = 120;
+// a second while the model writes, so they are applied once per frame; the
+// chat smooths the text itself (useSmoothText).
 export function useLiveEvents(runId: string | undefined): RunEventEnvelope[] {
   const [events, setEvents] = useState<RunEventEnvelope[]>([]);
   useEffect(() => {
@@ -18,6 +17,8 @@ export function useLiveEvents(runId: string | undefined): RunEventEnvelope[] {
     let cancelled = false;
     let pending: RunEventEnvelope[] = [];
     let timer = 0;
+    // The next frame, or a short timer while the window is hidden.
+    const schedule = () => document.hidden ? window.setTimeout(flush, 100) : requestAnimationFrame(flush);
     const flush = () => {
       timer = 0;
       const batch = pending;
@@ -32,12 +33,12 @@ export function useLiveEvents(runId: string | undefined): RunEventEnvelope[] {
           try {
             const event = JSON.parse((raw as MessageEvent<string>).data) as RunEventEnvelope;
             pending.push(event);
-            if (!timer) timer = window.setTimeout(flush, FLUSH_MS);
+            if (!timer) timer = schedule();
           } catch { /* ignore malformed events */ }
         });
       }
     });
-    return () => { cancelled = true; window.clearTimeout(timer); source?.close(); };
+    return () => { cancelled = true; window.clearTimeout(timer); cancelAnimationFrame(timer); source?.close(); };
   }, [runId]);
   return events;
 }

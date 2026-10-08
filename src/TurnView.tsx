@@ -1,6 +1,8 @@
-import { memo, useEffect, useMemo, useState } from "react";
+import { memo, useEffect, useMemo, useRef, useState } from "react";
 import { Brain, Check, ChevronRight, CircleAlert, Copy, LoaderCircle, Pencil, RotateCcw } from "lucide-react";
 import { applyRunEvent, emptyRunStreamState } from "./runStream";
+import { closeOpenFence, splitBlocks } from "./streaming";
+import { useSmoothText, useStableText } from "./useSmoothText";
 import { formatElapsed, isControlTool, stepLabel } from "./steps";
 import { bankLabel } from "./MemoryPanel";
 import type { Bot, MemoryOverview, RunEventEnvelope, RunTimelineSegment, RunToolCall, Turn } from "./types";
@@ -95,6 +97,28 @@ function CopyButton({ text }: { text: string }) {
   return <button type="button" className="reply-action" onClick={copy} aria-label="Copy answer">{copied ? <Check size={12} /> : <Copy size={12} />}{copied ? "Copied" : "Copy"}</button>;
 }
 
+// The run's state from its events. While a turn streams, events only grow at
+// the end, so only new ones are applied rather than all of them again.
+function useRunState(events: RunEventEnvelope[]) {
+  const memo = useRef<{ events: RunEventEnvelope[]; state: ReturnType<typeof emptyRunStreamState> } | null>(null);
+  return useMemo(() => {
+    const apply = (current: ReturnType<typeof emptyRunStreamState>, event: RunEventEnvelope) => applyRunEvent(current, event, event.sent_at || new Date().toISOString());
+    const last = memo.current;
+    const grows = !!last && events.length >= last.events.length && last.events.every((event, index) => events[index] === event);
+    const state = grows ? events.slice(last!.events.length).reduce(apply, last!.state) : events.reduce(apply, emptyRunStreamState());
+    memo.current = { events, state };
+    return state;
+  }, [events]);
+}
+
+// While text streams, finished paragraphs are parsed once; only the one
+// still growing is parsed again, with any open code fence closed.
+const MarkdownBlock = memo(function MarkdownBlock({ text }: { text: string }) { return <Markdown>{text}</Markdown>; });
+function StreamingMarkdown({ text }: { text: string }) {
+  const blocks = splitBlocks(text);
+  return <div className="streaming-md">{blocks.map((block, index) => <MarkdownBlock key={index} text={index === blocks.length - 1 ? closeOpenFence(block) : block} />)}</div>;
+}
+
 // Long pasted messages fold to their first lines; the whole text is a click away.
 const FOLD_LINES = 10;
 function UserText({ text }: { text: string }) {
@@ -115,7 +139,7 @@ export const TurnView = memo(function TurnView({ turn, bot, events, working, mem
     try { await onEditMessage(turn.id, editing.trim()); setEditing(null); } finally { setSaving(false); }
   };
   // Events arrive in order (stored by sequence, live by arrival).
-  const state = useMemo(() => events.reduce((current, event) => applyRunEvent(current, event, event.sent_at || new Date().toISOString()), emptyRunStreamState()), [events]);
+  const state = useRunState(events);
   const [open, setOpen] = useState(false);
   const now = useNow(working);
 
@@ -131,7 +155,8 @@ export const TurnView = memo(function TurnView({ turn, bot, events, working, mem
   const answer = answerIndex >= 0 ? (segments[answerIndex] as Extract<RunTimelineSegment, { kind: "assistant" }>) : null;
   const work = segments.filter((_, index) => index !== answerIndex);
   const tools = work.filter((segment): segment is RunToolCall => segment.kind === "tool");
-  const answerText = answer?.content || (!working ? turn.assistant_text : "");
+  const answerText = useStableText(answer?.content || (!working ? turn.assistant_text : ""), turn.status !== "failed" && turn.status !== "cancelled");
+  const smooth = useSmoothText(answerText, working);
   const elapsedMs = (turn.settled_at ? Date.parse(turn.settled_at) : now) - Date.parse(turn.started_at);
   const latest = [...tools].reverse()[0];
   const thinking = state.reasoning.some(item => item.status !== "completed");
@@ -182,14 +207,14 @@ export const TurnView = memo(function TurnView({ turn, bot, events, working, mem
       <div className="reply-meta"><span className="reply-name">{bot.role === "main" ? <AppLogo size={18} /> : <BotFace icon={bot.emoji} color={bot.color} seed={bot.id} size={18} />} {bot.name}</span>
         {turn.origin?.startsWith("report:") && <span className="reply-tag">Report from {turn.origin.slice("report:".length)}</span>}</div>
       {workRow}
-      {answerText && <div className="bubble bot"><Markdown>{answerText}</Markdown>{working && answer?.status !== "completed" && <span className="caret" />}</div>}
+      {answerText && <div className={`bubble bot ${smooth.animating ? "streaming" : ""}`}>{smooth.animating ? <StreamingMarkdown text={smooth.text} /> : <Markdown>{answerText}</Markdown>}</div>}
       {turn.status === "failed" && <div className="turn-failure" title={error}>
         <CircleAlert size={15} />
         <div className="grow"><strong>{answerText ? "The bot stopped before finishing" : "This message didn't go through"}</strong><span>{turnFailure(error)}</span></div>
         {onRetry && turn.user_text && <button type="button" className="button secondary small" onClick={() => onRetry(turn.user_text)}><RotateCcw size={12} />Try again</button>}
       </div>}
       {turn.status === "cancelled" && <div className="turn-note">Stopped.</div>}
-      {!working && answerText && turn.status !== "failed" && <div className="reply-actions">
+      {!working && !smooth.animating && answerText && turn.status !== "failed" && <div className="reply-actions">
         <CopyButton text={answerText} />
         {turn.settled_at && <span className="reply-time">{clock(turn.settled_at)}</span>}
       </div>}
