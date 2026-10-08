@@ -23,7 +23,7 @@ import (
 	protocol "github.com/modelcontextprotocol/go-sdk/mcp"
 )
 
-// Google apps (Gmail, Google Sheets) are connections Rex serves itself.
+// Google apps (Gmail, Google Sheets, Google Calendar, Google Drive) are connections Rex serves itself.
 // Google offers no MCP servers Rex can register with, so Rex signs in to
 // Google as a desktop app (PKCE, on its loopback callback) and provides
 // the tools from its own MCP endpoint. A connection's URL names the
@@ -39,6 +39,8 @@ var (
 	gmailAPI        = "https://gmail.googleapis.com/gmail/v1/users/me"
 	sheetsAPI       = "https://sheets.googleapis.com/v4/spreadsheets"
 	driveAPI        = "https://www.googleapis.com/drive/v3"
+	driveUploadAPI  = "https://www.googleapis.com/upload/drive/v3"
+	calendarAPI     = "https://www.googleapis.com/calendar/v3"
 )
 
 // The Google client Rex signs in as. Release builds set these with
@@ -357,8 +359,10 @@ type googleTool struct {
 
 // googleServices is keyed by connection URL.
 var googleServices = map[string]*googleService{
-	"google:gmail":  gmailService,
-	"google:sheets": sheetsService,
+	"google:gmail":    gmailService,
+	"google:sheets":   sheetsService,
+	"google:calendar": calendarService,
+	"google:drive":    driveService,
 }
 
 func googleToolList(service *googleService) []MCPTool {
@@ -464,30 +468,40 @@ func (e *googleAPIError) Error() string {
 // do sends body as JSON (when not nil) and decodes the reply into out.
 func (g *googleAPI) do(ctx context.Context, method, endpoint string, body, out any) error {
 	var reader io.Reader
+	contentType := ""
 	if body != nil {
 		payload, err := json.Marshal(body)
 		if err != nil {
 			return err
 		}
-		reader = strings.NewReader(string(payload))
+		reader, contentType = strings.NewReader(string(payload)), "application/json"
 	}
-	request, err := http.NewRequestWithContext(ctx, method, endpoint, reader)
-	if err != nil {
+	raw, err := g.send(ctx, method, endpoint, contentType, reader, 32<<20)
+	if err != nil || out == nil || len(raw) == 0 {
 		return err
 	}
+	return json.Unmarshal(raw, out)
+}
+
+// send makes a request with any body and returns up to limit bytes of the
+// reply; a longer reply is cut, not refused.
+func (g *googleAPI) send(ctx context.Context, method, endpoint, contentType string, body io.Reader, limit int64) ([]byte, error) {
+	request, err := http.NewRequestWithContext(ctx, method, endpoint, body)
+	if err != nil {
+		return nil, err
+	}
 	request.Header.Set("Authorization", "Bearer "+g.token)
-	request.Header.Set("Accept", "application/json")
-	if body != nil {
-		request.Header.Set("Content-Type", "application/json")
+	if contentType != "" {
+		request.Header.Set("Content-Type", contentType)
 	}
 	response, err := g.client.Do(request)
 	if err != nil {
-		return err
+		return nil, err
 	}
 	defer response.Body.Close()
-	raw, err := io.ReadAll(io.LimitReader(response.Body, 32<<20))
+	raw, err := io.ReadAll(io.LimitReader(response.Body, limit))
 	if err != nil {
-		return err
+		return nil, err
 	}
 	if response.StatusCode >= 300 {
 		var failure struct {
@@ -496,12 +510,9 @@ func (g *googleAPI) do(ctx context.Context, method, endpoint string, body, out a
 			} `json:"error"`
 		}
 		_ = json.Unmarshal(raw, &failure)
-		return &googleAPIError{Status: response.StatusCode, Message: firstNonEmpty(failure.Error.Message, http.StatusText(response.StatusCode))}
+		return nil, &googleAPIError{Status: response.StatusCode, Message: firstNonEmpty(failure.Error.Message, http.StatusText(response.StatusCode))}
 	}
-	if out == nil || len(raw) == 0 {
-		return nil
-	}
-	return json.Unmarshal(raw, out)
+	return raw, nil
 }
 
 // decodeInput reads a tool's arguments, refusing unknown fields so a

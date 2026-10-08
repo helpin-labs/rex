@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"io"
 	"mime"
+	"mime/multipart"
 	"mime/quotedprintable"
 	"net/http"
 	"net/http/httptest"
@@ -14,6 +15,7 @@ import (
 	"strings"
 	"sync"
 	"testing"
+	"time"
 
 	protocol "github.com/modelcontextprotocol/go-sdk/mcp"
 )
@@ -51,6 +53,8 @@ type fakeGoogle struct {
 	revoked  []string
 	drafts   []string
 	paths    []string
+	// routes answer "METHOD /path" requests a test sets up.
+	routes map[string]http.HandlerFunc
 }
 
 func newFakeGoogle(t *testing.T) *fakeGoogle {
@@ -58,11 +62,13 @@ func newFakeGoogle(t *testing.T) *fakeGoogle {
 	fake := &fakeGoogle{}
 	fake.Server = httptest.NewServer(http.HandlerFunc(fake.serve))
 	t.Cleanup(fake.Close)
-	saved := []string{googleAuthURL, googleTokenURL, googleRevokeURL, gmailAPI, sheetsAPI, driveAPI}
+	fake.routes = map[string]http.HandlerFunc{}
+	saved := []string{googleAuthURL, googleTokenURL, googleRevokeURL, gmailAPI, sheetsAPI, driveAPI, driveUploadAPI, calendarAPI}
 	googleAuthURL, googleTokenURL, googleRevokeURL = fake.URL+"/auth", fake.URL+"/token", fake.URL+"/revoke"
 	gmailAPI, sheetsAPI, driveAPI = fake.URL+"/gmail", fake.URL+"/sheets", fake.URL+"/drive"
+	driveUploadAPI, calendarAPI = fake.URL+"/upload", fake.URL+"/calendar"
 	t.Cleanup(func() {
-		googleAuthURL, googleTokenURL, googleRevokeURL, gmailAPI, sheetsAPI, driveAPI = saved[0], saved[1], saved[2], saved[3], saved[4], saved[5]
+		googleAuthURL, googleTokenURL, googleRevokeURL, gmailAPI, sheetsAPI, driveAPI, driveUploadAPI, calendarAPI = saved[0], saved[1], saved[2], saved[3], saved[4], saved[5], saved[6], saved[7]
 	})
 	return fake
 }
@@ -89,7 +95,8 @@ func (f *fakeGoogle) serve(w http.ResponseWriter, r *http.Request) {
 			_ = json.NewEncoder(w).Encode(map[string]string{"error": "invalid_client"})
 			return
 		}
-		scopes := "openid https://www.googleapis.com/auth/userinfo.email " + gmailModify + " " + sheetsScope + " " + driveMetadataScope
+		scopes := strings.Join([]string{"openid https://www.googleapis.com/auth/userinfo.email", gmailModify, sheetsScope, driveMetadataScope,
+			calendarReadScope, calendarEventsScope, driveReadScope, driveFileScope}, " ")
 		switch {
 		case form.Get("grant_type") == "authorization_code" && form.Get("code_verifier") != "" && form.Get("code") == "good-code":
 			f.valid = "access-1"
@@ -113,6 +120,10 @@ func (f *fakeGoogle) serve(w http.ResponseWriter, r *http.Request) {
 	if r.Header.Get("Authorization") != "Bearer "+f.valid || f.valid == "" {
 		w.WriteHeader(http.StatusUnauthorized)
 		_ = json.NewEncoder(w).Encode(map[string]any{"error": map[string]any{"code": 401, "message": "Request had invalid authentication credentials."}})
+		return
+	}
+	if route, ok := f.routes[r.Method+" "+r.URL.Path]; ok {
+		route(w, r)
 		return
 	}
 	header := func(name, value string) map[string]string { return map[string]string{"name": name, "value": value} }
@@ -388,5 +399,157 @@ func TestSpreadsheetHelpers(t *testing.T) {
 	rows, truncated := limitCells([][]any{{1, 2}, {3, 4}, {5, 6}}, 5)
 	if len(rows) != 2 || !truncated {
 		t.Fatalf("limitCells kept %d rows", len(rows))
+	}
+}
+
+func TestEventTimes(t *testing.T) {
+	if got, err := eventTime("2026-10-09", ""); err != nil || got["date"] != "2026-10-09" {
+		t.Fatalf("all-day %v, %v", got, err)
+	}
+	got, err := eventTime("2026-10-09T15:00", "Europe/Berlin")
+	if err != nil || got["dateTime"] != "2026-10-09T15:00:00+02:00" || got["timeZone"] != "Europe/Berlin" {
+		t.Fatalf("local time in a zone %v, %v", got, err)
+	}
+	if got, _ := eventTime("2026-10-09T13:00:00Z", "Europe/Berlin"); got["dateTime"] != "2026-10-09T15:00:00+02:00" {
+		t.Fatalf("an instant is shown in the event's zone: %v", got)
+	}
+	if _, err := eventTime("tomorrow at 3", "Europe/Berlin"); err == nil {
+		t.Fatal("words are not times")
+	}
+	if _, err := eventTime("2026-10-09T15:00", "Mars/Olympus"); err == nil {
+		t.Fatal("unknown zones are refused")
+	}
+}
+
+func TestFreeSlots(t *testing.T) {
+	at := func(hour, minute int) time.Time { return time.Date(2026, 10, 9, hour, minute, 0, 0, time.UTC) }
+	busy := []busyPeriod{{at(13, 0), at(14, 0)}, {at(9, 30), at(10, 30)}, {at(10, 0), at(11, 0)}, {at(11, 10), at(11, 40)}}
+	free := freeSlots(busy, at(9, 0), at(17, 0), 30*time.Minute)
+	want := []busyPeriod{{at(9, 0), at(9, 30)}, {at(11, 40), at(13, 0)}, {at(14, 0), at(17, 0)}}
+	if len(free) != len(want) {
+		t.Fatalf("free %v", free)
+	}
+	for index := range want {
+		if !free[index].start.Equal(want[index].start) || !free[index].end.Equal(want[index].end) {
+			t.Fatalf("slot %d = %v, want %v", index, free[index], want[index])
+		}
+	}
+}
+
+func TestCalendarCreatesAndAnswersEvents(t *testing.T) {
+	ctx := context.Background()
+	host := newSetupTestHost(t)
+	fake := newFakeGoogle(t)
+	connection := signedInGoogleApp(t, host, "google:calendar")
+	var created map[string]any
+	var createdQuery url.Values
+	fake.routes["POST /calendar/calendars/primary/events"] = func(w http.ResponseWriter, r *http.Request) {
+		createdQuery = r.URL.Query()
+		_ = json.NewDecoder(r.Body).Decode(&created)
+		_ = json.NewEncoder(w).Encode(map[string]any{"id": "e1", "summary": created["summary"], "start": created["start"], "end": created["end"], "hangoutLink": "https://meet.google.com/abc"})
+	}
+	tool := func(name string) googleTool {
+		for _, tool := range calendarService.tools {
+			if tool.name == name {
+				return tool
+			}
+		}
+		t.Fatalf("no tool %s", name)
+		return googleTool{}
+	}
+	result, err := host.callGoogle(ctx, *connection, tool("create_event"), json.RawMessage(`{"summary":"Demo","start":"2026-10-09T15:00","end":"2026-10-09T15:30","time_zone":"Europe/Berlin","attendees":["Lee <lee@example.com>"],"add_meet":true}`))
+	if err != nil {
+		t.Fatal(err)
+	}
+	attendees, _ := created["attendees"].([]any)
+	if len(attendees) != 1 || attendees[0].(map[string]any)["email"] != "lee@example.com" || createdQuery.Get("sendUpdates") != "all" || createdQuery.Get("conferenceDataVersion") != "1" {
+		t.Fatalf("invites attendees with a Meet link: %v %v", created, createdQuery)
+	}
+	if payload, _ := json.Marshal(result); !strings.Contains(string(payload), "meet.google.com/abc") {
+		t.Fatalf("result %s", payload)
+	}
+
+	var answered map[string]any
+	fake.routes["GET /calendar/calendars/primary/events/e2"] = func(w http.ResponseWriter, _ *http.Request) {
+		_ = json.NewEncoder(w).Encode(map[string]any{"id": "e2", "attendees": []map[string]any{{"email": "boss@example.com", "organizer": true, "responseStatus": "accepted"}, {"email": "sam@example.com", "self": true, "responseStatus": "needsAction"}}})
+	}
+	fake.routes["PATCH /calendar/calendars/primary/events/e2"] = func(w http.ResponseWriter, r *http.Request) {
+		_ = json.NewDecoder(r.Body).Decode(&answered)
+		_ = json.NewEncoder(w).Encode(map[string]any{"id": "e2"})
+	}
+	if _, err := host.callGoogle(ctx, *connection, tool("respond_to_event"), json.RawMessage(`{"event_id":"e2","response":"tentative"}`)); err != nil {
+		t.Fatal(err)
+	}
+	people, _ := answered["attendees"].([]any)
+	if len(people) != 2 || people[1].(map[string]any)["responseStatus"] != "tentative" || people[0].(map[string]any)["responseStatus"] != "accepted" {
+		t.Fatalf("only the user's answer changes: %v", answered)
+	}
+}
+
+func TestDriveReadsDocsAndCreatesThemFromMarkdown(t *testing.T) {
+	ctx := context.Background()
+	host := newSetupTestHost(t)
+	fake := newFakeGoogle(t)
+	connection := signedInGoogleApp(t, host, "google:drive")
+	fake.routes["GET /drive/files/doc123456789"] = func(w http.ResponseWriter, _ *http.Request) {
+		_ = json.NewEncoder(w).Encode(map[string]any{"id": "doc123456789", "name": "Plan", "mimeType": googleDocType, "webViewLink": "https://docs.google.com/document/d/doc123456789/edit"})
+	}
+	fake.routes["GET /drive/files/doc123456789/export"] = func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", r.URL.Query().Get("mimeType"))
+		_, _ = w.Write([]byte("# Plan\n\n- ship it"))
+	}
+	read := driveService.tools[2]
+	result, err := host.callGoogle(ctx, *connection, read, json.RawMessage(`{"file":"https://docs.google.com/document/d/doc123456789/edit?usp=sharing"}`))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if item := result.(map[string]any); item["content"] != "# Plan\n\n- ship it" || item["format"] != "markdown" || item["kind"] != "document" {
+		t.Fatalf("read %v", item)
+	}
+
+	var metadata map[string]any
+	var markdown string
+	fake.routes["POST /upload/files"] = func(w http.ResponseWriter, r *http.Request) {
+		_, params, _ := mime.ParseMediaType(r.Header.Get("Content-Type"))
+		reader := multipart.NewReader(r.Body, params["boundary"])
+		first, _ := reader.NextPart()
+		_ = json.NewDecoder(first).Decode(&metadata)
+		second, _ := reader.NextPart()
+		body, _ := io.ReadAll(second)
+		markdown = second.Header.Get("Content-Type") + "|" + string(body)
+		_ = json.NewEncoder(w).Encode(map[string]any{"id": "new1", "name": metadata["name"], "mimeType": googleDocType})
+	}
+	create := driveService.tools[3]
+	if _, err := host.callGoogle(ctx, *connection, create, json.RawMessage(`{"title":"Notes","content":"# Hello","folder_id":"https://drive.google.com/drive/folders/folder123456"}`)); err != nil {
+		t.Fatal(err)
+	}
+	parents, _ := metadata["parents"].([]any)
+	if metadata["mimeType"] != googleDocType || len(parents) != 1 || parents[0] != "folder123456" || markdown != "text/markdown; charset=UTF-8|# Hello" {
+		t.Fatalf("upload metadata %v, content %q", metadata, markdown)
+	}
+
+	fake.routes["GET /drive/files/pdf123456789"] = func(w http.ResponseWriter, _ *http.Request) {
+		_ = json.NewEncoder(w).Encode(map[string]any{"id": "pdf123456789", "name": "Invoice", "mimeType": "application/pdf"})
+	}
+	if _, err := host.callGoogle(ctx, *connection, read, json.RawMessage(`{"file":"pdf123456789"}`)); err == nil || !strings.Contains(err.Error(), "pdf") {
+		t.Fatalf("a PDF can't be read as text, got %v", err)
+	}
+}
+
+func TestParseDriveID(t *testing.T) {
+	for input, want := range map[string]string{
+		"https://drive.google.com/file/d/1AbCdEfGhIj/view":        "1AbCdEfGhIj",
+		"https://drive.google.com/drive/folders/1AbCdEfGhIj":      "1AbCdEfGhIj",
+		"https://drive.google.com/open?id=1AbCdEfGhIj":            "1AbCdEfGhIj",
+		"https://docs.google.com/presentation/d/1AbCdEfGhIj/edit": "1AbCdEfGhIj",
+		"1AbCdEfGhIj": "1AbCdEfGhIj",
+		"root":        "root",
+	} {
+		if got, err := parseDriveID(input); err != nil || got != want {
+			t.Fatalf("parseDriveID(%q) = %q, %v", input, got, err)
+		}
+	}
+	if _, err := parseDriveID("my notes"); err == nil {
+		t.Fatal("a name is not an id")
 	}
 }

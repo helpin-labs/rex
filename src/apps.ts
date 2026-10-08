@@ -1,4 +1,4 @@
-import { siAirtable, siAtlassian, siCloudflare, siClickup, siGithub, siGmail, siGooglesheets, siHuggingface, siIntercom, siLinear, siNeon, siNetlify, siNotion, siPaypal, siPosthog,
+import { siAirtable, siAtlassian, siCloudflare, siClickup, siGithub, siGmail, siGooglecalendar, siGoogledrive, siGooglesheets, siHuggingface, siIntercom, siLinear, siNeon, siNetlify, siNotion, siPaypal, siPosthog,
   siSentry, siStripe, siSupabase, siVercel, siWebflow, siWix, siZapier } from "simple-icons";
 import type { MCPConnection } from "./types";
 
@@ -35,6 +35,10 @@ export const appCatalog: AppEntry[] = [
     access: "Read, search and label your email, save drafts and send email. Rex can't permanently delete mail.", icon: icon(siGmail), color: "#EA4335" },
   { id: "google-sheets", name: "Google Sheets", description: "Find, read and update spreadsheets.", category: "Work", url: "google:sheets", auth: "google",
     access: "Read and edit your spreadsheets, create new ones, and see the names of files in your Drive to find them.", icon: icon(siGooglesheets), color: "#34A853" },
+  { id: "google-calendar", name: "Google Calendar", description: "See your schedule, find free time and book meetings.", category: "Work", url: "google:calendar", auth: "google",
+    access: "See your calendars and when you're free, add and change events, and answer invitations.", icon: icon(siGooglecalendar), color: "#4285F4" },
+  { id: "google-drive", name: "Google Drive", description: "Search and read your files, create Docs and folders.", category: "Work", url: "google:drive", auth: "google",
+    access: "Search and read your files, and create new Docs and folders. Rex can't change or delete files it didn't create.", icon: icon(siGoogledrive), color: "#4285F4" },
   { id: "notion", name: "Notion", description: "Search, read and update pages and databases.", category: "Work", url: "https://mcp.notion.com/mcp", auth: "oauth", icon: icon(siNotion), color: "#000000" },
   { id: "linear", name: "Linear", description: "Find, create and update issues, projects and cycles.", category: "Engineering", url: "https://mcp.linear.app/mcp", auth: "oauth", icon: icon(siLinear), color: "#5E6AD2" },
   { id: "atlassian", name: "Atlassian", description: "Jira issues and Confluence pages.", category: "Work", url: "https://mcp.atlassian.com/v1/mcp", auth: "oauth", icon: icon(siAtlassian), color: "#0052CC" },

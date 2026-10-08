@@ -320,7 +320,7 @@ export function ConnectionEditor({ initial, app, justConnected, bots, onClose, o
 const googleConsole = "https://console.cloud.google.com";
 const googleSteps: { text: string; link?: { label: string; url: string } }[] = [
   { text: "Create a Google Cloud project (or pick one you have).", link: { label: "New project", url: `${googleConsole}/projectcreate` } },
-  { text: "Turn on the Gmail, Google Sheets and Google Drive APIs for it.", link: { label: "Enable APIs", url: `${googleConsole}/flows/enableapi?apiid=gmail.googleapis.com,sheets.googleapis.com,drive.googleapis.com` } },
+  { text: "Turn on the Gmail, Google Sheets, Google Calendar and Google Drive APIs for it.", link: { label: "Enable APIs", url: `${googleConsole}/flows/enableapi?apiid=gmail.googleapis.com,sheets.googleapis.com,calendar-json.googleapis.com,drive.googleapis.com` } },
   { text: "Set up the consent screen: choose External, and add your Google address under Audience → Test users.", link: { label: "Consent screen", url: `${googleConsole}/auth/overview` } },
   { text: "Create an OAuth client of type Desktop app, then paste its ID and secret here.", link: { label: "Create client", url: `${googleConsole}/auth/clients/create` } },
 ];
