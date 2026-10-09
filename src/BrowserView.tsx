@@ -108,8 +108,8 @@ export function BrowserView({ bot, onClose }: { bot: Bot; onClose: () => void })
     </header>
     {page.url && <div className="browser-url"><Globe size={12} /><span>{page.url}</span>{connected && <span className="live-dot" title="Live" />}</div>}
     <div className="browser-screen">
-      <img ref={imageRef} alt={`${bot.name}'s browser`} hidden={!hasFrame} />
-      {!hasFrame && <div className="browser-empty">{live && !live.active ? <>The browser opens when {bot.name} starts browsing.</> : <><LoaderCircle className="spin" size={16} /> Connecting…</>}</div>}
+      <img ref={imageRef} alt={`${bot.name}'s browser`} hidden={!hasFrame || live?.held} />
+      {(!hasFrame || live?.held) && <div className="browser-empty">{live?.held ? <>You're using {bot.name}'s browser in its own window. Hand it back when you're done.</> : live && !live.active ? <>The browser opens when {bot.name} starts browsing.</> : <><LoaderCircle className="spin" size={16} /> Connecting…</>}</div>}
     </div>
     <p className="muted small browser-note">View only. To sign in or click yourself, use “Take over browser” when the bot asks for help.</p>
   </aside>;

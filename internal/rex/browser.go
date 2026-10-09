@@ -3,6 +3,7 @@ package rex
 import (
 	"context"
 	"crypto/sha256"
+	"database/sql"
 	"encoding/hex"
 	"encoding/json"
 	"errors"
@@ -10,6 +11,7 @@ import (
 	"io"
 	"log/slog"
 	"net/http"
+	neturl "net/url"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -54,9 +56,15 @@ type heldBrowser struct {
 	RunID string
 	URL   string
 	Since time.Time
-	// InPlace means the user is using the bot's own visible window.
-	InPlace bool
+	// Plain is the browser the user is using, started without automation;
+	// exited closes when it quits.
+	Plain *plainBrowser
 }
+
+// hideAutomation keeps Chrome from setting navigator.webdriver in the bots'
+// browsers. Sites such as Cloudflare's human check refuse browsers that
+// say they are automated.
+const hideAutomation = "--disable-blink-features=AutomationControlled"
 
 func NewBrowserControl(host *Host) *BrowserControl {
 	return &BrowserControl{host: host, held: map[string]heldBrowser{}, active: map[string]string{}, prepared: map[string]int{}, open: map[string]bool{}, ensuring: map[string]*sync.Mutex{}}
@@ -66,8 +74,6 @@ func browserSessionName(runID string) string {
 	sum := sha256.Sum256([]byte(AppID + "/" + runID))
 	return "ar-" + hex.EncodeToString(sum[:])[:20]
 }
-
-func takeoverSessionName(botID string) string { return "rex-takeover-" + Slug(botID) }
 
 func (b *BrowserControl) profileDir(botID string) string {
 	return filepath.Join(b.host.cfg.DataDir, "browser-profiles", Slug(botID))
@@ -258,9 +264,11 @@ func (b *BrowserControl) markOpen(session string, open bool) {
 // launch opens a session on the bot's profile and records it. If another
 // process still holds the profile, it stops that Chrome and retries once.
 func (b *BrowserControl) launch(ctx context.Context, botID, session, kind, url string, headed bool) error {
-	args := []string{"--session", session, "--profile", b.profileDir(botID)}
+	args := []string{"--session", session, "--profile", b.profileDir(botID), "--args", hideAutomation}
 	if headed || b.visible(ctx) {
 		args = append(args, "--headed")
+	} else if agent := b.userAgent(ctx); agent != "" {
+		args = append(args, "--user-agent", agent)
 	}
 	args = append(args, "open", url)
 	_, err := b.run(ctx, args...)
@@ -333,6 +341,12 @@ func (b *BrowserControl) CloseAll(ctx context.Context) {
 		}
 		_, _ = agentBrowser(ctx, "--session", session, "close")
 		_ = b.host.Store.DeleteBrowserSession(ctx, session)
+	}
+	b.mu.Lock()
+	held := b.held
+	b.mu.Unlock()
+	for botID, browser := range held {
+		b.closePlain(browser, b.profileDir(botID))
 	}
 	b.mu.Lock()
 	b.held = map[string]heldBrowser{}
@@ -420,8 +434,13 @@ func (b *BrowserControl) cloud(ctx context.Context) bool {
 	return err == nil && settings.CloudBrowsers()
 }
 
-// TakeOver opens the bot's browser in a visible window for the user.
+// TakeOver closes the bot's automated browser and opens its profile in a
+// plain window for the user, so checks for automated browsers pass and what
+// the user signs in to is saved in the bot's profile.
 func (b *BrowserControl) TakeOver(ctx context.Context, botID string) (map[string]any, error) {
+	if b.Held(botID) {
+		return map[string]any{"held": true, "message": "You already have the bot's browser. Hand it back when you're done."}, nil
+	}
 	if b.cloud(ctx) {
 		return nil, errors.New("bots use cloud browsers (Kernel), which can't be taken over. Turn cloud browsers off in Settings → General to use your Mac's browser")
 	}
@@ -444,27 +463,26 @@ func (b *BrowserControl) TakeOver(ctx context.Context, botID string) (map[string
 	if runID != "" {
 		url = b.lastURL(ctx, browserSessionName(runID))
 	}
-	// With visible bot browsers the user simply uses the bot's own window:
-	// the bot is paused, so nothing else acts in it until it is handed back.
-	if runID != "" && b.visible(ctx) && b.sessionRunning(ctx, browserSessionName(runID)) {
-		b.mu.Lock()
-		b.held[botID] = heldBrowser{RunID: runID, URL: url, Since: time.Now(), InPlace: true}
-		b.mu.Unlock()
-		b.bringToFront(ctx)
-		return map[string]any{"held": true, "url": url, "message": "The bot's browser window is in front. Sign in or finish the step there, then hand it back."}, nil
-	}
-	if url == "" {
-		url = "about:blank"
-	}
 	b.closeBotSessions(ctx, botID, "")
-	if err := os.MkdirAll(b.profileDir(botID), 0o700); err != nil {
+	profile := b.profileDir(botID)
+	if url == "" {
+		url = firstNonEmpty(withoutChallenge(lastVisited(profile)), "about:blank")
+	}
+	if err := os.MkdirAll(profile, 0o700); err != nil {
 		return nil, err
 	}
-	if err := b.launch(ctx, botID, takeoverSessionName(botID), "takeover", url, true); err != nil {
+	if _, err := os.Lstat(filepath.Join(profile, "SingletonLock")); err == nil {
+		stopProfileHolders(profile)
+	}
+	clearChallengeCookies(profile)
+	held := heldBrowser{RunID: runID, URL: url, Since: time.Now()}
+	command, err := b.openPlain(ctx, profile, url)
+	if err != nil {
 		return nil, fmt.Errorf("could not open the browser window: %w", err)
 	}
+	held.Plain = command
 	b.mu.Lock()
-	b.held[botID] = heldBrowser{RunID: runID, URL: url, Since: time.Now()}
+	b.held[botID] = held
 	b.mu.Unlock()
 	return map[string]any{"held": true, "url": url, "message": "The bot's browser is open in a new window. Sign in or finish the step, then hand it back."}, nil
 }
@@ -478,18 +496,10 @@ func (b *BrowserControl) Release(ctx context.Context, botID string) error {
 	if !ok {
 		return nil
 	}
-	if held.InPlace {
-		b.mu.Lock()
-		delete(b.held, botID)
-		b.mu.Unlock()
-		return nil
-	}
-	url := currentURL(ctx, takeoverSessionName(botID))
+	url := b.closePlain(held, b.profileDir(botID))
 	if url == "" {
 		url = held.URL
 	}
-	_, _ = agentBrowser(ctx, "--session", takeoverSessionName(botID), "close")
-	_ = b.host.Store.DeleteBrowserSession(ctx, takeoverSessionName(botID))
 	b.mu.Lock()
 	delete(b.held, botID)
 	b.mu.Unlock()
@@ -501,20 +511,180 @@ func (b *BrowserControl) Release(ctx context.Context, botID string) error {
 	return nil
 }
 
-// bringToFront activates the browser app so the bot's window is visible.
-func (b *BrowserControl) bringToFront(ctx context.Context) {
+// openPlain starts the bots' browser on a bot's profile the way a person
+// would: no automation flags and no DevTools client attached, so sites that
+// check for automated browsers (Cloudflare's human check, some sign-ins)
+// treat it as the user's own. The keychain flags match agent-browser's, so
+// both read the same saved cookies.
+func (b *BrowserControl) openPlain(ctx context.Context, profile, url string) (*plainBrowser, error) {
 	settings, err := b.host.Settings.Get(ctx)
 	if err != nil {
-		return
+		return nil, err
 	}
-	executable := BrowserExecutable(settings)
-	app := executable
-	if index := strings.Index(executable, ".app/"); index > 0 {
-		app = executable[:index+4]
+	executable := firstNonEmpty(BrowserExecutable(settings), bundledChrome())
+	if executable == "" {
+		return nil, errors.New("no browser found. Install Google Chrome or another Chromium browser")
 	}
-	if app != "" {
-		_ = exec.CommandContext(ctx, "osascript", "-e", fmt.Sprintf("tell application %q to activate", app)).Run()
+	return startPlainBrowser(executable, plainBrowserArgs(profile, url))
+}
+
+// plainBrowserArgs keeps a DevTools pipe (file descriptors 3 and 4) that
+// nothing uses while the user browses. Pages cannot see it; Rex uses it
+// only to read the open page and quit cleanly, which saves the cookies.
+func plainBrowserArgs(profile, url string) []string {
+	return []string{"--user-data-dir=" + profile, "--no-first-run", "--no-default-browser-check",
+		"--password-store=basic", "--use-mock-keychain", "--remote-debugging-pipe", "--new-window", url}
+}
+
+// bundledChrome is the newest Chrome for Testing agent-browser installed,
+// which it uses when no other browser is chosen.
+func bundledChrome() string {
+	home, _ := os.UserHomeDir()
+	matches, _ := filepath.Glob(filepath.Join(home, ".agent-browser", "browsers", "chrome-*", "Google Chrome for Testing.app", "Contents", "MacOS", "Google Chrome for Testing"))
+	newest := ""
+	for _, match := range matches {
+		if newest == "" || compareVersions(versionOf(match), versionOf(newest)) > 0 {
+			newest = match
+		}
 	}
+	return newest
+}
+
+func versionOf(path string) string {
+	for _, part := range strings.Split(path, string(filepath.Separator)) {
+		if version, ok := strings.CutPrefix(part, "chrome-"); ok {
+			return version
+		}
+	}
+	return ""
+}
+
+// compareVersions compares dotted version numbers.
+func compareVersions(a, b string) int {
+	left, right := strings.Split(a, "."), strings.Split(b, ".")
+	for i := 0; i < len(left) || i < len(right); i++ {
+		var x, y int
+		if i < len(left) {
+			fmt.Sscan(left[i], &x)
+		}
+		if i < len(right) {
+			fmt.Sscan(right[i], &y)
+		}
+		if x != y {
+			if x < y {
+				return -1
+			}
+			return 1
+		}
+	}
+	return 0
+}
+
+// closePlain quits the user's window cleanly, so the browser saves its
+// cookies, and returns the page the user was on.
+func (b *BrowserControl) closePlain(held heldBrowser, profile string) string {
+	if held.Plain == nil {
+		return ""
+	}
+	url := held.Plain.close(10 * time.Second)
+	if !held.Plain.waitExit(0) {
+		stopProfileHolders(profile)
+	}
+	if url == "" {
+		url = lastVisited(profile)
+	}
+	return url
+}
+
+// clearChallengeCookies removes Cloudflare's challenge cookies from a closed
+// profile. A clearance is tied to the browser that earned it; sent by a
+// different one (the user's plain window, or the bot's browser after a
+// change) it makes Cloudflare challenge again and again. Without it the
+// user gets one fresh check, and the clearance they earn is kept for the
+// bot.
+func clearChallengeCookies(profile string) {
+	for _, path := range []string{filepath.Join(profile, "Default", "Network", "Cookies"), filepath.Join(profile, "Default", "Cookies")} {
+		if _, err := os.Stat(path); err != nil {
+			continue
+		}
+		db, err := sql.Open("sqlite", "file:"+path+"?_pragma=busy_timeout(2000)")
+		if err != nil {
+			continue
+		}
+		if _, err := db.Exec(`DELETE FROM cookies WHERE name IN ('cf_clearance','__cf_bm') OR name LIKE 'cf\_chl%' ESCAPE '\'`); err != nil {
+			slog.Warn("could not clear challenge cookies", "error", err)
+		}
+		db.Close()
+	}
+}
+
+// userAgent is what the bots' browser says when it shows a window. A
+// hidden browser would otherwise say HeadlessChrome, which sites refuse,
+// and a clearance the user earned in a window would not match it.
+func (b *BrowserControl) userAgent(ctx context.Context) string {
+	settings, err := b.host.Settings.Get(ctx)
+	if err != nil {
+		return ""
+	}
+	return chromeUserAgent(firstNonEmpty(BrowserExecutable(settings), bundledChrome()))
+}
+
+func chromeUserAgent(executable string) string {
+	index := strings.Index(executable, ".app/")
+	if index < 0 {
+		return ""
+	}
+	output, err := exec.Command("/usr/libexec/PlistBuddy", "-c", "Print CFBundleShortVersionString", filepath.Join(executable[:index+4], "Contents", "Info.plist")).Output()
+	if err != nil {
+		return ""
+	}
+	return userAgentFor(strings.TrimSpace(string(output)))
+}
+
+// userAgentFor builds Chrome's reduced user agent from a Chromium-based
+// browser's version, whose first number is Chromium's major version.
+func userAgentFor(version string) string {
+	major, _, _ := strings.Cut(version, ".")
+	if major == "" || strings.Trim(major, "0123456789") != "" {
+		return ""
+	}
+	return "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/" + major + ".0.0.0 Safari/537.36"
+}
+
+// withoutChallenge removes Cloudflare's challenge parameters from a page
+// address, so reopening it starts a fresh check.
+func withoutChallenge(address string) string {
+	parsed, err := neturl.Parse(address)
+	if err != nil || parsed.RawQuery == "" {
+		return address
+	}
+	query := parsed.Query()
+	for key := range query {
+		if strings.HasPrefix(key, "__cf_chl_") {
+			query.Del(key)
+		}
+	}
+	parsed.RawQuery = query.Encode()
+	return parsed.String()
+}
+
+// lastVisited reads the most recent web page from a closed profile's
+// history.
+func lastVisited(profile string) string {
+	path := filepath.Join(profile, "Default", "History")
+	if _, err := os.Stat(path); err != nil {
+		return ""
+	}
+	db, err := sql.Open("sqlite", "file:"+path+"?mode=ro&_pragma=busy_timeout(2000)")
+	if err != nil {
+		return ""
+	}
+	defer db.Close()
+	var url string
+	if db.QueryRow(`SELECT url FROM urls WHERE url LIKE 'http%' ORDER BY last_visit_time DESC LIMIT 1`).Scan(&url) != nil {
+		return ""
+	}
+	return url
 }
 
 // saveArtifact receives browser screenshots from the runtime and stores
@@ -593,8 +763,9 @@ func (b *BrowserControl) Live(ctx context.Context, botID string) (LiveView, erro
 		sessions = append([]string{browserSessionName(runID)}, sessions...)
 	}
 	b.mu.Unlock()
+	// The user's own window is not automated, so it cannot be watched.
 	if view.Held {
-		sessions = append([]string{takeoverSessionName(botID)}, sessions...)
+		return view, nil
 	}
 	for _, session := range sessions {
 		if !b.sessionRunning(ctx, session) {

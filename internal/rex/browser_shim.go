@@ -87,7 +87,13 @@ func RunBrowserShim(args []string) error {
 	if real == "" {
 		real = agentBrowserPath()
 	}
-	return syscall.Exec(real, append([]string{real}, args...), os.Environ())
+	// A session the host did not open is launched by agent-browser itself;
+	// it should not say it is automated either.
+	env := os.Environ()
+	if os.Getenv("AGENT_BROWSER_ARGS") == "" {
+		env = append(env, "AGENT_BROWSER_ARGS="+hideAutomation)
+	}
+	return syscall.Exec(real, append([]string{real}, args...), env)
 }
 
 // BrowserShimEnv links rex-host as agent-browser in the data folder, writes
