@@ -17,7 +17,7 @@ func TestPlainBrowserIsNotAutomated(t *testing.T) {
 	}
 	// Cookies are encrypted with the same key agent-browser uses, so the
 	// bot keeps what the user signed in to.
-	for _, want := range []string{"--user-data-dir=/profiles/bot", "--use-mock-keychain", "--password-store=basic", "https://example.com/"} {
+	for _, want := range []string{"--user-data-dir=/profiles/bot", hideAutomation, "--use-mock-keychain", "--password-store=basic", "https://example.com/"} {
 		if !slices.Contains(args, want) {
 			t.Fatalf("missing %s in %v", want, args)
 		}

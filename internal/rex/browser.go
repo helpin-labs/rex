@@ -529,11 +529,13 @@ func (b *BrowserControl) openPlain(ctx context.Context, profile, url string) (*p
 }
 
 // plainBrowserArgs keeps a DevTools pipe (file descriptors 3 and 4) that
-// nothing uses while the user browses. Pages cannot see it; Rex uses it
-// only to read the open page and quit cleanly, which saves the cookies.
+// nothing uses while the user browses; Rex uses it only to read the open
+// page and quit cleanly, which saves the cookies. Chrome marks a browser
+// with a DevTools pipe as automated (navigator.webdriver), so that is
+// turned off too.
 func plainBrowserArgs(profile, url string) []string {
 	return []string{"--user-data-dir=" + profile, "--no-first-run", "--no-default-browser-check",
-		"--password-store=basic", "--use-mock-keychain", "--remote-debugging-pipe", "--new-window", url}
+		"--password-store=basic", "--use-mock-keychain", "--remote-debugging-pipe", hideAutomation, "--new-window", url}
 }
 
 // bundledChrome is the newest Chrome for Testing agent-browser installed,
