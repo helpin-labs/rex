@@ -199,7 +199,7 @@ func (h *Host) SaveBot(ctx context.Context, bot *Bot) error {
 		return ErrWriteToolsUnavailable
 	}
 	if existing, err := h.Store.GetBot(ctx, bot.ID); err == nil {
-		if bot.BrowserBackend != existing.BrowserBackend {
+		if bot.BrowserBackend != existing.BrowserBackend || (existing.Capabilities.Browser && !bot.Capabilities.Browser) {
 			if h.Browser.Held(bot.ID) {
 				return errors.New("hand back the browser before changing its mode")
 			}
@@ -213,6 +213,32 @@ func (h *Host) SaveBot(ctx context.Context, bot *Bot) error {
 				}
 				if run.Status != "completed" && run.Status != "failed" && run.Status != "cancelled" {
 					return errors.New("stop the current task before changing browser mode")
+				}
+			}
+			settings, err := h.Settings.Get(ctx)
+			if err != nil {
+				return err
+			}
+			if existing.Capabilities.Browser && (existing.browserMode(settings) != bot.browserMode(settings) || !bot.Capabilities.Browser) {
+				if existing.browserMode(settings) == "extension" {
+					status, err := h.Browser.extensionControl(ctx, bot.ID, "status")
+					if err != nil {
+						return fmt.Errorf("could not check browser before changing mode: %w", err)
+					}
+					if status.Held {
+						return errors.New("hand back the browser before changing its mode")
+					}
+					if status.RunID != "" {
+						run, err := h.Runtime.GetRun(ctx, status.RunID)
+						if err != nil || !run.Terminal() {
+							return errors.New("stop the current task before changing browser mode")
+						}
+					}
+					if _, err := h.Browser.extensionControl(ctx, bot.ID, "close"); err != nil {
+						return err
+					}
+				} else {
+					h.Browser.closeBotSessions(ctx, bot.ID, "")
 				}
 			}
 		}

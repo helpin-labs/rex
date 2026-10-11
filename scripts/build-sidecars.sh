@@ -19,8 +19,8 @@ export GOPRIVATE="${GOPRIVATE:+$GOPRIVATE,}github.com/helpin-ai/*"
 # Do not ship an older runtime that would ignore the extension driver settings.
 runtime_module_dir="$(cd "$repo_root" && go list -m -f '{{.Dir}}' github.com/helpin-ai/agent-runtime)"
 case "$(cat "$runtime_module_dir/internal/tools/browser_tools.go")" in
-  *AGENT_RUNTIME_BROWSER_HOST_URL*) ;;
-  *) echo "Extension mode needs the updated agent-runtime. Use the agent-runtime version pinned in go.mod or an updated local checkout." >&2; exit 1 ;;
+  *AGENT_RUNTIME_BROWSER_PROFILE_ROOT*) ;;
+  *) echo "Extension mode needs the runtime-owned browser release. For local testing use go work init . ../agent-runtime; pin the native Extension release before distribution." >&2; exit 1 ;;
 esac
 
 flags=(-trimpath -ldflags "-s -w")

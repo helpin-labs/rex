@@ -249,6 +249,9 @@ func (b Bot) RuntimeProvider() string {
 
 func (b Bot) executionConfig() json.RawMessage {
 	config := map[string]any{}
+	if b.Capabilities.Browser {
+		config["browser"] = map[string]string{"backend": b.browserMode(Settings{}), "profile": Slug(b.ID)}
+	}
 	if b.UsesWorkspace() {
 		access := "read_write"
 		if !b.Capabilities.FilesWrite && !b.Capabilities.Shell {

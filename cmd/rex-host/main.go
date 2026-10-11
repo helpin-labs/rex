@@ -360,8 +360,8 @@ func (l runtimeLaunch) start(ctx context.Context) (*exec.Cmd, <-chan error, erro
 		"AGENT_RUNTIME_RECOVER_INTERRUPTED_RUNS=true",
 	)
 	command.Env = append(command.Env,
-		"AGENT_RUNTIME_BROWSER_HOST_URL="+l.hostURL+"/runtime/browser/driver",
-		"AGENT_RUNTIME_BROWSER_HOST_TOKEN="+l.internalToken,
+		"AGENT_RUNTIME_BROWSER_PROFILE_ROOT="+filepath.Join(l.dataDir, "browser-profiles"),
+		"AGENT_RUNTIME_BROWSER_PROFILE_APP_ID="+rex.AppID,
 	)
 	command.Env = append(command.Env, l.browserShim...)
 	command.Env = append(command.Env, env...)
