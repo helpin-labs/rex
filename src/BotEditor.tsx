@@ -66,6 +66,7 @@ export function BotEditor({ initial, settings, status, onClose, onSaved, onDelet
   const [confirmDelete, setConfirmDelete] = useState(false);
   const isNew = !baseline.id;
   const writeTools = !!status?.write_tools;
+  const browserMode = bot.browser_backend || (settings?.kernel_browser && settings.kernel?.configured ? "cloud" : "extension");
   const dirty = isNew || JSON.stringify(bot) !== JSON.stringify(baseline);
 
   const [allBots, setAllBots] = useState<Bot[]>([]);
@@ -129,6 +130,10 @@ export function BotEditor({ initial, settings, status, onClose, onSaved, onDelet
     { key: "shell" as const, icon: <SquareTerminal size={17} />, label: "Run shell commands", description: "In a macOS sandbox limited to its folder. Asks first unless TypeSafe clears it.", disabled: !writeTools },
   ];
   const on = abilities.filter(item => bot.capabilities[item.key]).length;
+  const setupExtension = async () => {
+    try { setNotice((await api.setupBrowserExtension(bot.id)).message); }
+    catch (error) { setError(errorMessage(error)); }
+  };
   const modelLabel = bot.model || (bot.provider === settings?.default_provider && settings?.default_model) || "provider default";
 
   return <div className="page">
@@ -181,6 +186,22 @@ export function BotEditor({ initial, settings, status, onClose, onSaved, onDelet
             <TileMark seed={item.key} icon={item.icon} size={36} />
             <Toggle label={item.label} description={item.description} note={item.note} checked={bot.capabilities[item.key]} disabled={item.disabled} onChange={value => capability(item.key, value)} />
           </div>)}</div>
+          {bot.capabilities.browser && <div className="card">
+            <Field label="Browser mode" hint="Choose before starting a task. Changing mode starts a new run; logins stay in the local bot profile.">
+              <Select value={bot.browser_backend || ""} onChange={value => update({ browser_backend: value as Bot["browser_backend"] })}>
+                <option value="">{settings?.kernel_browser && settings.kernel?.configured ? "Follow Settings (Cloud)" : "Default (Extension)"}</option>
+                <option value="standard">Standard</option>
+                <option value="extension">Extension (experimental)</option>
+                <option value="cloud" disabled={!settings?.kernel?.configured}>Cloud (Kernel)</option>
+              </Select>
+            </Field>
+            {browserMode === "extension" && <>
+              <p className="muted small">Uses a visible local window. Some controls and embedded frames need your help. Compatibility with protected sites varies.</p>
+              <button type="button" className="button secondary small" disabled={isNew || dirty} onClick={setupExtension}>Open extension browser</button>
+              <p className="field-hint">The extension loads automatically in the bundled browser. No installation or Developer mode is needed.</p>
+              {notice && <p className="field-hint">{notice}</p>}
+            </>}
+          </div>}
           <div className="card">
             <h3 className="section-title">Approvals</h3>
             <div className="choice-row" role="radiogroup" aria-label="Approvals">

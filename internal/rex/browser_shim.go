@@ -4,6 +4,8 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"errors"
+	"fmt"
 	"net/http"
 	"os"
 	"path/filepath"
@@ -73,15 +75,11 @@ func RunBrowserShim(args []string) error {
 	if session != "" && config.EnsureURL != "" && command != "close" && command != "session" && command != "stream" {
 		payload, _ := json.Marshal(map[string]string{"session": session})
 		ctx, cancel := context.WithTimeout(context.Background(), 90*time.Second)
-		request, err := http.NewRequestWithContext(ctx, http.MethodPost, config.EnsureURL, bytes.NewReader(payload))
-		if err == nil {
-			request.Header.Set("Authorization", "Bearer "+config.Token)
-			request.Header.Set("Content-Type", "application/json")
-			if response, err := http.DefaultClient.Do(request); err == nil {
-				response.Body.Close()
-			}
-		}
+		err := ensureBrowserSession(ctx, config, payload)
 		cancel()
+		if err != nil {
+			return err
+		}
 	}
 	real := config.RealBrowser
 	if real == "" {
@@ -94,6 +92,25 @@ func RunBrowserShim(args []string) error {
 		env = append(env, "AGENT_BROWSER_ARGS="+hideAutomation)
 	}
 	return syscall.Exec(real, append([]string{real}, args...), env)
+}
+
+func ensureBrowserSession(ctx context.Context, config shimConfig, payload []byte) error {
+	request, err := http.NewRequestWithContext(ctx, http.MethodPost, config.EnsureURL, bytes.NewReader(payload))
+	if err != nil {
+		return errors.New("invalid browser host configuration")
+	}
+	request.Header.Set("Authorization", "Bearer "+config.Token)
+	request.Header.Set("Content-Type", "application/json")
+	client := &http.Client{CheckRedirect: func(*http.Request, []*http.Request) error { return http.ErrUseLastResponse }}
+	response, err := client.Do(request)
+	if err != nil {
+		return errors.New("browser host is unavailable; refusing to start an unconfigured browser")
+	}
+	defer response.Body.Close()
+	if response.StatusCode != http.StatusNoContent {
+		return fmt.Errorf("browser host refused agent-browser (status %d); Extension mode requires rebuilding the updated agent-runtime", response.StatusCode)
+	}
+	return nil
 }
 
 // BrowserShimEnv links rex-host as agent-browser in the data folder, writes
@@ -126,6 +143,30 @@ func (h *Host) ensureBrowser(w http.ResponseWriter, r *http.Request) {
 		Session string `json:"session"`
 	}
 	if !decode(w, r, &input) {
+		return
+	}
+	h.Browser.mu.Lock()
+	botID := ""
+	for id, runID := range h.Browser.active {
+		if browserSessionName(runID) == input.Session {
+			botID = id
+			break
+		}
+	}
+	h.Browser.mu.Unlock()
+	mode, err := h.Store.GetSetting(r.Context(), "browser.backend."+input.Session)
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, err)
+		return
+	}
+	if botID != "" {
+		if _, err := h.Store.GetBot(r.Context(), botID); err != nil {
+			writeError(w, http.StatusForbidden, errors.New("browser bot is unavailable"))
+			return
+		}
+	}
+	if mode == "extension" || (botID != "" && h.Browser.backend(r.Context(), botID) == "extension") {
+		writeError(w, http.StatusConflict, errors.New("Extension mode cannot execute agent-browser commands"))
 		return
 	}
 	h.Browser.Ensure(r.Context(), input.Session)

@@ -1,6 +1,10 @@
 package rex
 
-import "testing"
+import (
+	"encoding/json"
+	"net/http/httptest"
+	"testing"
+)
 
 func TestBrowserCommandFindsSessionAndCommand(t *testing.T) {
 	for _, tc := range []struct {
@@ -16,5 +20,19 @@ func TestBrowserCommandFindsSessionAndCommand(t *testing.T) {
 		if session != tc.session || command != tc.command {
 			t.Fatalf("%v: got %q %q", tc.args, session, command)
 		}
+	}
+}
+
+func TestOldRuntimeCannotAttachDevToolsToExtensionSession(t *testing.T) {
+	h := extensionTestHost(t)
+	h.Browser.active["first"] = "run-extension"
+	server := httptest.NewServer(h.Handler())
+	defer server.Close()
+	payload, _ := json.Marshal(map[string]string{"session": browserSessionName("run-extension")})
+	if err := ensureBrowserSession(t.Context(), shimConfig{EnsureURL: server.URL + "/runtime/browser/ensure", Token: h.cfg.InternalToken}, payload); err == nil {
+		t.Fatal("old runtime allowed to launch agent-browser for an extension run")
+	}
+	if err := ensureBrowserSession(t.Context(), shimConfig{EnsureURL: server.URL + "/runtime/browser/ensure", Token: "wrong"}, payload); err == nil {
+		t.Fatal("failed authorization bypassed host")
 	}
 }

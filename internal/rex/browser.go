@@ -30,9 +30,10 @@ import (
 // only possible while the bot's run is paused, so the bot cannot act while
 // the user holds the browser.
 type BrowserControl struct {
-	host *Host
-	mu   sync.Mutex
-	held map[string]heldBrowser
+	host       *Host
+	mu         sync.Mutex
+	held       map[string]heldBrowser
+	extensions map[string]*extensionBrowser
 	// active maps bot ID to the run whose session uses the bot's profile.
 	active map[string]string
 	// prepared counts Prepare calls per bot, so closing an idle browser can
@@ -53,9 +54,10 @@ type BrowserControl struct {
 const browserIdleTimeout = 2 * time.Minute
 
 type heldBrowser struct {
-	RunID string
-	URL   string
-	Since time.Time
+	Extension bool
+	RunID     string
+	URL       string
+	Since     time.Time
 	// Plain is the browser the user is using, started without automation;
 	// exited closes when it quits.
 	Plain *plainBrowser
@@ -67,7 +69,7 @@ type heldBrowser struct {
 const hideAutomation = "--disable-blink-features=AutomationControlled"
 
 func NewBrowserControl(host *Host) *BrowserControl {
-	return &BrowserControl{host: host, held: map[string]heldBrowser{}, active: map[string]string{}, prepared: map[string]int{}, open: map[string]bool{}, ensuring: map[string]*sync.Mutex{}}
+	return &BrowserControl{host: host, held: map[string]heldBrowser{}, extensions: map[string]*extensionBrowser{}, active: map[string]string{}, prepared: map[string]int{}, open: map[string]bool{}, ensuring: map[string]*sync.Mutex{}}
 }
 
 func browserSessionName(runID string) string {
@@ -219,7 +221,7 @@ func (b *BrowserControl) Ensure(ctx context.Context, session string) {
 	b.mu.Unlock()
 	// Cloud browsers are created by the runtime in Kernel; there is no
 	// local profile to open.
-	if botID == "" || b.cloud(ctx) {
+	if botID == "" || b.backend(ctx, botID) != "standard" {
 		return
 	}
 	lock.Lock()
@@ -331,6 +333,7 @@ func (b *BrowserControl) closeBotSessions(ctx context.Context, botID, except str
 // CloseAll closes every bot browser Rex opened. It runs at startup (to
 // clear sessions left by a previous process) and at shutdown.
 func (b *BrowserControl) CloseAll(ctx context.Context) {
+	b.closeExtensions(ctx)
 	sessions, err := b.host.Store.BrowserSessions(ctx, "")
 	if err != nil {
 		return
@@ -371,6 +374,10 @@ func (b *BrowserControl) lastURL(ctx context.Context, session string) string {
 // browserIdleTimeout. It stays open while the bot works again, waits for
 // the user, or the user holds it. The next Prepare reopens the same page.
 func (b *BrowserControl) CloseWhenIdle(botID, runID string) {
+	// Extension mode keeps the live page for takeover and user inspection.
+	if b.backend(context.Background(), botID) == "extension" {
+		return
+	}
 	b.mu.Lock()
 	generation := b.prepared[botID]
 	b.mu.Unlock()
@@ -441,8 +448,11 @@ func (b *BrowserControl) TakeOver(ctx context.Context, botID string) (map[string
 	if b.Held(botID) {
 		return map[string]any{"held": true, "message": "You already have the bot's browser. Hand it back when you're done."}, nil
 	}
-	if b.cloud(ctx) {
-		return nil, errors.New("bots use cloud browsers (Kernel), which can't be taken over. Turn cloud browsers off in Settings → General to use your Mac's browser")
+	if b.backend(ctx, botID) == "extension" {
+		return b.takeOverExtension(ctx, botID)
+	}
+	if b.backend(ctx, botID) == "cloud" {
+		return nil, errors.New("this run uses Kernel cloud, which cannot be taken over. Choose a local mode in the bot’s Abilities and start a new task")
 	}
 	bot, err := b.host.Store.GetBot(ctx, botID)
 	if err != nil {
@@ -494,6 +504,19 @@ func (b *BrowserControl) Release(ctx context.Context, botID string) error {
 	held, ok := b.held[botID]
 	b.mu.Unlock()
 	if !ok {
+		return nil
+	}
+	if held.Extension {
+		ext, err := b.extension(ctx, botID)
+		if err != nil {
+			return err
+		}
+		ext.gate.Lock()
+		defer ext.gate.Unlock()
+		ext.epoch = randomHex(8)
+		b.mu.Lock()
+		delete(b.held, botID)
+		b.mu.Unlock()
 		return nil
 	}
 	url := b.closePlain(held, b.profileDir(botID))
@@ -748,11 +771,15 @@ type LiveView struct {
 	Session string `json:"session,omitempty"`
 	URL     string `json:"ws_url,omitempty"`
 	Held    bool   `json:"held"`
+	Backend string `json:"backend,omitempty"`
 }
 
 // Live returns the stream of the bot's current browser session, preferring
 // the user's takeover window, then the newest run session.
 func (b *BrowserControl) Live(ctx context.Context, botID string) (LiveView, error) {
+	if b.backend(ctx, botID) == "extension" {
+		return b.extensionLive(ctx, botID), nil
+	}
 	view := LiveView{Held: b.Held(botID)}
 	sessions, err := b.host.Store.BrowserSessions(ctx, botID)
 	if err != nil {

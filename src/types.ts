@@ -18,6 +18,7 @@ export type Bot = {
   provider: Provider;
   model: string;
   capabilities: Capabilities;
+  browser_backend?: "" | "standard" | "extension" | "cloud";
   approval_mode: "ask" | "auto";
   workspace_dir: string;
   memory_mode: "private" | "shared" | "off";

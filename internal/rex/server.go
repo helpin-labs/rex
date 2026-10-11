@@ -28,6 +28,9 @@ func (h *Host) Handler() http.Handler {
 
 	mux.HandleFunc("POST /runtime/context", h.requireInternal(h.runtimeContext))
 	mux.HandleFunc("POST /runtime/browser/ensure", h.requireInternal(h.ensureBrowser))
+	mux.HandleFunc("POST /runtime/browser/driver", h.requireInternal(h.browserDriver))
+	mux.HandleFunc("GET /extension/browser", h.extensionBridge)
+	mux.HandleFunc("POST /extension/browser", h.extensionBridge)
 	mux.HandleFunc("POST /runtime/skills/by-id", h.requireInternal(h.lookupSkill))
 	mux.HandleFunc("POST /runtime/skills/active-by-key", h.requireInternal(h.lookupSkill))
 	mux.HandleFunc("GET /runtime/skill-packages/objects/{key...}", h.requireInternal(h.skillPackage))
@@ -83,6 +86,7 @@ func (h *Host) Handler() http.Handler {
 	api.HandleFunc("GET /api/bots/{id}/file", h.readFile)
 	api.HandleFunc("POST /api/bots/{id}/files", h.uploadFile)
 	api.HandleFunc("POST /api/bots/{id}/reveal", h.revealFile)
+	api.HandleFunc("POST /api/bots/{id}/browser/extension", h.setupBrowserExtension)
 	api.HandleFunc("POST /api/bots/{id}/browser/takeover", h.browserTakeover)
 	api.HandleFunc("POST /api/bots/{id}/browser/release", h.browserRelease)
 	api.HandleFunc("GET /api/bots/{id}/browser/live", h.browserLive)

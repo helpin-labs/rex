@@ -114,9 +114,9 @@ type Settings struct {
 	Kernel        ProviderConfig `json:"kernel"`
 	KernelBrowser bool           `json:"kernel_browser"`
 	// ChatGPT reports the subscription sign-in; it is not saved here.
-	ChatGPT ChatGPTStatus `json:"chatgpt"`
-	Exa      ProviderConfig `json:"exa"`
-	Brave    ProviderConfig `json:"brave"`
+	ChatGPT ChatGPTStatus  `json:"chatgpt"`
+	Exa     ProviderConfig `json:"exa"`
+	Brave   ProviderConfig `json:"brave"`
 	// NotificationsOff stops system notifications when a bot needs the user.
 	NotificationsOff bool `json:"notifications_off"`
 	Onboarded        bool `json:"onboarded"`
@@ -298,8 +298,9 @@ func (m *SettingsManager) RuntimeEnv(ctx context.Context) ([]string, error) {
 		return nil, err
 	}
 	// ChatGPT runs carry their own credential, refreshed through Rex.
-	env := []string{"AGENT_RUNTIME_NATIVE_EINO=true", "AGENT_RUNTIME_CHATGPT_ENABLED=true"}
-	if settings.CloudBrowsers() {
+	// Kernel stealth loads an automatic CAPTCHA solver; Rex leaves checks to the user.
+	env := []string{"AGENT_RUNTIME_NATIVE_EINO=true", "AGENT_RUNTIME_CHATGPT_ENABLED=true", "KERNEL_STEALTH=false"}
+	if settings.Kernel.Configured {
 		key, err := m.APIKey(providerKernel)
 		if err != nil {
 			return nil, err

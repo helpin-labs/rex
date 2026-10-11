@@ -359,6 +359,10 @@ func (l runtimeLaunch) start(ctx context.Context) (*exec.Cmd, <-chan error, erro
 		// settings restart are continued from their checkpoints.
 		"AGENT_RUNTIME_RECOVER_INTERRUPTED_RUNS=true",
 	)
+	command.Env = append(command.Env,
+		"AGENT_RUNTIME_BROWSER_HOST_URL="+l.hostURL+"/runtime/browser/driver",
+		"AGENT_RUNTIME_BROWSER_HOST_TOKEN="+l.internalToken,
+	)
 	command.Env = append(command.Env, l.browserShim...)
 	command.Env = append(command.Env, env...)
 	// The bot's browser (installed Chrome/Brave/Edge, visible, with the bot's

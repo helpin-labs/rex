@@ -10,9 +10,9 @@ Rex runs on a local model (LM Studio, Ollama), your API keys (Anthropic, OpenAI,
 - **Rex, the main assistant.** Rex answers general questions, hands tasks to the right bot, and creates new bots for you.
 - **Ask before acting.** Each bot can use the web, a browser, files in its own folder, and shell commands. File edits and commands ask first. Commands run in a macOS sandbox that can only write inside the bot's folder. [TypeSafe](https://typesafe.ai) review can clear routine local steps for you.
 - **Memory.** After each answer, Rex keeps lasting facts from what you said and brings back the relevant ones before each new message. This happens in the background, with a built-in embedding model. You can view, search, correct or forget memories. Each bot has its own memory unless you choose to share it.
-- **Browser.** Each bot has a browser with its own profile, so logins persist.
+- **Browser.** Extension is the local default, with a separate profile for each bot so logins persist. Standard and Cloud remain explicit choices; modes never switch automatically.
   - When a site needs you, for a sign-in or a CAPTCHA, you take over the browser and then hand it back.
-  - Saved logins are filled in by Rex, so the bot never sees your passwords.
+  - In Standard mode, saved logins are filled in by Rex, so the bot never sees your passwords.
   - Optionally, bots can browse in [Kernel](https://www.kernel.sh)'s cloud instead.
 - **Skills.** Reusable instructions in the [Agent Skills](https://agentskills.io) format, kept in `~/Rex/skills`.
   - Browse curated GitHub collections (Anthropic's skills, marketing, sales, coding) and install a skill for a bot at a pinned version.

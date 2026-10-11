@@ -88,6 +88,9 @@ func (h *Host) runtimeContext(w http.ResponseWriter, r *http.Request) {
 				cancel()
 			}
 		}
+		if bot.Capabilities.Browser && h.Browser.backend(r.Context(), bot.ID) == "cloud" {
+			sections = append(sections, "This run uses Kernel cloud. Human takeover and saved-password filling are unavailable. If a site needs a human sign-in or verification, explain this and ask the user to choose a local Browser mode and start a new task.")
+		}
 		if h.Browser.Held(bot.ID) {
 			sections = append(sections, "The user has taken control of your browser. Do not use browser tools until they hand it back.")
 		}

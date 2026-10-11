@@ -227,6 +227,9 @@ func (h *Host) KnownPasswords(ctx context.Context) []string {
 // browserForSignIn finds the bot's own browser session and checks that it
 // shows a page on the login's site.
 func (h *Host) browserForSignIn(ctx context.Context, botID string, login *BotLogin) (string, error) {
+	if h.Browser.backend(ctx, botID) != "standard" {
+		return "", errors.New("saved-password filling is available in Standard mode; ask the user to take over for Extension mode")
+	}
 	if h.Browser.Held(botID) {
 		return "", errors.New("the user has taken over your browser; wait until they hand it back")
 	}

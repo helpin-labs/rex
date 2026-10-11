@@ -71,7 +71,7 @@ func TestLoginsKeepPasswordsInTheKeychain(t *testing.T) {
 func TestSignInOnlyTypesOnTheLoginsSite(t *testing.T) {
 	ctx := context.Background()
 	host := newSetupTestHost(t)
-	bot := &Bot{Name: "Trips", Capabilities: Capabilities{Browser: true}}
+	bot := &Bot{Name: "Trips", BrowserBackend: "standard", Capabilities: Capabilities{Browser: true}}
 	_ = host.SaveBot(ctx, bot)
 	login, _ := host.SaveLogin(ctx, bot.ID, "", LoginInput{Site: "momondo.se", Username: "amad@example.com", Password: "s3cret-pass"})
 	host.Browser.active[bot.ID] = "run-1"
