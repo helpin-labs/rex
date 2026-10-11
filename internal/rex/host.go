@@ -160,8 +160,10 @@ func (h *Host) PrepareInterruptedRuns(ctx context.Context) {
 // system prompt (instructions, rules, skills), tools, model and MCP servers.
 func (h *Host) botFingerprint(ctx context.Context, bot Bot) string {
 	hash := sha256.New()
+	settings, _ := h.Settings.Get(ctx)
+	bot.BrowserBackend = bot.browserMode(settings)
 	agent := bot.RuntimeAgent(bot.SystemPrompt(h.Skills.Resolve(bot.Skills)))
-	fmt.Fprintln(hash, agent.SystemPrompt, strings.Join(agent.AllowedTools, ","), agent.Provider, agent.Model, agent.ApprovalMode, strings.Join(bot.Skills, ","))
+	fmt.Fprintln(hash, bot.BrowserBackend, agent.SystemPrompt, strings.Join(agent.AllowedTools, ","), agent.Provider, agent.Model, agent.ApprovalMode, strings.Join(bot.Skills, ","))
 	for _, skill := range h.Skills.Resolve(bot.Skills) {
 		fmt.Fprintln(hash, skill.ID, skill.Version)
 	}
@@ -178,8 +180,13 @@ func (h *Host) botFingerprint(ctx context.Context, bot Bot) string {
 }
 
 func (h *Host) SyncBot(ctx context.Context, bot Bot) error {
+	settings, err := h.Settings.Get(ctx)
+	if err != nil {
+		return err
+	}
+	bot.BrowserBackend = bot.browserMode(settings)
 	skills := h.Skills.Resolve(bot.Skills)
-	_, err := h.Runtime.UpsertAgent(ctx, bot.RuntimeAgent(bot.SystemPrompt(skills)))
+	_, err = h.Runtime.UpsertAgent(ctx, bot.RuntimeAgent(bot.SystemPrompt(skills)))
 	return err
 }
 
@@ -192,6 +199,23 @@ func (h *Host) SaveBot(ctx context.Context, bot *Bot) error {
 		return ErrWriteToolsUnavailable
 	}
 	if existing, err := h.Store.GetBot(ctx, bot.ID); err == nil {
+		if bot.BrowserBackend != existing.BrowserBackend {
+			if h.Browser.Held(bot.ID) {
+				return errors.New("hand back the browser before changing its mode")
+			}
+			h.Browser.mu.Lock()
+			runID := h.Browser.active[bot.ID]
+			h.Browser.mu.Unlock()
+			if runID != "" {
+				run, err := h.Runtime.GetRun(ctx, runID)
+				if err != nil {
+					return errors.New("could not check the current browser task")
+				}
+				if run.Status != "completed" && run.Status != "failed" && run.Status != "cancelled" {
+					return errors.New("stop the current task before changing browser mode")
+				}
+			}
+		}
 		bot.CreatedAt = existing.CreatedAt
 	}
 	if bot.UsesWorkspace() {

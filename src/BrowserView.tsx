@@ -3,7 +3,7 @@ import { Globe, LoaderCircle, X } from "lucide-react";
 import { api } from "./api";
 import type { Bot } from "./types";
 
-type Live = { active: boolean; ws_url?: string; held: boolean };
+type Live = { active: boolean; ws_url?: string; held: boolean; backend?: string };
 
 // BrowserView shows the bot's browser live. agent-browser streams each
 // session's screen as JPEG frames over a loopback WebSocket, about 20 a
@@ -48,7 +48,7 @@ export function BrowserView({ bot, onClose }: { bot: Bot; onClose: () => void })
       try {
         const next = await api.browserLive(bot.id);
         if (cancelled) return;
-        setLive(current => current?.ws_url === next.ws_url && current?.held === next.held ? current : next);
+        setLive(current => current?.ws_url === next.ws_url && current?.held === next.held && current?.active === next.active && current?.backend === next.backend ? current : next);
       } catch { /* retry */ }
       if (!cancelled) timer = window.setTimeout(poll, 3000);
     };
@@ -108,8 +108,8 @@ export function BrowserView({ bot, onClose }: { bot: Bot; onClose: () => void })
     </header>
     {page.url && <div className="browser-url"><Globe size={12} /><span>{page.url}</span>{connected && <span className="live-dot" title="Live" />}</div>}
     <div className="browser-screen">
-      <img ref={imageRef} alt={`${bot.name}'s browser`} hidden={!hasFrame} />
-      {!hasFrame && <div className="browser-empty">{live && !live.active ? <>The browser opens when {bot.name} starts browsing.</> : <><LoaderCircle className="spin" size={16} /> Connecting…</>}</div>}
+      <img ref={imageRef} alt={`${bot.name}'s browser`} hidden={!hasFrame || live?.held} />
+      {(!hasFrame || live?.held) && <div className="browser-empty">{live?.held ? <>You're using {bot.name}'s browser in its own window. Hand it back when you're done.</> : live?.backend === "extension" ? <>Extension mode opens in the bot’s own browser window. Watch it there; take over when the bot asks for help.</> : live && !live.active ? <>The browser opens when {bot.name} starts browsing.</> : <><LoaderCircle className="spin" size={16} /> Connecting…</>}</div>}
     </div>
     <p className="muted small browser-note">View only. To sign in or click yourself, use “Take over browser” when the bot asks for help.</p>
   </aside>;

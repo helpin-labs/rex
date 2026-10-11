@@ -160,7 +160,7 @@ func TestChatGPTBotRunsOnTheSubscription(t *testing.T) {
 	}
 }
 
-func TestKernelKeyReachesTheRuntimeOnlyWhenOn(t *testing.T) {
+func TestKernelKeyAvailableForPerBotCloudSelection(t *testing.T) {
 	ctx := context.Background()
 	host := newSetupTestHost(t)
 	settings, _ := host.Settings.Get(ctx)
@@ -176,8 +176,8 @@ func TestKernelKeyReachesTheRuntimeOnlyWhenOn(t *testing.T) {
 		}
 		return strings.Contains(strings.Join(env, "\n"), "KERNEL_API_KEY=sk_kernel")
 	}
-	if settings.CloudBrowsers() || hasKernel() {
-		t.Fatal("a stored key alone turned on cloud browsers")
+	if settings.CloudBrowsers() || !hasKernel() {
+		t.Fatal("a stored key must support explicit per-bot cloud without changing the default")
 	}
 	settings.KernelBrowser = true
 	saved, restart, err := host.Settings.Save(ctx, settings)

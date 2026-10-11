@@ -16,6 +16,13 @@ mkdir -p "$bin_dir" "$repo_root/bin"
 # agent-runtime is private: fetch it with git credentials, not the public proxy.
 export GOPRIVATE="${GOPRIVATE:+$GOPRIVATE,}github.com/helpin-ai/*"
 
+# Do not ship an older runtime that would ignore the extension driver settings.
+runtime_module_dir="$(cd "$repo_root" && go list -m -f '{{.Dir}}' github.com/helpin-ai/agent-runtime)"
+case "$(cat "$runtime_module_dir/internal/tools/browser_tools.go")" in
+  *AGENT_RUNTIME_BROWSER_HOST_URL*) ;;
+  *) echo "Extension mode needs the updated agent-runtime. Use the agent-runtime version pinned in go.mod or an updated local checkout." >&2; exit 1 ;;
+esac
+
 flags=(-trimpath -ldflags "-s -w")
 # Rex's own Google client, for Gmail and Google Sheets. Without one, people
 # add their own in Apps.
@@ -26,11 +33,7 @@ if [ -n "${REX_GOOGLE_CLIENT_ID:-}" ]; then
 fi
 (cd "$repo_root" && go build -trimpath -ldflags "$host_ldflags" -o "$bin_dir/rex-host-$target_triple" ./cmd/rex-host)
 (cd "$repo_root" && go build "${flags[@]}" -o "$bin_dir/agent-runtime-$target_triple" github.com/helpin-ai/agent-runtime/cmd/agent-runtime)
-if [ -f "$repo_root/go.work" ]; then
-  echo "agent-runtime: local checkout from go.work"
-else
-  echo "agent-runtime: $(cd "$repo_root" && go list -m -f '{{.Version}}' github.com/helpin-ai/agent-runtime) from GitHub"
-fi
+echo "agent-runtime: $(cd "$repo_root" && go list -m -f '{{if .Main}}local checkout from go.work{{else}}{{.Version}} from GitHub{{end}}' github.com/helpin-ai/agent-runtime)"
 cp "$bin_dir/rex-host-$target_triple" "$repo_root/bin/rex-host"
 "$repo_root/scripts/build-embedder.sh"
 echo "sidecars built for $target_triple"

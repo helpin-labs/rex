@@ -265,6 +265,15 @@ export function Chat({ bot, bots, conversationId, status, pending: waiting, defa
   const togglePanel = (next: "files" | "browser" | "memory") => { setMemoryFocus(undefined); setPanel(current => current === next ? null : next); };
   const showMemory = useCallback((documentId?: string) => { setMemoryFocus(documentId); setPanel("memory"); }, []);
   const [browserHeld, setBrowserHeld] = useState(false);
+  useEffect(() => {
+    setBrowserHeld(false);
+    if (!bot.capabilities.browser || (bot.browser_backend || (status?.cloud_browsers ? "cloud" : "extension")) !== "extension") return;
+    let cancelled = false;
+    const refresh = () => api.browserLive(bot.id).then(live => { if (!cancelled) setBrowserHeld(live.held); }).catch(() => undefined);
+    void refresh();
+    const timer = window.setInterval(refresh, 3000);
+    return () => { cancelled = true; window.clearInterval(timer); };
+  }, [bot.id, bot.browser_backend, bot.capabilities.browser, status?.cloud_browsers]);
   const [refreshKey, setRefreshKey] = useState(0);
   const [shown, setShown] = useState(TURNS_SHOWN);
   const scrollRef = useRef<HTMLDivElement>(null);
@@ -476,7 +485,7 @@ export function Chat({ bot, bots, conversationId, status, pending: waiting, defa
           <div><h2>{bot.name}</h2><div className="badges">{capabilityBadges.map(badge => <span className="badge" key={badge}>{badge}</span>)}</div></div>
         </div>
         <div className="row chat-tools">
-          {bot.capabilities.browser && !status?.cloud_browsers && <button type="button" className={`button ${browserHeld ? "warning" : "secondary"} small`} onClick={toggleBrowser} title={browserHeld ? "Hand the browser back to the bot" : "Take control of the bot's browser, for example to sign in"}><MousePointerClick size={14} /><span className="button-label">{browserHeld ? "Hand back browser" : "Take over browser"}</span></button>}
+          {bot.capabilities.browser && bot.browser_backend !== "cloud" && (!!bot.browser_backend || !status?.cloud_browsers) && <button type="button" className={`button ${browserHeld ? "warning" : "secondary"} small`} onClick={toggleBrowser} title={browserHeld ? "Hand the browser back to the bot" : "Take control of the bot's browser, for example to sign in"}><MousePointerClick size={14} /><span className="button-label">{browserHeld ? "Hand back browser" : "Take over browser"}</span></button>}
           {(bot.capabilities.browser || bot.capabilities.files_read || !!home) && <div className="tool-group" role="group" aria-label="Panels">
             {bot.capabilities.browser && <button type="button" className={`tool ${panel === "browser" ? "active" : ""}`} title="Watch the bot's browser" aria-label="Browser" aria-pressed={panel === "browser"} onClick={() => togglePanel("browser")}><Eye size={15} /></button>}
             {bot.capabilities.files_read && <button type="button" className={`tool ${panel === "files" ? "active" : ""}`} title="Workspace files" aria-label="Files" aria-pressed={panel === "files"} onClick={() => togglePanel("files")}><FolderOpen size={15} /></button>}

@@ -155,6 +155,7 @@ ALTER TABLE instruction_proposals ADD COLUMN catalog_id TEXT NOT NULL DEFAULT ''
 	// out when a later run carries the conversation forward.
 	`CREATE TABLE context_cuts (conversation_id TEXT NOT NULL REFERENCES conversations(id) ON DELETE CASCADE, run_id TEXT NOT NULL,
 	after DATETIME NOT NULL, PRIMARY KEY (conversation_id, run_id));`,
+	`ALTER TABLE bots ADD COLUMN browser_backend TEXT NOT NULL DEFAULT '';`,
 }
 
 func (s *Store) migrate(ctx context.Context) error {
@@ -204,12 +205,12 @@ func (s *Store) SetSetting(ctx context.Context, key, value string) error {
 
 // --- bots ---
 
-const botColumns = `id,name,emoji,color,instructions,provider,model,capabilities,approval_mode,workspace_dir,memory_mode,skills,mcp_connections,position,created_at,updated_at,setup,role,retro_off`
+const botColumns = `id,name,emoji,color,instructions,provider,model,capabilities,approval_mode,workspace_dir,memory_mode,skills,mcp_connections,position,created_at,updated_at,setup,role,retro_off,browser_backend`
 
 func scanBot(row interface{ Scan(...any) error }) (*Bot, error) {
 	var bot Bot
 	var capabilities, skills, connections string
-	if err := row.Scan(&bot.ID, &bot.Name, &bot.Emoji, &bot.Color, &bot.Instructions, &bot.Provider, &bot.Model, &capabilities, &bot.ApprovalMode, &bot.WorkspaceDir, &bot.MemoryMode, &skills, &connections, &bot.Position, &bot.CreatedAt, &bot.UpdatedAt, &bot.Setup, &bot.Role, &bot.RetroOff); err != nil {
+	if err := row.Scan(&bot.ID, &bot.Name, &bot.Emoji, &bot.Color, &bot.Instructions, &bot.Provider, &bot.Model, &capabilities, &bot.ApprovalMode, &bot.WorkspaceDir, &bot.MemoryMode, &skills, &connections, &bot.Position, &bot.CreatedAt, &bot.UpdatedAt, &bot.Setup, &bot.Role, &bot.RetroOff, &bot.BrowserBackend); err != nil {
 		return nil, err
 	}
 	_ = json.Unmarshal([]byte(capabilities), &bot.Capabilities)
@@ -258,12 +259,12 @@ func (s *Store) SaveBot(ctx context.Context, bot *Bot) error {
 	capabilities, _ := json.Marshal(bot.Capabilities)
 	skills, _ := json.Marshal(nonNil(bot.Skills))
 	connections, _ := json.Marshal(nonNil(bot.MCPConnections))
-	_, err := s.db.ExecContext(ctx, `INSERT INTO bots(`+botColumns+`) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
+	_, err := s.db.ExecContext(ctx, `INSERT INTO bots(`+botColumns+`) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
 		ON CONFLICT(id) DO UPDATE SET name=excluded.name,emoji=excluded.emoji,color=excluded.color,instructions=excluded.instructions,
 		provider=excluded.provider,model=excluded.model,capabilities=excluded.capabilities,approval_mode=excluded.approval_mode,
 		workspace_dir=excluded.workspace_dir,memory_mode=excluded.memory_mode,skills=excluded.skills,mcp_connections=excluded.mcp_connections,
-		position=excluded.position,updated_at=excluded.updated_at,setup=excluded.setup,role=excluded.role,retro_off=excluded.retro_off`,
-		bot.ID, bot.Name, bot.Emoji, bot.Color, bot.Instructions, bot.Provider, bot.Model, string(capabilities), bot.ApprovalMode, bot.WorkspaceDir, bot.MemoryMode, string(skills), string(connections), bot.Position, bot.CreatedAt, bot.UpdatedAt, bot.Setup, bot.Role, bot.RetroOff)
+		position=excluded.position,updated_at=excluded.updated_at,setup=excluded.setup,role=excluded.role,retro_off=excluded.retro_off,browser_backend=excluded.browser_backend`,
+		bot.ID, bot.Name, bot.Emoji, bot.Color, bot.Instructions, bot.Provider, bot.Model, string(capabilities), bot.ApprovalMode, bot.WorkspaceDir, bot.MemoryMode, string(skills), string(connections), bot.Position, bot.CreatedAt, bot.UpdatedAt, bot.Setup, bot.Role, bot.RetroOff, bot.BrowserBackend)
 	return err
 }
 

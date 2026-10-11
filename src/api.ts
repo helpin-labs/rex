@@ -80,8 +80,9 @@ export const api = {
     form.append("file", file);
     return request<WorkspaceFile>(`/api/bots/${encodeURIComponent(botId)}/files`, { method: "POST", body: form });
   },
+  setupBrowserExtension: (botId: string) => request<{ message: string }>(`/api/bots/${encodeURIComponent(botId)}/browser/extension`, json("POST", {})),
   takeOverBrowser: (botId: string) => request<{ held: boolean; message?: string }>(`/api/bots/${encodeURIComponent(botId)}/browser/takeover`, json("POST", {})),
-  browserLive: (botId: string) => request<{ active: boolean; ws_url?: string; held: boolean }>(`/api/bots/${encodeURIComponent(botId)}/browser/live`),
+  browserLive: (botId: string) => request<{ active: boolean; ws_url?: string; held: boolean; backend?: string }>(`/api/bots/${encodeURIComponent(botId)}/browser/live`),
   releaseBrowser: (botId: string) => request<{ held: boolean }>(`/api/bots/${encodeURIComponent(botId)}/browser/release`, json("POST", {})),
 
   conversations: (botId?: string) => request<Conversation[]>(`/api/conversations${botId ? `?bot_id=${encodeURIComponent(botId)}` : ""}`),

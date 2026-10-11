@@ -252,18 +252,18 @@ export function SettingsView({ status, initialTab, onSaved }: { status: Status |
             {settings.browser_enabled ? <span className="chip ok">On</span> : <span className="chip">Off</span>}</div>
           <Toggle label="Allow bots to use a browser" checked={settings.browser_enabled} onChange={browser_enabled => update({ browser_enabled })} />
           {settings.browser_enabled && <>
-            <Field label="Browser for bots" hint="Any installed Chromium-based browser works. Safari and Firefox can't be automated.">
+            <Field label="Browser for Standard mode" hint="Extension mode uses the built-in browser by default. This choice applies when a bot explicitly selects Standard.">
               <Select value={settings.browser_path || ""} onChange={value => update({ browser_path: value })}>
                 <option value="">{browsers.length ? `Automatic (${browsers[0].name})` : "Built-in test browser"}</option>
                 {browsers.map(browser => <option key={browser.path} value={browser.path}>{browser.name}</option>)}
               </Select>
             </Field>
-            {!settings.kernel_browser && <Toggle label="Show bot browsers on screen" description="Bots browse in a normal window you can watch. Turn off to keep them in the background (watch them from the chat instead)." checked={!settings.browser_hidden} onChange={visible => update({ browser_hidden: !visible })} />}
+            {!settings.kernel_browser && <Toggle label="Show Standard browsers on screen" description="Extension browsers always use a visible window. Standard browsers can run in the background, with a preview in chat." checked={!settings.browser_hidden} onChange={visible => update({ browser_hidden: !visible })} />}
             <div className="subsection">
               <Field label="Kernel API key (cloud browsers)" hint={settings.kernel?.configured ? <span className="row">Key stored in your Keychain. <button type="button" className="link-button" onClick={() => update({ kernel: { ...settings.kernel!, clear_key: true }, kernel_browser: false })}>Remove</button></span> : <>From <button type="button" className="link-button" onClick={() => openExternal("https://www.kernel.sh")}>kernel.sh</button>. Stored in your macOS Keychain.</>}>
                 <input type="password" placeholder={settings.kernel?.configured ? "••••••••" : "sk_…"} value={settings.kernel?.api_key || ""} onChange={event => update({ kernel: { ...(settings.kernel || { base_url: "", configured: false }), api_key: event.target.value, clear_key: false } })} />
               </Field>
-              <Toggle label="Browse in Kernel's cloud" description="Every bot gets a fresh cloud browser for each task instead of a browser on this Mac. Saved logins, taking over the browser and filling in your saved passwords don't work there. If Kernel credits run out, bots fall back to this Mac."
+              <Toggle label="Use Kernel cloud by default" description="Bots following Settings get a fresh cloud browser per task. This integration does not keep cloud logins or support takeover. You can choose a local mode in each bot’s Abilities. Cloud errors stop the task."
                 checked={!!settings.kernel_browser} disabled={!settings.kernel?.configured && !settings.kernel?.api_key} onChange={kernel_browser => update({ kernel_browser })} />
             </div>
           </>}
