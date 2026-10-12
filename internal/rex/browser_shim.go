@@ -154,18 +154,13 @@ func (h *Host) ensureBrowser(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 	h.Browser.mu.Unlock()
-	mode, err := h.Store.GetSetting(r.Context(), "browser.backend."+input.Session)
-	if err != nil {
-		writeError(w, http.StatusInternalServerError, err)
-		return
-	}
 	if botID != "" {
 		if _, err := h.Store.GetBot(r.Context(), botID); err != nil {
 			writeError(w, http.StatusForbidden, errors.New("browser bot is unavailable"))
 			return
 		}
 	}
-	if mode == "extension" || (botID != "" && h.Browser.backend(r.Context(), botID) == "extension") {
+	if botID != "" && h.Browser.backend(r.Context(), botID) == "extension" {
 		writeError(w, http.StatusConflict, errors.New("Extension mode cannot execute agent-browser commands"))
 		return
 	}

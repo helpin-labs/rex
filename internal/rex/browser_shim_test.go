@@ -23,14 +23,14 @@ func TestBrowserCommandFindsSessionAndCommand(t *testing.T) {
 	}
 }
 
-func TestOldRuntimeCannotAttachDevToolsToExtensionSession(t *testing.T) {
+func TestStandardShimRejectsExtensionSession(t *testing.T) {
 	h := extensionTestHost(t)
 	h.Browser.active["first"] = "run-extension"
 	server := httptest.NewServer(h.Handler())
 	defer server.Close()
 	payload, _ := json.Marshal(map[string]string{"session": browserSessionName("run-extension")})
 	if err := ensureBrowserSession(t.Context(), shimConfig{EnsureURL: server.URL + "/runtime/browser/ensure", Token: h.cfg.InternalToken}, payload); err == nil {
-		t.Fatal("old runtime allowed to launch agent-browser for an extension run")
+		t.Fatal("Standard shim allowed agent-browser for an Extension run")
 	}
 	if err := ensureBrowserSession(t.Context(), shimConfig{EnsureURL: server.URL + "/runtime/browser/ensure", Token: "wrong"}, payload); err == nil {
 		t.Fatal("failed authorization bypassed host")

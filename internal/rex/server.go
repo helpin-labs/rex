@@ -28,9 +28,6 @@ func (h *Host) Handler() http.Handler {
 
 	mux.HandleFunc("POST /runtime/context", h.requireInternal(h.runtimeContext))
 	mux.HandleFunc("POST /runtime/browser/ensure", h.requireInternal(h.ensureBrowser))
-	mux.HandleFunc("POST /runtime/browser/driver", h.requireInternal(h.browserDriver))
-	mux.HandleFunc("GET /extension/browser", h.extensionBridge)
-	mux.HandleFunc("POST /extension/browser", h.extensionBridge)
 	mux.HandleFunc("POST /runtime/skills/by-id", h.requireInternal(h.lookupSkill))
 	mux.HandleFunc("POST /runtime/skills/active-by-key", h.requireInternal(h.lookupSkill))
 	mux.HandleFunc("GET /runtime/skill-packages/objects/{key...}", h.requireInternal(h.skillPackage))

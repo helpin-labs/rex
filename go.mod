@@ -5,7 +5,7 @@ go 1.26.0
 require (
 	github.com/glebarez/go-sqlite v1.21.2
 	github.com/google/uuid v1.6.0
-	github.com/helpin-ai/agent-runtime v0.13.11
+	github.com/helpin-ai/agent-runtime v0.13.12
 	github.com/helpin-ai/agent-runtime-go v0.7.0
 	github.com/modelcontextprotocol/go-sdk v1.4.1
 	github.com/robfig/cron/v3 v3.0.1

@@ -1,0 +1,15 @@
+@font-face {
+  font-family: "DM Sans";
+  src: url("./assets/fonts/dm-sans/dm-sans-variable.ttf") format("truetype");
+  font-weight: 100 1000;
+  font-style: normal;
+  font-display: swap;
+}
+
+@font-face {
+  font-family: "DM Sans";
+  src: url("./assets/fonts/dm-sans/dm-sans-variable-italic.ttf") format("truetype");
+  font-weight: 100 1000;
+  font-style: italic;
+  font-display: swap;
+}

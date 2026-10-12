@@ -38,6 +38,9 @@ type Agent struct {
 }
 
 type Run struct {
+	Input struct {
+		Metadata map[string]interface{} `json:"metadata,omitempty"`
+	} `json:"input,omitempty"`
 	ID            string         `json:"id"`
 	AppID         string         `json:"app_id"`
 	HostRunID     string         `json:"host_run_id,omitempty"`

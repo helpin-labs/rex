@@ -1,5 +1,8 @@
 # Experimental extension browser
 
+The move of this driver into agent-runtime is described in
+[the migration plan](PLAN-extension-runtime.md).
+
 A bot can select **Standard**, **Extension (experimental)** or **Cloud (Kernel)**
 in **Edit bot → Abilities → Browser mode**. Bots without an explicit mode use Extension for local browsing.
 An explicitly enabled cloud default still uses Kernel. Standard remains an
@@ -9,12 +12,9 @@ page between drivers.
 
 ## Build
 
-Rex pins agent-runtime **v0.13.11** in `go.mod`, including the extension driver
-callback and bounded ChatGPT stream recovery. Build the released version with:
-
-```sh
-GOWORK=off pnpm tauri:build
-```
+Rex pins **agent-runtime v0.13.12**, which includes the native Extension driver.
+Build the packaged app with `GOWORK=off pnpm tauri:build` to use this release
+even if a local development workspace exists.
 
 For local runtime development, an ignored `go.work` can use both checkouts:
 
@@ -24,18 +24,17 @@ pnpm sidecars
 pnpm tauri dev
 ```
 
-The sidecar build refuses runtimes without the host driver callback. An older
-running runtime also cannot launch agent-browser for an Extension session:
+An older running runtime cannot launch agent-browser for an Extension session:
 the shim rejects it before any debugger is attached.
 
 ## Installation
 
-Use the default local mode or select **Extension** for the bot. Rex loads its extension automatically in
+Use the default local mode or select **Extension** for the bot. Agent-runtime loads the extension automatically in
 agent-browser's bundled Chrome for Testing when browsing starts. No Developer
 mode or manual installation is required. Install the bundled browser with
 `agent-browser install` if it is missing. The browser runs visibly, including
 when Standard mode is configured to be hidden. The extension is embedded in
-`rex-host` and refreshed at launch; Rex attaches no DevTools connection.
+`agent-runtime` and refreshed at launch; it attaches no DevTools connection.
 
 **Open extension browser** opens the bot's browser for human use. Hand it back
 in Rex when ready. Extension mode always uses the bundled browser, independently
@@ -57,14 +56,16 @@ Embedded frames, keyboard presses, hover, file uploads, recording, full-page or
 annotated screenshots and saved-password filling return a clear error or require
 human takeover. Existing local login cookies remain in the same bot profile.
 The live panel directs the user to watch the real window instead of opening a
-DevTools stream. Extension windows stay open while idle to preserve the page.
+DevTools stream. Extension windows stay open until runtime's idle timeout.
+Closing saves the page URL; reopening restores that URL and the persistent profile.
 
 ## Ownership and security
 
-Agent-runtime owns tool schemas, input validation, backend selection and artifact
-storage. Its extension driver uses an authenticated host callback and never
-executes agent-browser. Rex owns installation, profiles, process launch and
-takeover. Local and cloud commands retain their existing execution path.
+Agent-runtime owns tool schemas, input validation, backend selection, artifact
+storage, extension installation, profiles, process launch and the takeover gate.
+Its native Extension driver never executes agent-browser. Rex sends authenticated
+control requests and keeps the existing mode selector and takeover UI. Its profile
+mapping preserves existing `browser-profiles/<bot slug>` cookies.
 
 The loopback bridge has a separate random credential for each bot. Credentials
 are stored in that bot's extension folder with user-only permissions and stay in
@@ -76,7 +77,8 @@ run session and reference epoch. The Manifest V3 worker uses bounded polling and
 alarms to reconnect, without automatically replaying an action after a failure.
 
 Takeover waits for the current extension operation, blocks further commands, and
-keeps the same page open. Handback invalidates references. Sign-in and visible
+keeps the same page open. Held state survives runtime restart. Handback invalidates
+references. A second run cannot claim an occupied profile. Sign-in and visible
 verification are performed by the human. Kernel is launched with `stealth=false`
 because its stealth setting loads an automatic CAPTCHA solver; this changes the
 previous cloud behavior. Explicit cloud failures never silently become local
@@ -88,18 +90,19 @@ cloud profiles.
 ```sh
 pnpm test
 pnpm build
-go test ./...
-go test github.com/helpin-ai/agent-runtime/internal/tools -run 'Test(Browser|HostSelected|Extension|ExplicitCloud)'
-REX_EXTENSION_E2E=1 go test ./internal/rex -run TestExtensionBrowserWithoutDevTools -count=1 -v
+GOWORK=off go test ./...
+cd ../agent-runtime
+go test -race ./internal/tools ./internal/api ./internal/engine -run 'Test(Browser|HostSelected|Extension|Native|StartRunFreezesTrustedBrowserPolicy|ExplicitCloud)'
+AGENT_RUNTIME_EXTENSION_E2E=1 go test ./internal/tools -run TestExtensionBrowserWithoutDevTools -count=1 -v
 ```
 
 The last check uses a temporary profile and localhost fixture, with no DevTools
 connection. It exercises navigation, form input, text, screenshots, references
-and cookie persistence. It requires the agent-browser-installed Chrome for
+and cookie persistence across full runtime restart. It requires the agent-browser-installed Chrome for
 Testing, but does not use agent-browser to drive it.
 
-Protected-site completion rates, all supported Chromium products, long-running
-worker recovery and host-crash recovery still need representative trials before
+Protected-site completion rates, Linux virtual displays, all supported Chromium
+products and long-running worker recovery still need representative trials before
 broader rollout. A host crash can leave a bot's browser open; close that window
 before reopening Extension mode if its profile is reported as locked. No claim
 is made that extension automation passes bot checks. Automatic backend switching

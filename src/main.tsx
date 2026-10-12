@@ -3,6 +3,7 @@ import ReactDOM from "react-dom/client";
 import App from "./App";
 import { applyTheme, loadTheme } from "./theme";
 import "@fontsource-variable/inter";
+import "./fonts.css";
 import "./styles.css";
 
 applyTheme(loadTheme());

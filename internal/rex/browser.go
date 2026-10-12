@@ -30,10 +30,9 @@ import (
 // only possible while the bot's run is paused, so the bot cannot act while
 // the user holds the browser.
 type BrowserControl struct {
-	host       *Host
-	mu         sync.Mutex
-	held       map[string]heldBrowser
-	extensions map[string]*extensionBrowser
+	host *Host
+	mu   sync.Mutex
+	held map[string]heldBrowser
 	// active maps bot ID to the run whose session uses the bot's profile.
 	active map[string]string
 	// prepared counts Prepare calls per bot, so closing an idle browser can
@@ -54,10 +53,9 @@ type BrowserControl struct {
 const browserIdleTimeout = 2 * time.Minute
 
 type heldBrowser struct {
-	Extension bool
-	RunID     string
-	URL       string
-	Since     time.Time
+	RunID string
+	URL   string
+	Since time.Time
 	// Plain is the browser the user is using, started without automation;
 	// exited closes when it quits.
 	Plain *plainBrowser
@@ -69,7 +67,7 @@ type heldBrowser struct {
 const hideAutomation = "--disable-blink-features=AutomationControlled"
 
 func NewBrowserControl(host *Host) *BrowserControl {
-	return &BrowserControl{host: host, held: map[string]heldBrowser{}, extensions: map[string]*extensionBrowser{}, active: map[string]string{}, prepared: map[string]int{}, open: map[string]bool{}, ensuring: map[string]*sync.Mutex{}}
+	return &BrowserControl{host: host, held: map[string]heldBrowser{}, active: map[string]string{}, prepared: map[string]int{}, open: map[string]bool{}, ensuring: map[string]*sync.Mutex{}}
 }
 
 func browserSessionName(runID string) string {
@@ -333,7 +331,6 @@ func (b *BrowserControl) closeBotSessions(ctx context.Context, botID, except str
 // CloseAll closes every bot browser Rex opened. It runs at startup (to
 // clear sessions left by a previous process) and at shutdown.
 func (b *BrowserControl) CloseAll(ctx context.Context) {
-	b.closeExtensions(ctx)
 	sessions, err := b.host.Store.BrowserSessions(ctx, "")
 	if err != nil {
 		return
@@ -500,23 +497,14 @@ func (b *BrowserControl) TakeOver(ctx context.Context, botID string) (map[string
 // Release closes the user's window and gives the bot its browser back at
 // the page the user left it on.
 func (b *BrowserControl) Release(ctx context.Context, botID string) error {
+	if b.backend(ctx, botID) == "extension" {
+		_, err := b.extensionControl(ctx, botID, "handback")
+		return err
+	}
 	b.mu.Lock()
 	held, ok := b.held[botID]
 	b.mu.Unlock()
 	if !ok {
-		return nil
-	}
-	if held.Extension {
-		ext, err := b.extension(ctx, botID)
-		if err != nil {
-			return err
-		}
-		ext.gate.Lock()
-		defer ext.gate.Unlock()
-		ext.epoch = randomHex(8)
-		b.mu.Lock()
-		delete(b.held, botID)
-		b.mu.Unlock()
 		return nil
 	}
 	url := b.closePlain(held, b.profileDir(botID))
@@ -778,7 +766,7 @@ type LiveView struct {
 // the user's takeover window, then the newest run session.
 func (b *BrowserControl) Live(ctx context.Context, botID string) (LiveView, error) {
 	if b.backend(ctx, botID) == "extension" {
-		return b.extensionLive(ctx, botID), nil
+		return b.extensionLive(ctx, botID)
 	}
 	view := LiveView{Held: b.Held(botID)}
 	sessions, err := b.host.Store.BrowserSessions(ctx, botID)
