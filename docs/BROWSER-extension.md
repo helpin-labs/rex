@@ -12,10 +12,9 @@ page between drivers.
 
 ## Build
 
-The native driver is currently tested against the sibling agent-runtime checkout.
-Rex still pins **v0.13.11**, which predates runtime ownership. Publish and pin
-the native-driver release before distribution, then build with
-`GOWORK=off pnpm tauri:build`. The sidecar build rejects an incompatible runtime.
+Rex pins **agent-runtime v0.13.12**, which includes the native Extension driver.
+Build the packaged app with `GOWORK=off pnpm tauri:build` to use this release
+even if a local development workspace exists.
 
 For local runtime development, an ignored `go.work` can use both checkouts:
 
@@ -25,8 +24,7 @@ pnpm sidecars
 pnpm tauri dev
 ```
 
-The sidecar build refuses runtimes without the native driver. An older
-running runtime also cannot launch agent-browser for an Extension session:
+An older running runtime cannot launch agent-browser for an Extension session:
 the shim rejects it before any debugger is attached.
 
 ## Installation
@@ -92,7 +90,7 @@ cloud profiles.
 ```sh
 pnpm test
 pnpm build
-go test ./...
+GOWORK=off go test ./...
 cd ../agent-runtime
 go test -race ./internal/tools ./internal/api ./internal/engine -run 'Test(Browser|HostSelected|Extension|Native|StartRunFreezesTrustedBrowserPolicy|ExplicitCloud)'
 AGENT_RUNTIME_EXTENSION_E2E=1 go test ./internal/tools -run TestExtensionBrowserWithoutDevTools -count=1 -v

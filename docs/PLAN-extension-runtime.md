@@ -1,7 +1,7 @@
 # Extension browser migration into agent runtime
 
-Status: implemented locally, 2026-10-11. Runtime owns the Extension driver and
-Rex uses its authenticated controls. Real Chrome tests on macOS cover navigation,
+Status: implemented and pinned to agent-runtime v0.13.12, 2026-10-12. Runtime
+owns the Extension driver and Rex uses its authenticated controls. Real Chrome tests on macOS cover navigation,
 input, screenshots, takeover, cookies and full runtime restart. Runtime API,
 engine and browser race tests, Rex Go tests and frontend checks pass. The existing
 nine macOS runtime test failures remain unrelated to this migration.
@@ -9,11 +9,10 @@ The rebuilt packaged Rex app also passes Open, connected status, Take over and
 Hand back using an existing bot profile. Chrome loads the runtime's extension
 without remote-debugging flags; Extension remains the default.
 
-Release gates remaining: Linux virtual-display smoke test, publish the runtime
-release, pin it in Rex, and build with `GOWORK=off`. Local builds currently use
-the sibling runtime through `go.work`; Rex still pins v0.13.11, so the build
-guard rejects distribution without the new runtime. Rex uses its existing HTTP
-client for the new controls; no SDK release is needed.
+The runtime release is pinned in Rex; packaged builds use `GOWORK=off` to avoid
+local workspace overrides. Rex uses its existing HTTP client for the new
+controls; no SDK release is needed. Linux virtual-display smoke testing remains
+before broader rollout.
 
 ## Goal and scope
 

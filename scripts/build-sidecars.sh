@@ -16,13 +16,6 @@ mkdir -p "$bin_dir" "$repo_root/bin"
 # agent-runtime is private: fetch it with git credentials, not the public proxy.
 export GOPRIVATE="${GOPRIVATE:+$GOPRIVATE,}github.com/helpin-ai/*"
 
-# Do not ship an older runtime that would ignore the extension driver settings.
-runtime_module_dir="$(cd "$repo_root" && go list -m -f '{{.Dir}}' github.com/helpin-ai/agent-runtime)"
-case "$(cat "$runtime_module_dir/internal/tools/browser_tools.go")" in
-  *AGENT_RUNTIME_BROWSER_PROFILE_ROOT*) ;;
-  *) echo "Extension mode needs the runtime-owned browser release. For local testing use go work init . ../agent-runtime; pin the native Extension release before distribution." >&2; exit 1 ;;
-esac
-
 flags=(-trimpath -ldflags "-s -w")
 # Rex's own Google client, for Gmail and Google Sheets. Without one, people
 # add their own in Apps.
