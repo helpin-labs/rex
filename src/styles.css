@@ -35,7 +35,7 @@
   --radius: 12px;
   color-scheme: light;
   font-family: "DM Sans", "Inter Variable", -apple-system, BlinkMacSystemFont, "Helvetica Neue", sans-serif;
-  font-size: 16px;
+  font-size: 15px;
   letter-spacing: -0.011em;
   color: var(--text);
   background: var(--bg);
@@ -61,19 +61,21 @@
 }
 * { box-sizing: border-box; }
 html, body, #root { height: 100%; margin: 0; overflow: hidden; background: var(--bg); }
-button, input, textarea, select { font: inherit; color: inherit; }
+button, input, textarea, select { font: inherit; color: inherit; letter-spacing: -.011em; }
 /* Text fields use the 13px UI size, like Helpin's controls. */
 input, textarea, select { font-size: 13px; }
 button { cursor: pointer; }
 button:disabled { cursor: default; opacity: .5; }
 h1, h2, h3, h4 { margin: 0; letter-spacing: -.02em; }
 h1 { font-size: 20px; font-weight: 650; }
-h2 { font-size: 16px; font-weight: 650; }
+h2 { font-size: 15px; font-weight: 650; }
 h3 { font-size: 14px; font-weight: 600; }
 p { line-height: 1.55; margin: 0 0 8px; }
 code { font: 12px ui-monospace, SFMono-Regular, Menlo, monospace; padding: 1px 5px; border-radius: 5px; background: var(--surface-2); }
 pre { font: 12px/1.5 ui-monospace, SFMono-Regular, Menlo, monospace; white-space: pre-wrap; word-break: break-word; margin: 0; }
 .muted { color: var(--muted); }
+/* Keep monospaced controls at their existing normal spacing. */
+textarea.code, .schedule-row .cron-input, .json-summary, .model-trigger-text small, .gallery-card-main .mono-url { letter-spacing: normal; }
 .small { font-size: 12.5px; }
 .pre { white-space: pre-wrap; }
 .spacer { flex: 1; }
@@ -114,7 +116,7 @@ pre { font: 12px/1.5 ui-monospace, SFMono-Regular, Menlo, monospace; white-space
 .bot-row.active { background: var(--side-active); }
 .bot-row-text { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 2px; }
 .bot-row-top { display: flex; align-items: baseline; gap: 8px; }
-.bot-row-top strong { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-weight: 550; font-size: 16px; }
+.bot-row-top strong { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-weight: 550; font-size: 15px; }
 .bot-row-top strong, .main-bot strong, .brand strong { letter-spacing: -.02em; }
 .bot-row-top small { flex: 0 0 auto; color: var(--faint); font-size: 11.5px; }
 .bot-row-preview { display: flex; align-items: center; gap: 5px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--muted); font-size: 12.5px; }
@@ -172,7 +174,7 @@ pre { font: 12px/1.5 ui-monospace, SFMono-Regular, Menlo, monospace; white-space
   .chat-header .button .button-label { display: none; }
   .chat-header .button.small { padding: 0; width: 32px; height: 32px; }
 }
-.chat-title h2 { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 16px; }
+.chat-title h2 { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 15px; }
 .badges { display: flex; flex-wrap: wrap; gap: 5px; margin-top: 3px; }
 .badge { display: inline-flex; align-items: center; padding: 1px 7px; border-radius: 999px; background: var(--surface-2); color: var(--muted); font-size: 11.5px; font-weight: 600; }
 .badge.danger { background: var(--danger-soft); color: var(--danger); }
@@ -182,10 +184,10 @@ pre { font: 12px/1.5 ui-monospace, SFMono-Regular, Menlo, monospace; white-space
 .chat-empty { display: flex; flex-direction: column; align-items: center; text-align: center; gap: 10px; max-width: 420px; margin: 12vh auto 0; color: var(--muted); }
 .chat-empty h3 { color: var(--text); font-size: 18px; }
 .turn { max-width: 760px; margin: 0 auto 22px; }
-.bubble { font-size: 16px; line-height: 1.65; overflow-wrap: anywhere; }
+.bubble { font-size: 15px; font-weight: 450; line-height: 1.65; overflow-wrap: anywhere; }
 .bubble.user { width: fit-content; max-width: 78%; margin: 0 0 14px auto; padding: 10px 14px; border-radius: 18px 18px 5px 18px; background: var(--user-bubble); color: var(--user-text); border: 1px solid var(--user-border); }
 .bubble-text { white-space: pre-wrap; }
-.bubble.bot { padding: 2px 0; font-weight: 450; }
+.bubble.bot { padding: 2px 0; }
 .bubble.bot.failed { display: flex; gap: 6px; align-items: center; color: var(--danger); }
 .bot-reply { display: flex; flex-direction: column; gap: 6px; }
 .reply-meta { display: flex; align-items: center; gap: 6px; }
@@ -242,7 +244,7 @@ pre { font: 12px/1.5 ui-monospace, SFMono-Regular, Menlo, monospace; white-space
 .composer-wrap { grid-row: 5; padding: 10px clamp(20px, 6vw, 80px) 14px; }
 .composer { display: flex; align-items: flex-end; gap: 6px; max-width: 760px; margin: 0 auto; padding: 7px; border: 1px solid var(--border-strong); border-radius: 16px; background: var(--surface); box-shadow: var(--shadow); }
 .composer:focus-within { border-color: var(--accent); }
-.composer textarea { flex: 1; min-height: 32px; font-size: 16px; max-height: 220px; padding: 6px 4px; border: 0; outline: 0; resize: none; background: transparent; field-sizing: content; line-height: 1.45; }
+.composer textarea { flex: 1; min-height: 32px; font-size: 15px; font-weight: 450; max-height: 220px; padding: 6px 4px; border: 0; outline: 0; resize: none; background: transparent; field-sizing: content; line-height: 1.45; }
 .send { display: grid; place-items: center; width: 34px; height: 34px; border: 0; border-radius: 11px; background: var(--accent-fill); color: white; }
 .send.stop { background: var(--text); color: var(--surface); }
 .composer-hint { max-width: 760px; margin: 6px auto 0; color: var(--faint); font-size: 11px; text-align: center; }
@@ -297,7 +299,7 @@ pre { font: 12px/1.5 ui-monospace, SFMono-Regular, Menlo, monospace; white-space
 .side-slot { flex: 1; min-height: 0; display: flex; flex-direction: column; }
 .side-page { flex: 1; min-height: 0; display: flex; flex-direction: column; overflow-y: auto; padding-bottom: 10px; }
 .page-list-header { padding: 6px 16px 12px; }
-.page-list-header h2 { font-size: 16px; }
+.page-list-header h2 { font-size: 15px; }
 .page-list-header .subtitle { display: block; margin-top: 1px; color: var(--muted); font-size: 13px; }
 .list { display: flex; flex-direction: column; gap: 2px; padding: 4px 8px 16px; overflow-y: auto; }
 .list-item { display: flex; align-items: center; gap: 10px; padding: 9px 10px; border: 0; border-radius: 9px; background: none; text-align: left; font-size: 14.5px; }
@@ -320,7 +322,7 @@ pre { font: 12px/1.5 ui-monospace, SFMono-Regular, Menlo, monospace; white-space
 .section-title { font-size: 14px; color: var(--text); font-weight: 600; text-transform: none; }
 .empty { display: flex; flex-direction: column; align-items: center; justify-content: center; text-align: center; gap: 10px; height: 100%; min-height: 260px; padding: 30px; color: var(--muted); }
 .empty-icon { display: grid; place-items: center; width: 56px; height: 56px; border-radius: 16px; background: var(--surface-2); }
-.empty h3 { color: var(--text); font-size: 16px; }
+.empty h3 { color: var(--text); font-size: 15px; }
 .empty-body { max-width: 380px; line-height: 1.5; }
 input.bare { flex: 1; border: 0; outline: 0; background: transparent; padding: 4px; }
 .recall-results { margin: 4px 0 0; padding-left: 20px; }
@@ -646,7 +648,7 @@ textarea { resize: vertical; line-height: 1.5; }
 .skill-header { display: flex; align-items: flex-start; justify-content: space-between; gap: 16px; position: sticky; top: -22px; z-index: 2; margin: -22px -4px 0; padding: 22px 4px 12px; background: var(--surface); border-bottom: 1px solid var(--border); }
 .skill-header-text { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 2px; }
 .skill-header-text small { font-size: 12px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-family: ui-monospace, SFMono-Regular, Menlo, monospace; }
-.skill-header input.skill-title-input { width: 100%; min-height: 0; border: 0; outline: none; padding: 2px 0; border: 0; border-radius: 0; background: none; box-shadow: none; color: var(--text); font-size: 22px; font-weight: 650; letter-spacing: -0.01em; outline: none; }
+.skill-header input.skill-title-input { width: 100%; min-height: 0; border: 0; outline: none; padding: 2px 0; border: 0; border-radius: 0; background: none; box-shadow: none; color: var(--text); font-size: 22px; font-weight: 650; letter-spacing: -0.02em; outline: none; }
 .skill-header input.skill-title-input:focus { box-shadow: 0 1px 0 var(--accent); border: 0; }
 .skill-title-input::placeholder { color: var(--faint); }
 .skill-actions { flex: 0 0 auto; align-items: center; gap: 8px; }
@@ -665,7 +667,7 @@ textarea { resize: vertical; line-height: 1.5; }
 .catalog-search input:not([type=checkbox]) { border: 0; padding: 7px 0; background: none; box-shadow: none; }
 .catalog-sources-link { margin: 0 12px 8px; padding: 2px 4px; border: 0; background: none; color: var(--accent-text, var(--accent)); font-size: 12px; text-align: left; cursor: pointer; }
 .catalog-sources-link.active { font-weight: 600; }
-.catalog-title { font-size: 22px; font-weight: 650; letter-spacing: -0.01em; margin: 0; }
+.catalog-title { font-size: 22px; font-weight: 650; letter-spacing: -0.02em; margin: 0; }
 .catalog-description { margin: 0; font-size: 14.5px; line-height: 1.55; }
 .catalog-facts { display: flex; flex-wrap: wrap; align-items: center; gap: 6px 14px; font-size: 12.5px; color: var(--muted); }
 .catalog-warning { display: inline-flex; align-items: center; gap: 5px; color: var(--warn, #b45309); }
@@ -702,7 +704,7 @@ textarea { resize: vertical; line-height: 1.5; }
   .main-bot { display: grid; grid-template-columns: auto auto; align-items: center; column-gap: 10px; row-gap: 0; padding: 6px 14px 6px 8px; text-align: left; }
   .main-bot-logo { grid-row: 1 / 3; margin: 0; }
   .main-bot-logo .app-logo { width: 46px; height: 46px; }
-  .main-bot strong { align-self: end; font-size: 16px; }
+  .main-bot strong { align-self: end; font-size: 15px; }
   .main-bot small { align-self: start; }
 }
 
@@ -858,7 +860,7 @@ textarea { resize: vertical; line-height: 1.5; }
 .bot-settings-title { display: flex; align-items: center; gap: 14px; }
 .bot-settings-title .grow { display: flex; flex-direction: column; gap: 2px; min-width: 0; }
 .bot-settings-title small { font-size: 12.5px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.bot-settings-title input.bot-name-input:not([type=checkbox]) { width: 100%; padding: 2px 0; border: 0; border-radius: 0; outline: none; background: none; box-shadow: none; color: var(--text); font-size: 22px; font-weight: 650; letter-spacing: -0.015em; }
+.bot-settings-title input.bot-name-input:not([type=checkbox]) { width: 100%; padding: 2px 0; border: 0; border-radius: 0; outline: none; background: none; box-shadow: none; color: var(--text); font-size: 22px; font-weight: 650; letter-spacing: -0.02em; }
 .bot-settings-title input.bot-name-input:not([type=checkbox]):focus { box-shadow: 0 1px 0 var(--accent); border: 0; }
 .tab-bar { display: flex; gap: 2px; margin-top: 14px; border-bottom: 1px solid var(--border); }
 .tab-bar button { margin-bottom: -1px; padding: 8px 12px; border: 0; border-bottom: 2px solid transparent; background: none; color: var(--muted); font-size: 13.5px; font-weight: 550; }
@@ -977,7 +979,7 @@ textarea { resize: vertical; line-height: 1.5; }
 .edit-message { margin-top: 8px; opacity: 0; }
 .turn:hover .edit-message, .edit-message:focus-visible { opacity: 1; }
 .bubble-edit { display: flex; flex-direction: column; gap: 8px; width: min(78%, 620px); margin: 0 0 14px auto; padding: 10px; border: 1px solid var(--accent); border-radius: 16px; background: var(--surface); box-shadow: 0 0 0 3px var(--accent-soft); }
-.bubble-edit textarea:not([type=checkbox]) { padding: 2px 4px; border: 0; background: none; box-shadow: none; resize: none; font-size: 16px; line-height: 1.5; field-sizing: content; max-height: 40vh; }
+.bubble-edit textarea:not([type=checkbox]) { padding: 2px 4px; border: 0; background: none; box-shadow: none; resize: none; font-size: 15px; font-weight: 450; line-height: 1.5; field-sizing: content; max-height: 40vh; }
 .bubble-edit small { font-size: 11.5px; }
 .chat-main.searching .transcript { padding-top: 66px; }
 
