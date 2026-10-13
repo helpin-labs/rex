@@ -38,7 +38,7 @@ func TestRetroSignals(t *testing.T) {
 func TestRetrospectiveSuggestsAndRecordsOutcome(t *testing.T) {
 	ctx := context.Background()
 	host := newSetupTestHost(t)
-	bot := &Bot{Name: "Domain monitor", Instructions: "You check vendor categories where public forms permit.", Capabilities: Capabilities{Browser: true}}
+	bot := &Bot{MemoryMode: MemoryPrivate, Name: "Domain monitor", Instructions: "You check vendor categories where public forms permit.", Capabilities: Capabilities{Browser: true}}
 	if err := host.SaveBot(ctx, bot); err != nil {
 		t.Fatal(err)
 	}
@@ -65,8 +65,21 @@ func TestRetrospectiveSuggestsAndRecordsOutcome(t *testing.T) {
 	if _, err := host.recordSuggestion(ctx, retro.ID, "update_instructions", "", "", "You ask the user to take over on CAPTCHAs."); err == nil {
 		t.Fatal("a suggestion needs a summary")
 	}
+	learningFixture(t, host)
+	_, episode := episodeFixture(t, host, *bot, "No, from now on preserve the reporting format", "settled")
+	saveEpisodeFixture(t, host, episode, "tool_result")
+	if !host.Memory.retainEpisode(ctx) {
+		t.Fatal("missing learning")
+	}
+	if _, err := host.reviewMemory(ctx, retro.ID, *bot, "review", ""); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := host.capabilitySearch(ctx, retro.ID, *bot, "browser"); err != nil {
+		t.Fatal(err)
+	}
+	proof := ProposalEvidence{GapType: "instruction_contract", Sources: []string{episodeDocument(episode.TurnID)}, Gap: "Repeatedly ignores the retrieved report contract", MemoryRemedy: "Reviewed the saved reporting correction", MemoryInsufficient: "Repeatedly ignored the correction after recall", CapabilityRemedy: "Reviewed enabled browser and skills", CapabilityInsufficient: "Tools do not define the report contract", Expected: "Reports follow the existing source requirements"}
 	newInstructions := "You check vendor categories. When a page shows a CAPTCHA, ask the user to take over the browser instead of skipping the vendor."
-	outcome, err := host.recordSuggestion(ctx, retro.ID, "update_instructions", "Ask you to solve CAPTCHAs instead of skipping vendors", "Palo Alto and Broadcom were skipped because of CAPTCHAs.", newInstructions)
+	outcome, err := host.recordSuggestion(ctx, retro.ID, "update_instructions", "Ask you to solve CAPTCHAs instead of skipping vendors", "Palo Alto and Broadcom were skipped because of CAPTCHAs.", newInstructions, proof)
 	if err != nil || !strings.HasPrefix(outcome, "suggested:") {
 		t.Fatalf("outcome %q, %v", outcome, err)
 	}
@@ -74,13 +87,14 @@ func TestRetrospectiveSuggestsAndRecordsOutcome(t *testing.T) {
 	if len(pending) != 1 || pending[0].Source != ProposalFromRetrospective || pending[0].Reason == "" || pending[0].Instructions != newInstructions {
 		t.Fatalf("pending = %+v", pending)
 	}
-	if done, _ := host.Store.GetRetrospective(ctx, retro.ID); done.Status != "done" || done.FinishedAt == nil {
-		t.Fatalf("look-back not finished: %+v", done)
+	if done, _ := host.Store.GetRetrospective(ctx, retro.ID); done.Status != "running" || done.Outcome == "" {
+		t.Fatalf("look-back result not recorded: %+v", done)
 	}
 	if unchanged, _ := host.Store.GetBot(ctx, bot.ID); unchanged.Instructions != bot.Instructions {
 		t.Fatal("a suggestion changes nothing by itself")
 	}
 
+	_ = host.Store.updateRetro(ctx, retro.ID, "done", "", outcome)
 	// While a suggestion waits, no new look-back starts.
 	_ = host.Store.QueueRetrospective(ctx, bot.ID, retroAsked)
 	next, _ := host.Store.retrospectives(ctx, `WHERE bot_id=? AND status='queued'`, bot.ID)

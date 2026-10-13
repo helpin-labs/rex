@@ -21,9 +21,10 @@ type ModelInfo struct {
 	Embedding bool   `json:"embedding"`
 	// What the provider says about the model, where it says it (OpenRouter
 	// says the most; Anthropic gives a name).
-	Name    string `json:"name,omitempty"`
-	Context int    `json:"context,omitempty"`
-	Vision  bool   `json:"vision,omitempty"`
+	Name      string `json:"name,omitempty"`
+	Context   int    `json:"context,omitempty"`
+	MaxOutput int    `json:"max_output,omitempty"`
+	Vision    bool   `json:"vision,omitempty"`
 	// Tools is false only when the provider says the model can't call tools.
 	Tools *bool `json:"tools,omitempty"`
 	// Prices in US dollars per million input and output tokens.
@@ -65,9 +66,19 @@ func (h *Host) providerEndpoint(ctx context.Context, provider string) (string, s
 // ListModels asks a provider which models it offers.
 func (h *Host) ListModels(ctx context.Context, provider string) ([]ModelInfo, error) {
 	if provider == ProviderChatGPT {
+		metadata, err := h.chatGPTModelMetadata(ctx)
 		models := make([]ModelInfo, 0, len(ChatGPTModels))
 		for _, id := range ChatGPTModels {
-			models = append(models, ModelInfo{ID: id})
+			info := ModelInfo{ID: id}
+			if err == nil {
+				for _, item := range metadata {
+					if item.ID == id {
+						info = item
+						break
+					}
+				}
+			}
+			models = append(models, info)
 		}
 		return models, nil
 	}
@@ -92,12 +103,18 @@ func (h *Host) ListModels(ctx context.Context, provider string) ([]ModelInfo, er
 	}
 	var response struct {
 		Data []struct {
-			ID            string `json:"id"`
-			Type          string `json:"type"`
-			Name          string `json:"name"`
-			DisplayName   string `json:"display_name"`
-			ContextLength int    `json:"context_length"`
-			Architecture  struct {
+			ID                  string `json:"id"`
+			Type                string `json:"type"`
+			Name                string `json:"name"`
+			DisplayName         string `json:"display_name"`
+			ContextLength       int    `json:"context_length"`
+			ContextWindow       int    `json:"context_window"`
+			MaxModelLen         int    `json:"max_model_len"`
+			MaxCompletionTokens int    `json:"max_completion_tokens"`
+			TopProvider         struct {
+				MaxCompletionTokens int `json:"max_completion_tokens"`
+			} `json:"top_provider"`
+			Architecture struct {
 				InputModalities []string `json:"input_modalities"`
 			} `json:"architecture"`
 			Pricing *struct {
@@ -116,6 +133,8 @@ func (h *Host) ListModels(ctx context.Context, provider string) ([]ModelInfo, er
 		model := ModelInfo{ID: item.ID, Embedding: strings.Contains(lower, "embed") || item.Type == "embeddings",
 			Name: firstNonEmpty(item.DisplayName, item.Name), Context: item.ContextLength,
 			Vision: slices.Contains(item.Architecture.InputModalities, "image")}
+		model.Context = minimumReported(item.ContextLength, item.ContextWindow, item.MaxModelLen)
+		model.MaxOutput = minimumReported(item.MaxCompletionTokens, item.TopProvider.MaxCompletionTokens)
 		if item.SupportedParameters != nil {
 			tools := slices.Contains(item.SupportedParameters, "tools")
 			model.Tools = &tools
@@ -126,6 +145,9 @@ func (h *Host) ListModels(ctx context.Context, provider string) ([]ModelInfo, er
 		models = append(models, model)
 	}
 	sort.Slice(models, func(i, j int) bool { return models[i].ID < models[j].ID })
+	if provider == ProviderLocal {
+		h.localModelLimits(ctx, base, models)
+	}
 	return models, nil
 }
 

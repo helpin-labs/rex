@@ -74,7 +74,7 @@ func (r routingExtractor) Extract(ctx context.Context, request memory.RetainRequ
 }
 
 func (r routingExtractor) Consolidate(ctx context.Context, facts []memory.Fact, observations []memory.Observation) (memory.ConsolidationPlan, error) {
-	return r.pool.base.Provider.Consolidate(ctx, facts, observations)
+	return r.pool.base.consolidateOperational(ctx, facts, observations)
 }
 
 func (r routingExtractor) ReconcileObservations(ctx context.Context, newText, existing string) (memory.ObservationReconciliation, error) {

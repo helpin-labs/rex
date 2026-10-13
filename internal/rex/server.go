@@ -110,6 +110,9 @@ func (h *Host) Handler() http.Handler {
 	api.HandleFunc("POST /api/memory/banks/{bank}/forget", h.memoryForget)
 	api.HandleFunc("POST /api/memory/banks/{bank}/recall", h.memoryRecall)
 	api.HandleFunc("POST /api/memory/banks/{bank}/consolidate", h.memoryConsolidate)
+	api.HandleFunc("GET /api/memory/banks/{bank}/learning", h.memoryLearning)
+	api.HandleFunc("POST /api/memory/banks/{bank}/history/search", h.memoryHistorySearch)
+	api.HandleFunc("POST /api/memory/banks/{bank}/history/read", h.memoryHistoryRead)
 	api.HandleFunc("POST /api/memory/turns/{id}/retry", h.memoryRetryTurn)
 
 	api.HandleFunc("GET /api/skills", h.listSkills)
@@ -806,7 +809,16 @@ func (h *Host) memoryConsolidate(w http.ResponseWriter, r *http.Request) {
 }
 
 func (h *Host) memoryRetryTurn(w http.ResponseWriter, r *http.Request) {
-	if err := h.Store.SetTurnMemory(r.Context(), r.PathValue("id"), "pending", "", 0); err != nil {
+	turn, err := h.Store.GetTurn(r.Context(), r.PathValue("id"))
+	if err == nil && turn.MemoryStatus != "forgotten" {
+		err = h.Store.QueueEpisode(r.Context(), *turn)
+		if err == nil {
+			err = h.Store.retryEpisode(r.Context(), firstNonEmpty(turn.MemoryBank, "bot:"+turn.BotID), turn.ID)
+		}
+	} else if err == nil {
+		err = errors.New("source was forgotten")
+	}
+	if err != nil {
 		writeError(w, http.StatusBadRequest, err)
 		return
 	}

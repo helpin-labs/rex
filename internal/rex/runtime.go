@@ -67,7 +67,25 @@ type Message struct {
 	Role        string    `json:"role"`
 	MessageType string    `json:"message_type,omitempty"`
 	Content     string    `json:"content"`
+	SequenceNo  int64     `json:"sequence_no"`
 	CreatedAt   time.Time `json:"created_at"`
+}
+
+type Artifact struct {
+	ID            string          `json:"id"`
+	Type          string          `json:"artifact_type"`
+	Format        string          `json:"format"`
+	StorageMode   string          `json:"storage_mode"`
+	InlineContent string          `json:"inline_content,omitempty"`
+	Metadata      json.RawMessage `json:"metadata,omitempty"`
+	Sequence      int64           `json:"sequence_no"`
+	CreatedAt     time.Time       `json:"created_at"`
+}
+
+func (c *RuntimeClient) ListArtifacts(ctx context.Context, id string) ([]Artifact, error) {
+	var out []Artifact
+	err := c.do(ctx, http.MethodGet, "/v1/runs/"+url.PathEscape(id)+"/artifacts?app_id="+AppID, nil, &out)
+	return out, err
 }
 
 type Interaction struct {
@@ -87,6 +105,8 @@ type ToolCall struct {
 	ToolName  string          `json:"tool_name"`
 	Status    string          `json:"status"`
 	Input     json.RawMessage `json:"input,omitempty"`
+	Output    json.RawMessage `json:"output,omitempty"`
+	Error     string          `json:"error,omitempty"`
 	CreatedAt time.Time       `json:"created_at"`
 }
 

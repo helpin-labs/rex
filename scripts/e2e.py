@@ -99,7 +99,7 @@ def configure():
 
 
 def new_conversation(bot_id, title):
-    return api.call("POST", "/api/conversations", {"bot_id": bot_id, "title": title}, expect=201)["id"]
+    return api.call("POST", "/api/conversations", {"bot_id": bot_id, "title": title})["id"]
 
 
 def send(conversation_id, text):

@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"path/filepath"
 	"strings"
 	"time"
 
@@ -16,7 +17,10 @@ import (
 // Store holds Rex's product state: bots, conversations, turns, routines and
 // settings. Execution state (runs, messages, events) stays in agent-runtime's
 // own database, and long-term memory stays in the memory database.
-type Store struct{ db *sql.DB }
+type Store struct {
+	db   *sql.DB
+	path string
+}
 
 var ErrNotFound = errors.New("not found")
 
@@ -26,7 +30,7 @@ func OpenStore(path string) (*Store, error) {
 		return nil, err
 	}
 	db.SetMaxOpenConns(1)
-	store := &Store{db: db}
+	store := &Store{db: db, path: path}
 	if err := store.migrate(context.Background()); err != nil {
 		db.Close()
 		return nil, err
@@ -156,6 +160,31 @@ ALTER TABLE instruction_proposals ADD COLUMN catalog_id TEXT NOT NULL DEFAULT ''
 	`CREATE TABLE context_cuts (conversation_id TEXT NOT NULL REFERENCES conversations(id) ON DELETE CASCADE, run_id TEXT NOT NULL,
 	after DATETIME NOT NULL, PRIMARY KEY (conversation_id, run_id));`,
 	`ALTER TABLE bots ADD COLUMN browser_backend TEXT NOT NULL DEFAULT '';`,
+	`CREATE TABLE task_episodes (turn_id TEXT PRIMARY KEY REFERENCES turns(id) ON DELETE CASCADE,
+		bot_id TEXT NOT NULL REFERENCES bots(id) ON DELETE CASCADE, bank TEXT NOT NULL, run_id TEXT NOT NULL,
+		status TEXT NOT NULL DEFAULT 'capture', attempts INTEGER NOT NULL DEFAULT 0, retry_at DATETIME,
+		error TEXT NOT NULL DEFAULT '', facts INTEGER NOT NULL DEFAULT 0, revision TEXT NOT NULL DEFAULT '',
+		forgotten INTEGER NOT NULL DEFAULT 0, model TEXT NOT NULL DEFAULT '', created_at DATETIME NOT NULL, updated_at DATETIME NOT NULL);
+	CREATE INDEX task_episodes_queue ON task_episodes(status,retry_at,created_at);
+	CREATE TABLE task_history (id TEXT PRIMARY KEY, turn_id TEXT NOT NULL REFERENCES task_episodes(turn_id) ON DELETE CASCADE,
+		kind TEXT NOT NULL, text TEXT NOT NULL, sequence_no INTEGER NOT NULL DEFAULT 0, created_at DATETIME NOT NULL);
+	CREATE INDEX task_history_turn ON task_history(turn_id,sequence_no,id);
+	CREATE VIRTUAL TABLE task_history_fts USING fts5(id UNINDEXED,text);
+	CREATE TRIGGER task_history_deleted AFTER DELETE ON task_history BEGIN DELETE FROM task_history_fts WHERE id=old.id; END;
+	CREATE TABLE memory_maintenance (bank TEXT PRIMARY KEY, last_success DATETIME, retry_at DATETIME,
+		attempts INTEGER NOT NULL DEFAULT 0, error TEXT NOT NULL DEFAULT '', result TEXT NOT NULL DEFAULT '{}');
+	ALTER TABLE instruction_proposals ADD COLUMN evidence TEXT NOT NULL DEFAULT '{}';
+	ALTER TABLE bots ADD COLUMN context_window INTEGER NOT NULL DEFAULT 0;
+ ALTER TABLE retrospectives ADD COLUMN review TEXT NOT NULL DEFAULT '{}';
+ ALTER TABLE retrospectives ADD COLUMN attempts INTEGER NOT NULL DEFAULT 0;
+ ALTER TABLE retrospectives ADD COLUMN retry_at DATETIME;
+ ALTER TABLE proposal_history ADD COLUMN evidence TEXT NOT NULL DEFAULT '{}';
+ ALTER TABLE proposal_history ADD COLUMN instructions TEXT NOT NULL DEFAULT '';
+ ALTER TABLE proposal_history ADD COLUMN catalog_id TEXT NOT NULL DEFAULT '';
+ ALTER TABLE task_episodes ADD COLUMN duration_ms INTEGER NOT NULL DEFAULT 0;
+ ALTER TABLE task_episodes ADD COLUMN extraction_schema TEXT NOT NULL DEFAULT '';
+ CREATE TABLE lesson_versions(bank TEXT NOT NULL,observation_id TEXT NOT NULL,version TEXT NOT NULL,payload TEXT NOT NULL,source_ids TEXT NOT NULL,recorded_at DATETIME NOT NULL,PRIMARY KEY(bank,observation_id,version));
+ CREATE TABLE memory_tombstones(bank TEXT NOT NULL,document_id TEXT NOT NULL,created_at DATETIME NOT NULL,PRIMARY KEY(bank,document_id));`,
 }
 
 func (s *Store) migrate(ctx context.Context) error {
@@ -165,6 +194,12 @@ func (s *Store) migrate(ctx context.Context) error {
 	var current int
 	if err := s.db.QueryRowContext(ctx, `SELECT COALESCE(MAX(version),0) FROM schema_migrations`).Scan(&current); err != nil {
 		return err
+	}
+	if current > 0 && current < len(migrations) && s.path != "" && s.path != ":memory:" {
+		backup := filepath.Join(filepath.Dir(s.path), filepath.Base(s.path)+"."+time.Now().Format("20060102-150405.000000000")+".before-learning.bak")
+		if _, err := s.db.ExecContext(ctx, `VACUUM INTO ?`, backup); err != nil {
+			return fmt.Errorf("backup before migration: %w", err)
+		}
 	}
 	for index := current; index < len(migrations); index++ {
 		version := index + 1
@@ -205,12 +240,12 @@ func (s *Store) SetSetting(ctx context.Context, key, value string) error {
 
 // --- bots ---
 
-const botColumns = `id,name,emoji,color,instructions,provider,model,capabilities,approval_mode,workspace_dir,memory_mode,skills,mcp_connections,position,created_at,updated_at,setup,role,retro_off,browser_backend`
+const botColumns = `id,name,emoji,color,instructions,provider,model,capabilities,approval_mode,workspace_dir,memory_mode,skills,mcp_connections,position,created_at,updated_at,setup,role,retro_off,browser_backend,context_window`
 
 func scanBot(row interface{ Scan(...any) error }) (*Bot, error) {
 	var bot Bot
 	var capabilities, skills, connections string
-	if err := row.Scan(&bot.ID, &bot.Name, &bot.Emoji, &bot.Color, &bot.Instructions, &bot.Provider, &bot.Model, &capabilities, &bot.ApprovalMode, &bot.WorkspaceDir, &bot.MemoryMode, &skills, &connections, &bot.Position, &bot.CreatedAt, &bot.UpdatedAt, &bot.Setup, &bot.Role, &bot.RetroOff, &bot.BrowserBackend); err != nil {
+	if err := row.Scan(&bot.ID, &bot.Name, &bot.Emoji, &bot.Color, &bot.Instructions, &bot.Provider, &bot.Model, &capabilities, &bot.ApprovalMode, &bot.WorkspaceDir, &bot.MemoryMode, &skills, &connections, &bot.Position, &bot.CreatedAt, &bot.UpdatedAt, &bot.Setup, &bot.Role, &bot.RetroOff, &bot.BrowserBackend, &bot.ContextWindow); err != nil {
 		return nil, err
 	}
 	_ = json.Unmarshal([]byte(capabilities), &bot.Capabilities)
@@ -259,12 +294,12 @@ func (s *Store) SaveBot(ctx context.Context, bot *Bot) error {
 	capabilities, _ := json.Marshal(bot.Capabilities)
 	skills, _ := json.Marshal(nonNil(bot.Skills))
 	connections, _ := json.Marshal(nonNil(bot.MCPConnections))
-	_, err := s.db.ExecContext(ctx, `INSERT INTO bots(`+botColumns+`) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
+	_, err := s.db.ExecContext(ctx, `INSERT INTO bots(`+botColumns+`) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
 		ON CONFLICT(id) DO UPDATE SET name=excluded.name,emoji=excluded.emoji,color=excluded.color,instructions=excluded.instructions,
 		provider=excluded.provider,model=excluded.model,capabilities=excluded.capabilities,approval_mode=excluded.approval_mode,
 		workspace_dir=excluded.workspace_dir,memory_mode=excluded.memory_mode,skills=excluded.skills,mcp_connections=excluded.mcp_connections,
-		position=excluded.position,updated_at=excluded.updated_at,setup=excluded.setup,role=excluded.role,retro_off=excluded.retro_off,browser_backend=excluded.browser_backend`,
-		bot.ID, bot.Name, bot.Emoji, bot.Color, bot.Instructions, bot.Provider, bot.Model, string(capabilities), bot.ApprovalMode, bot.WorkspaceDir, bot.MemoryMode, string(skills), string(connections), bot.Position, bot.CreatedAt, bot.UpdatedAt, bot.Setup, bot.Role, bot.RetroOff, bot.BrowserBackend)
+		position=excluded.position,updated_at=excluded.updated_at,setup=excluded.setup,role=excluded.role,retro_off=excluded.retro_off,browser_backend=excluded.browser_backend,context_window=excluded.context_window`,
+		bot.ID, bot.Name, bot.Emoji, bot.Color, bot.Instructions, bot.Provider, bot.Model, string(capabilities), bot.ApprovalMode, bot.WorkspaceDir, bot.MemoryMode, string(skills), string(connections), bot.Position, bot.CreatedAt, bot.UpdatedAt, bot.Setup, bot.Role, bot.RetroOff, bot.BrowserBackend, bot.ContextWindow)
 	return err
 }
 
@@ -447,8 +482,9 @@ type Turn struct {
 
 // RecalledMemory is one memory a bot was given, and the bank it came from.
 type RecalledMemory struct {
-	Text string `json:"text"`
-	Bank string `json:"bank"`
+	SourceID string `json:"source_id,omitempty"`
+	Text     string `json:"text"`
+	Bank     string `json:"bank"`
 }
 
 const turnColumns = `id,conversation_id,bot_id,run_id,user_text,assistant_text,status,started_at,settled_at,memory_bank,memory_status,memory_error,memory_facts,start_sequence,section,origin,delegated_by,recalled`

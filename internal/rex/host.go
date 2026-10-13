@@ -73,6 +73,9 @@ type Host struct {
 func NewHost(cfg Config, store *Store, runtime *RuntimeClient, settings *SettingsManager, memory *MemoryService, skills *SkillLibrary) *Host {
 	h := &Host{cfg: cfg, Store: store, Runtime: runtime, Settings: settings, Memory: memory, Skills: skills, watched: map[string]bool{}, wake: make(chan struct{}, 1), retroWake: make(chan struct{}, 1), github: newGitHubClient(), detachAfter: map[string]bool{}}
 	h.Routines = NewScheduler(h)
+	if memory != nil {
+		memory.attach(h)
+	}
 	storedPasswords = func() []string { return h.KnownPasswords(context.Background()) }
 	h.Browser = NewBrowserControl(h)
 	h.touch()
@@ -163,7 +166,7 @@ func (h *Host) botFingerprint(ctx context.Context, bot Bot) string {
 	settings, _ := h.Settings.Get(ctx)
 	bot.BrowserBackend = bot.browserMode(settings)
 	agent := bot.RuntimeAgent(bot.SystemPrompt(h.Skills.Resolve(bot.Skills)))
-	fmt.Fprintln(hash, bot.BrowserBackend, agent.SystemPrompt, strings.Join(agent.AllowedTools, ","), agent.Provider, agent.Model, agent.ApprovalMode, strings.Join(bot.Skills, ","))
+	fmt.Fprintln(hash, bot.BrowserBackend, agent.SystemPrompt, strings.Join(agent.AllowedTools, ","), agent.Provider, agent.Model, agent.ApprovalMode, strings.Join(bot.Skills, ","), bot.ContextWindow)
 	for _, skill := range h.Skills.Resolve(bot.Skills) {
 		fmt.Fprintln(hash, skill.ID, skill.Version)
 	}
@@ -368,10 +371,6 @@ func (h *Host) deliver(ctx context.Context, conversationID string, d delivery) (
 	if turn.MemoryBank == "" {
 		turn.MemoryStatus = "off"
 	}
-	if d.fromRex() {
-		// Memory keeps what the user said, not what bots wrote.
-		turn.MemoryStatus = "skipped"
-	}
 
 	if conversation.ActiveRunID != nil {
 		run, err := h.Runtime.GetRun(ctx, *conversation.ActiveRunID)
@@ -468,7 +467,7 @@ func (h *Host) trustedUserMessages(ctx context.Context, conversationID string) [
 	}
 	messages := []string{}
 	for _, turn := range turns {
-		if text := strings.TrimSpace(turn.UserText); text != "" && turn.Origin == "" {
+		if text := strings.TrimSpace(turn.UserText); text != "" && turn.Origin == "" && turn.MemoryStatus != "forgotten" {
 			messages = append(messages, text)
 		}
 	}
@@ -479,12 +478,23 @@ func (h *Host) trustedUserMessages(ctx context.Context, conversationID string) [
 }
 
 func (h *Host) startRun(ctx context.Context, bot Bot, conversation *Conversation, instructions string, chat bool, hostRunID string) (*Run, error) {
+	if bot.Provider == ProviderLocal && h.Memory != nil {
+		h.Memory.yieldToChat()
+		h.yieldLocalReviews(ctx)
+	}
 	model, credential, err := h.Settings.RunModelFor(ctx, bot)
 	if err != nil {
 		return nil, err
 	}
 	if err := h.SyncBot(ctx, bot); err != nil {
 		return nil, fmt.Errorf("sync bot: %w", err)
+	}
+	agent, resolved := h.runAgent(ctx, bot, model)
+	if resolved.Enabled {
+		instructions = boundCarriedContext(instructions, resolved.InputLimit/2)
+	}
+	if _, err := h.Runtime.UpsertAgent(ctx, agent); err != nil {
+		return nil, fmt.Errorf("configure context policy: %w", err)
 	}
 	servers, err := h.runMCPServers(ctx, bot)
 	if err != nil {
@@ -511,11 +521,11 @@ func (h *Host) startRun(ctx context.Context, bot Bot, conversation *Conversation
 // runMCPServers attaches Rex's memory tools and the bot's MCP connections.
 func (h *Host) runMCPServers(ctx context.Context, bot Bot) ([]RunMCPServer, error) {
 	var servers []RunMCPServer
-	if bank := bot.MemoryBank(); bank != "" && h.Memory.Available() {
+	if bank := bot.MemoryBank(); bank != "" {
 		servers = append(servers, RunMCPServer{
 			ServerID: "rex-memory", ServerName: "memory", Transport: "streamable_http",
 			URL:        h.cfg.HostURL + "/mcp/memory/" + base64.RawURLEncoding.EncodeToString([]byte(bank)),
-			Tools:      []RunMCPTool{{Name: "recall", Access: "read"}, {Name: "remember", Access: "read"}},
+			Tools:      []RunMCPTool{{Name: "recall", Access: "read"}, {Name: "remember", Access: "read"}, {Name: "history_search", Access: "read"}, {Name: "history_read", Access: "read"}},
 			Credential: &RunMCPCredential{Type: "bearer_token", AccessToken: h.MemoryToken(bank)},
 		})
 	}
@@ -760,6 +770,11 @@ func (h *Host) settle(ctx context.Context, run *Run, status string) {
 		slog.Error("settle turn", "turn", turn.ID, "error", err)
 		return
 	}
+	turn.Status, turn.AssistantText = status, answer
+	if err := h.Store.QueueEpisode(ctx, *turn); err != nil {
+		slog.Error("capture task episode", "turn", turn.ID, "error", err)
+	}
+	h.Memory.Notify()
 	_ = h.Store.TouchConversation(ctx, turn.ConversationID)
 	h.Browser.CloseWhenIdle(turn.BotID, run.ID)
 	h.detachIfConfigured(ctx, turn.BotID, turn.ConversationID)
@@ -769,8 +784,6 @@ func (h *Host) settle(ctx context.Context, run *Run, status string) {
 	go h.noteTaskForRetro(context.WithoutCancel(ctx), *turn, status, answer)
 	if status == "settled" {
 		h.Memory.Notify()
-	} else if turn.MemoryStatus == "pending" {
-		_ = h.Store.SetTurnMemory(ctx, turn.ID, "skipped", "turn did not complete", 0)
 	}
 }
 

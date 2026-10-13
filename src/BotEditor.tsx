@@ -174,10 +174,13 @@ export function BotEditor({ initial, settings, status, onClose, onSaved, onDelet
           <div className="card">
             <h3 className="section-title">Model</h3>
             <p className="muted small">Where {bot.name || "the bot"} thinks. Bots need a model that can call tools.</p>
-            <ProviderPicker value={bot.provider} onChange={provider => update({ provider, model: "" })}
+            <ProviderPicker value={bot.provider} onChange={provider => update({ provider, model: "", context_window: 0 })}
               providers={(Object.keys(providerNames) as Provider[]).map(id => ({ id, note: providerNote(id, settings) }))} />
-            <ModelPicker value={bot.model} models={models} loading={modelsLoading} error={modelError} onChange={model => update({ model })}
+            <ModelPicker value={bot.model} models={models} loading={modelsLoading} error={modelError} onChange={model => update({ model, context_window: 0 })}
               defaultLabel={bot.provider === settings?.default_provider && settings?.default_model ? `Follows Settings: ${modelName({ id: settings.default_model })}` : "The provider's default"} />
+            <Field label="Context window override" hint="Leave empty to use the provider's reported limit. If unavailable, enter this model's verified token limit to enable automatic compaction.">
+              <input type="number" min={4096} max={4000000} value={bot.context_window || ""} onChange={event => update({ context_window: Number(event.target.value) || 0 })} placeholder="From provider metadata" />
+            </Field>
           </div>
         </>}
 

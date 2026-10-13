@@ -21,7 +21,7 @@ import { ProfileMenu } from "./ProfileMenu";
 
 // Memory lives in each bot's conversation (the memory panel), so there is
 // no separate Memory page.
-type View = { kind: "bot"; botId: string; conversationId?: string } | { kind: "routines" } | { kind: "skills" } | { kind: "apps" } | { kind: "settings"; tab?: "models" | "tools" | "memory" | "about" };
+type View = { kind: "bot"; botId: string; conversationId?: string } | { kind: "routines" } | { kind: "skills" } | { kind: "apps"; appId?: string } | { kind: "settings"; tab?: "models" | "tools" | "memory" | "about" };
 const viewKinds = ["bot", "routines", "skills", "apps", "settings"];
 
 function loadView(): View | null {
@@ -175,12 +175,12 @@ export default function App() {
       }}
       onDeleted={async () => { setEditing(null); const list = await refreshBots(); await refreshThreads(); setView(list[0] ? { kind: "bot", botId: list[0].id } : { kind: "settings" }); }} /></main> : <>
       {view?.kind === "bot" && bot && <main className="main">
-        {thread ? <Chat key={thread.id} bot={bot} bots={bots} conversationId={thread.id} status={status} pending={attention.filter(item => (item.kind === "missed" || item.kind === "proposal") && item.bot_id === bot.id)} defaultModel={bot.provider === settings?.default_provider ? settings?.default_model : undefined} onEdit={() => setEditing(bot)} onOpenSettings={tab => setView({ kind: "settings", tab })} onChanged={() => void refreshThreads()} />
+        {thread ? <Chat key={thread.id} bot={bot} bots={bots} conversationId={thread.id} status={status} pending={attention.filter(item => (item.kind === "missed" || item.kind === "proposal") && item.bot_id === bot.id)} defaultModel={bot.provider === settings?.default_provider ? settings?.default_model : undefined} onEdit={() => setEditing(bot)} onOpenSettings={tab => setView({ kind: "settings", tab })} onOpenApps={appId => setView({ kind: "apps", appId })} onChanged={() => void refreshThreads()} />
           : <Empty icon={<LoaderCircle className="spin" size={20} />} title={`Opening ${bot.name}…`} />}
       </main>}
       {view?.kind === "routines" && <main className="main wide"><RoutinesView bots={bots} onOpenConversation={async id => { await refreshThreads(); await openConversation(id); }} /></main>}
       {view?.kind === "skills" && <main className="main wide"><SkillsView bots={bots} workspaceRoot={status?.workspace_root || "~/Rex"} onBotsChanged={() => void refreshBots()} /></main>}
-      {view?.kind === "apps" && <main className="main wide"><AppsView bots={bots} onBotsChanged={() => void refreshBots()} /></main>}
+      {view?.kind === "apps" && <main className="main wide"><AppsView focusApp={view.appId} bots={bots} onBotsChanged={() => void refreshBots()} /></main>}
       {view?.kind === "settings" && <main className="main wide"><SettingsView key={view.tab || "models"} initialTab={view.tab} status={status} onSaved={saved => { setSettings(saved); void refreshStatus(); }} /></main>}
     </>}
 

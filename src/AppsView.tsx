@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { Blocks, Check, CircleAlert, ExternalLink, KeyRound, LoaderCircle, Plus, RefreshCw, Trash2 } from "lucide-react";
 import { api } from "./api";
-import { type AppCategory, type AppEntry, appCategories, appFor, connectionFor, connectionState, searchApps } from "./apps";
+import { type AppCategory, type AppEntry, appCategories, appFor, connectionFor, connectionState, searchApps, appCatalog } from "./apps";
 import { Select } from "./Select";
 import { SideList } from "./SideList";
 import type { Bot, GoogleStatus, MCPConnection } from "./types";
@@ -41,11 +41,11 @@ function usedBy(bots: Bot[], connectionId: string): Bot[] {
   return bots.filter(bot => bot.mcp_connections.includes(connectionId));
 }
 
-export function AppsView({ bots, onBotsChanged }: { bots: Bot[]; onBotsChanged: () => void }) {
+export function AppsView({ bots, onBotsChanged, focusApp }: { bots: Bot[]; onBotsChanged: () => void; focusApp?: string }) {
   const [connections, setConnections] = useState<MCPConnection[]>([]);
   const [loaded, setLoaded] = useState(false);
   const [filter, setFilter] = useState<Filter>("all");
-  const [query, setQuery] = useState("");
+  const [query, setQuery] = useState(() => appCatalog.find(app => app.id === focusApp)?.name || "");
   const [editing, setEditing] = useState<{ connection: Partial<MCPConnection>; app?: AppEntry; justConnected?: boolean } | null>(null);
   // The app being connected, and the connection waiting for its sign-in.
   const [busy, setBusy] = useState<string | null>(null);

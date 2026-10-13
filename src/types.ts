@@ -17,6 +17,7 @@ export type Bot = {
   instructions: string;
   provider: Provider;
   model: string;
+  context_window?: number;
   capabilities: Capabilities;
   browser_backend?: "" | "standard" | "extension" | "cloud";
   approval_mode: "ask" | "auto";
@@ -240,10 +241,10 @@ export type RunStreamState = {
   event_count: number;
 };
 
-export type MemoryFact = { id: string; text: string; type: string; entities: string[]; mentioned_at: string; replaced?: boolean };
+export type MemoryFact = { id: string; text: string; type: string; entities: string[]; mentioned_at: string; replaced?: boolean; evidence_kind?: string; verified?: boolean; source_ids?: string[] };
 export type MemorySource = {
   document_id: string;
-  kind: "chat" | "note" | "bot";
+  kind: "chat" | "note" | "bot" | "episode";
   title: string;
   excerpt: string;
   conversation_id?: string;
@@ -329,7 +330,14 @@ export type AttentionItem = {
 
 // New instructions a bot proposed for itself, waiting for the user.
 // source "retrospective": the bot suggested it after looking back at recent tasks.
-export type InstructionProposal = { id: string; bot_id: string; instructions: string; summary: string; source?: string; reason?: string; created_at: string; kind?: "instructions" | "install_skill"; catalog_id?: string; skill?: CatalogSkill };
+export type InstructionProposal = { id: string; bot_id: string; instructions: string; summary: string; source?: string; reason?: string; created_at: string; kind?: "instructions" | "install_skill" | "connect_mcp"; app?: { id: string; name: string; description: string; url: string; auth: string; access?: string; tokenHint?: string }; evidence?: { sources?: string[]; gap?: string; memory_remedy?: string; memory_insufficient?: string; capability_remedy?: string; capability_insufficient?: string; documentation?: string[]; access?: string; setup_cost?: string; expected?: string }; catalog_id?: string; skill?: CatalogSkill };
 
 // A site a bot may sign in to. Passwords never reach the app or the bot.
 export type BotLogin = { id: string; bot_id: string; site: string; username: string; has_2fa: boolean; created_at: string; last_used_at?: string };
+
+export type TaskEpisode = { turn_id: string; status: string; forgotten: boolean; facts: number; model?: string; error?: string; created_at: string; updated_at: string; attempts: number; retry_at?: string };
+export type OperationalLesson = { id: string; text: string; state: string; task_count: number; verified_tasks: number; source_fact_ids: string[]; source_ids?: string[]; updated_at: string; is_stale: boolean };
+export type MemoryLearning = { episodes: TaskEpisode[]; counts: Record<string, number>; lessons: OperationalLesson[]; available: boolean; model: string; consolidation: { last_success?: string; retry_at?: string; error?: string; attempts: number }; context: { enabled: boolean; context_window?: number; trigger_tokens?: number; warning?: string; model?: string } };
+export type HistoryEntry = { source_id: string; turn_id: string; kind: string; text: string; created_at: string; truncated?: boolean };
+export type HistoryPage = { entries: HistoryEntry[]; next_cursor?: number };
+export type HistoryExcerpt = HistoryEntry & { offset: number; truncated: boolean; next_offset?: number };

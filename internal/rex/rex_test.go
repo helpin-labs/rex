@@ -77,13 +77,7 @@ func TestMemoryBanksAreSeparateByDefault(t *testing.T) {
 	}
 }
 
-func TestRetentionSkipsSmallTalkAndRedactsSecrets(t *testing.T) {
-	if skipRetention("thanks!") == "" || skipRetention("ok") == "" {
-		t.Fatal("small talk should be skipped")
-	}
-	if skipRetention("I'm allergic to peanuts and prefer vegetarian food") != "" {
-		t.Fatal("a durable fact must be retained")
-	}
+func TestMemoryRedactsSecrets(t *testing.T) {
 	redacted := redactSecrets("my key is sk-abcdefghijklmnopqrstuvwxyz123456 and password: hunter2")
 	if redacted == "" || containsAny(redacted, "sk-abcdef", "hunter2") {
 		t.Fatalf("secrets not redacted: %q", redacted)

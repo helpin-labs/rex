@@ -1,5 +1,5 @@
 import type { ChatGPTStatus,
-  AttentionItem, Bot, BotLogin, InstructionProposal, Conversation, ConversationDetail, GoogleStatus, MCPConnection, MemoryOverview, MemorySource, ModelInfo, ProviderTest,
+  AttentionItem, Bot, BotLogin, InstructionProposal, Conversation, ConversationDetail, GoogleStatus, MCPConnection, MemoryOverview, MemorySource, MemoryLearning, HistoryPage, HistoryExcerpt, ModelInfo, ProviderTest,
   Routine, RoutineRun, Run, RunEventEnvelope, Settings, Skill, Status, Turn, WorkspaceFile, CatalogSkill, SkillSource,
 } from "./types";
 
@@ -67,7 +67,7 @@ export const api = {
   deleteLogin: (botId: string, id: string) => request<void>(`/api/bots/${encodeURIComponent(botId)}/logins/${id}`, json("DELETE")),
   proposals: () => request<InstructionProposal[]>("/api/proposals"),
   lookBack: (botId: string) => request<void>(`/api/bots/${botId}/retrospective`, json("POST", {})),
-  answerProposal: (id: string, action: "apply" | "discard") => request<void>(`/api/proposals/${id}`, json("POST", { action })),
+  answerProposal: (id: string, action: "apply" | "discard" | "review") => request<void>(`/api/proposals/${id}`, json("POST", { action })),
   draftBot: (name: string, face: string, color: string) => request<Bot>("/api/bots/draft", json("POST", { name, face, color })),
   createBot: (bot: Partial<Bot>) => request<Bot>("/api/bots", json("POST", bot)),
   saveBot: (bot: Bot) => request<Bot>(`/api/bots/${encodeURIComponent(bot.id)}`, json("PUT", bot)),
@@ -99,6 +99,10 @@ export const api = {
 
   memory: () => request<MemoryOverview>("/api/memory"),
   memorySources: (bank: string) => request<MemorySource[]>(`/api/memory/banks/${encodeURIComponent(bank)}`),
+  memoryLearning: (bank: string) => request<MemoryLearning>(`/api/memory/banks/${encodeURIComponent(bank)}/learning`),
+  historySearch: (bank: string, query: string, cursor = 0) => request<HistoryPage>(`/api/memory/banks/${encodeURIComponent(bank)}/history/search`, json("POST", { query, cursor })),
+  historyRead: (bank: string, source_id: string, offset = 0) => request<HistoryExcerpt>(`/api/memory/banks/${encodeURIComponent(bank)}/history/read`, json("POST", { source_id, offset })),
+  consolidateMemory: (bank: string) => request(`/api/memory/banks/${encodeURIComponent(bank)}/consolidate`, json("POST", {})),
   addMemoryNote: (bank: string, content: string, replaces = "") => request(`/api/memory/banks/${encodeURIComponent(bank)}/notes`, json("POST", { content, replaces })),
   forget: (bank: string, documentId: string) => request<void>(`/api/memory/banks/${encodeURIComponent(bank)}/forget`, json("POST", { document_id: documentId })),
   recall: (bank: string, query: string) => request<{ results: { text: string; document_id: string; score: number }[] | null }>(`/api/memory/banks/${encodeURIComponent(bank)}/recall`, json("POST", { query })),

@@ -221,3 +221,33 @@ func (h *Host) startFresh(w http.ResponseWriter, r *http.Request) {
 	updated, err := h.Store.GetConversation(r.Context(), conversation.ID)
 	writeResult(w, updated, err)
 }
+
+// Forgetting starts new runs so compacted checkpoints cannot reintroduce a source.
+func (h *Host) invalidateBankContext(ctx context.Context, bank string) error {
+	bots, err := h.Store.ListBots(ctx)
+	if err != nil {
+		return err
+	}
+	for _, bot := range bots {
+		if bot.MemoryBank() != bank {
+			continue
+		}
+		conversations, err := h.Store.ListConversations(ctx, bot.ID)
+		if err != nil {
+			return err
+		}
+		for _, conversation := range conversations {
+			if conversation.ActiveRunID != nil {
+				if run, err := h.Runtime.GetRun(ctx, *conversation.ActiveRunID); err == nil && !run.Terminal() {
+					if _, err := h.Runtime.CancelRun(ctx, run.ID); err != nil {
+						return err
+					}
+				}
+			}
+			if err := h.Store.StartFresh(ctx, conversation.ID); err != nil {
+				return err
+			}
+		}
+	}
+	return nil
+}

@@ -1,7 +1,8 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { Bot as BotIcon, Brain, ChevronDown, CircleAlert, Lock, MessageSquare, Pencil, RotateCcw, Search, Settings as SettingsIcon, StickyNote, Trash2, Users, X } from "lucide-react";
+import { OperationalMemory } from "./OperationalMemory";
 import { api } from "./api";
-import type { Bot, MemoryOverview, MemorySource } from "./types";
+import type { Bot, MemoryOverview, MemorySource, MemoryLearning } from "./types";
 import { Avatar, errorMessage, relativeTime } from "./ui";
 
 // Where a bot's memories live: its own bank, or the shared bank that other
@@ -38,7 +39,7 @@ export function memoryFailureReason(error: string): string {
   return "Saving memories failed. The details are on hover.";
 }
 
-const sourceLabel = (source: MemorySource) => source.kind === "chat" ? "From a message" : source.kind === "note" ? "You taught it" : "Saved by the bot";
+const sourceLabel = (source: MemorySource) => source.kind === "episode" ? source.title : source.kind === "chat" ? "Legacy message" : source.kind === "note" ? "You taught it" : "Saved by the bot";
 const sourceIcon = (source: MemorySource) => source.kind === "chat" ? <MessageSquare size={12} /> : source.kind === "note" ? <StickyNote size={12} /> : <BotIcon size={12} />;
 
 // MemoryPanel shows what the bot remembers, where it is kept, and lets the
@@ -46,6 +47,7 @@ const sourceIcon = (source: MemorySource) => source.kind === "chat" ? <MessageSq
 // When saving memories fails, it says why and offers to try again.
 export function MemoryPanel({ bot, home, focusDocument, onClose, onOpenSettings }: { bot: Bot; home: MemoryHome; focusDocument?: string; onClose: () => void; onOpenSettings?: () => void }) {
   const [sources, setSources] = useState<MemorySource[]>([]);
+  const [learningState, setLearningState] = useState<MemoryLearning | null>(null);
   const [loaded, setLoaded] = useState(false);
   const [note, setNote] = useState("");
   const [filter, setFilter] = useState("");
@@ -56,7 +58,7 @@ export function MemoryPanel({ bot, home, focusDocument, onClose, onOpenSettings 
   const [error, setError] = useState("");
   const focusRef = useRef<HTMLLIElement>(null);
 
-  const load = useCallback(() => api.memorySources(home.bank).then(list => { setSources(list || []); setLoaded(true); }).catch(caught => setError(errorMessage(caught))), [home.bank]);
+  const load = useCallback(() => Promise.all([api.memorySources(home.bank), api.memoryLearning(home.bank)]).then(([list, learning]) => { setSources(list || []); setLearningState(learning); setLoaded(true); }).catch(caught => setError(errorMessage(caught))), [home.bank]);
   useEffect(() => { void load(); const timer = window.setInterval(() => void load(), 4000); return () => window.clearInterval(timer); }, [load]);
   useEffect(() => { focusRef.current?.scrollIntoView({ block: "center" }); }, [focusDocument, sources.length]);
 
@@ -74,13 +76,13 @@ export function MemoryPanel({ bot, home, focusDocument, onClose, onOpenSettings 
   };
   const retry = async (items: MemorySource[]) => {
     setRetrying(true); setError("");
-    try { for (const item of items) if (item.document_id.startsWith("turn/")) await api.retryMemory(item.document_id.slice(5)); await load(); }
+    try { for (const item of items) if (/^(turn|episode)\//.test(item.document_id)) await api.retryMemory(item.document_id.split("/")[1]); await load(); }
     catch (caught) { setError(errorMessage(caught)); } finally { setRetrying(false); }
   };
 
   const withFacts = sources.filter(source => source.facts?.length);
   const failed = sources.filter(source => source.status === "failed");
-  const learning = sources.filter(source => source.status === "pending").length;
+  const learning = sources.filter(source => ["pending", "capture", "queued", "extracting"].includes(source.status)).length;
   const factCount = withFacts.reduce((sum, source) => sum + (source.facts?.filter(fact => !fact.replaced).length || 0), 0);
   const words = filter.trim().toLowerCase();
   const shown = words ? withFacts.filter(source => source.facts!.some(fact => fact.text.toLowerCase().includes(words))) : withFacts;
@@ -101,6 +103,7 @@ export function MemoryPanel({ bot, home, focusDocument, onClose, onOpenSettings 
         </div>
       </div>
 
+      <OperationalMemory bank={home.bank} state={learningState} onRefresh={load} />
       {failed.length > 0 && <div className="memory-alert" role="alert">
         <CircleAlert size={15} />
         <div className="grow">
@@ -114,15 +117,15 @@ export function MemoryPanel({ bot, home, focusDocument, onClose, onOpenSettings 
       </div>}
 
       <div className="memory-teach">
-        <textarea rows={2} value={note} onChange={event => setNote(event.target.value)} onKeyDown={event => { if (event.key === "Enter" && !event.shiftKey) { event.preventDefault(); void teach(); } }} placeholder={`Teach ${bot.name} something, e.g. “I prefer window seats”`} />
+        <textarea rows={2} value={note} onChange={event => setNote(event.target.value)} onKeyDown={event => { if (event.key === "Enter" && !event.shiftKey) { event.preventDefault(); void teach(); } }} placeholder={`Teach ${bot.name} something, e.g. “Verify listing facts before reporting a match”`} />
         <div className="row"><small className="muted">Enter to save</small><span className="spacer" /><button type="button" className="button primary small" onClick={teach} disabled={!note.trim()}>Remember</button></div>
       </div>
       {error && <div className="inline-error"><span>{error}</span></div>}
-      {learning > 0 && <p className="muted small memory-learning"><Brain size={12} className="pulse" /> Learning from {learning} recent {learning === 1 ? "message" : "messages"}…</p>}
+      {learning > 0 && <p className="muted small memory-learning"><Brain size={12} className="pulse" /> Learning from {learning} recorded {learning === 1 ? "task" : "tasks"}…</p>}
       {withFacts.length > 4 && <label className="memory-filter"><Search size={13} /><input value={filter} onChange={event => setFilter(event.target.value)} placeholder="Filter memories" aria-label="Filter memories" /></label>}
 
       <ul className="memory-facts">
-        {loaded && withFacts.length === 0 && <li className="memory-empty"><Brain size={18} /><strong>Nothing remembered yet</strong><small>Preferences, people and plans you mention are kept here after each answer. You can also teach it directly above.</small></li>}
+        {loaded && withFacts.length === 0 && <li className="memory-empty"><Brain size={18} /><strong>Nothing remembered yet</strong><small>Task outcomes, successes, failures and corrections are learned here. Saved task history remains available even when learning is delayed.</small></li>}
         {words && shown.length === 0 && withFacts.length > 0 && <li className="memory-empty"><small>No memories match “{filter}”.</small></li>}
         {shown.map(source => {
           const live = source.facts!.filter(fact => !fact.replaced);
@@ -139,9 +142,9 @@ export function MemoryPanel({ bot, home, focusDocument, onClose, onOpenSettings 
               <div className="row"><small className="muted">Saved as something you taught; this replaces it.</small><span className="spacer" />
                 <button type="button" className="link-button" onClick={() => setEditing(null)}>Cancel</button>
                 <button type="button" className="button primary small" disabled={!editing.text.trim()} onClick={() => void correct()}>Save</button></div>
-            </div> : <ul className="memory-fact-list">{source.facts!.map(fact => <li key={fact.id} className={fact.replaced ? "replaced" : ""} title={fact.replaced ? "Replaced by a newer memory" : undefined}>{fact.text}</li>)}</ul>}
+            </div> : <ul className="memory-fact-list">{source.facts!.map(fact => <li key={fact.id} className={fact.replaced ? "replaced" : ""} title={fact.replaced ? "Replaced by a newer memory" : undefined}>{fact.evidence_kind && <small className="muted">{fact.evidence_kind} · {fact.evidence_kind === "correction" ? "user correction" : fact.verified ? "recorded tool evidence" : "unverified claim or inference"}<br /></small>}{fact.text}</li>)}</ul>}
             {forgetting === source.document_id && <div className="memory-confirm">
-              <span>Forget everything learned from this?</span><span className="spacer" />
+              <span>Forget everything learned from this? This stops active work using this bank and starts a new working context. Recorded chat stays visible.</span><span className="spacer" />
               <button type="button" className="link-button" onClick={() => setForgetting("")}>Keep</button>
               <button type="button" className="button danger-ghost small" onClick={() => void forget(source)}>Forget</button>
             </div>}
@@ -155,7 +158,7 @@ export function MemoryPanel({ bot, home, focusDocument, onClose, onOpenSettings 
         </button>
         {showFailed && <ul>{failed.map(source => <li key={source.document_id} title={source.error}>
           <span className="grow"><small className="muted">{relativeTime(source.created_at)}</small>“{source.excerpt}”</span>
-          {source.document_id.startsWith("turn/") && <button type="button" className="icon-button ghost tiny" title="Try again" aria-label="Try again" disabled={retrying} onClick={() => void retry([source])}><RotateCcw size={11} /></button>}
+          {/^(turn|episode)\//.test(source.document_id) && <button type="button" className="icon-button ghost tiny" title="Try again" aria-label="Try again" disabled={retrying} onClick={() => void retry([source])}><RotateCcw size={11} /></button>}
         </li>)}</ul>}
       </div>}
     </div>

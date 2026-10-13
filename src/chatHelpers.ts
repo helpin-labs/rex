@@ -9,7 +9,7 @@ export function starterPrompts(bot: Pick<Bot, "role" | "capabilities" | "memory_
   if (bot.capabilities.web) prompts.push("Find the latest news about ");
   if (bot.capabilities.browser) prompts.push("Open this page and summarise it: ");
   if (bot.capabilities.files_read) prompts.push("Summarise the file I attach");
-  if (bot.memory_mode !== "off") prompts.push("Remember that I prefer ");
+  if (bot.memory_mode !== "off") prompts.push("Remember this workflow: ");
   return prompts.slice(0, 4);
 }
 

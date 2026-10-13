@@ -54,6 +54,9 @@ Answer only with JSON: {"facts":[{"text":"...","entities":["..."]}]}`
 // entities, dates and causal links. Models that cannot follow that strict
 // schema in time fall back to a small prompt so memory still works.
 func (e *FactExtractor) Extract(ctx context.Context, request memory.RetainRequest) ([]memory.ExtractedFact, error) {
+	if request.Metadata["source"] == "episode" {
+		return e.extractOperational(ctx, request)
+	}
 	if e.structuredFailed.Load() {
 		return e.extractSimple(ctx, request)
 	}

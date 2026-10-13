@@ -37,14 +37,17 @@ type InstructionProposal struct {
 	CreatedAt time.Time `json:"created_at"`
 	// Kind is "instructions", or "install_skill" for a catalog skill
 	// (CatalogID) to install and turn on for the bot.
-	Kind      string        `json:"kind"`
-	CatalogID string        `json:"catalog_id,omitempty"`
-	Skill     *CatalogSkill `json:"skill,omitempty"`
+	Kind      string          `json:"kind"`
+	CatalogID string          `json:"catalog_id,omitempty"`
+	Skill     *CatalogSkill   `json:"skill,omitempty"`
+	App       *AppCapability  `json:"app,omitempty"`
+	Evidence  json.RawMessage `json:"evidence"`
 }
 
 const (
 	ProposalInstructions = "instructions"
 	ProposalInstallSkill = "install_skill"
+	ProposalConnectMCP   = "connect_mcp"
 	maxSkillProposals    = 3
 )
 
@@ -137,7 +140,7 @@ func userInstructions(text string) string {
 }
 
 func (s *Store) PendingProposals(ctx context.Context) ([]InstructionProposal, error) {
-	rows, err := s.db.QueryContext(ctx, `SELECT id,bot_id,instructions,summary,source,reason,created_at,kind,catalog_id FROM instruction_proposals ORDER BY created_at`)
+	rows, err := s.db.QueryContext(ctx, `SELECT id,bot_id,instructions,summary,source,reason,created_at,kind,catalog_id,evidence FROM instruction_proposals ORDER BY created_at`)
 	if err != nil {
 		return nil, err
 	}
@@ -145,7 +148,7 @@ func (s *Store) PendingProposals(ctx context.Context) ([]InstructionProposal, er
 	items := []InstructionProposal{}
 	for rows.Next() {
 		var item InstructionProposal
-		if err := rows.Scan(&item.ID, &item.BotID, &item.Instructions, &item.Summary, &item.Source, &item.Reason, &item.CreatedAt, &item.Kind, &item.CatalogID); err != nil {
+		if err := rows.Scan(&item.ID, &item.BotID, &item.Instructions, &item.Summary, &item.Source, &item.Reason, &item.CreatedAt, &item.Kind, &item.CatalogID, jsonScanner{&item.Evidence}); err != nil {
 			return nil, err
 		}
 		items = append(items, item)
@@ -155,8 +158,8 @@ func (s *Store) PendingProposals(ctx context.Context) ([]InstructionProposal, er
 
 func (s *Store) takeProposal(ctx context.Context, id string) (*InstructionProposal, error) {
 	var item InstructionProposal
-	err := s.db.QueryRowContext(ctx, `DELETE FROM instruction_proposals WHERE id=? RETURNING id,bot_id,instructions,summary,source,reason,created_at,kind,catalog_id`, id).
-		Scan(&item.ID, &item.BotID, &item.Instructions, &item.Summary, &item.Source, &item.Reason, &item.CreatedAt, &item.Kind, &item.CatalogID)
+	err := s.db.QueryRowContext(ctx, `DELETE FROM instruction_proposals WHERE id=? RETURNING id,bot_id,instructions,summary,source,reason,created_at,kind,catalog_id,evidence`, id).
+		Scan(&item.ID, &item.BotID, &item.Instructions, &item.Summary, &item.Source, &item.Reason, &item.CreatedAt, &item.Kind, &item.CatalogID, jsonScanner{&item.Evidence})
 	if errors.Is(err, sql.ErrNoRows) {
 		return nil, ErrNotFound
 	}
@@ -168,6 +171,9 @@ func (s *Store) takeProposal(ctx context.Context, id string) (*InstructionPropos
 // effect from the next message.
 func (h *Host) AnswerProposal(ctx context.Context, id string, apply bool) error {
 	if apply {
+		if pending, err := h.Store.proposal(ctx, id); err == nil && pending.Kind == ProposalConnectMCP {
+			return errors.New("review this app in Connect apps; finish authentication and choose the bot there")
+		}
 		// A skill is installed before the proposal is closed, so a failed
 		// download can be tried again.
 		if pending, err := h.Store.proposal(ctx, id); err == nil && pending.Kind == ProposalInstallSkill {
@@ -194,7 +200,7 @@ func (h *Host) AnswerProposal(ctx context.Context, id string, apply bool) error 
 	if err != nil {
 		return err
 	}
-	if proposal.Kind != ProposalInstallSkill {
+	if proposal.Kind == ProposalInstructions {
 		bot.Instructions = proposal.Instructions
 		if err := h.SaveBot(ctx, bot); err != nil {
 			return err
@@ -215,7 +221,9 @@ func (h *Host) AnswerProposal(ctx context.Context, id string, apply bool) error 
 func (h *Host) proposals(w http.ResponseWriter, r *http.Request) {
 	items, err := h.Store.PendingProposals(r.Context())
 	for index := range items {
-		if items[index].CatalogID != "" {
+		if items[index].Kind == ProposalConnectMCP {
+			items[index].App = findApp(items[index].CatalogID)
+		} else if items[index].CatalogID != "" {
 			items[index].Skill, _ = h.Store.CatalogSkill(r.Context(), items[index].CatalogID)
 		}
 	}
@@ -224,8 +232,8 @@ func (h *Host) proposals(w http.ResponseWriter, r *http.Request) {
 
 func (s *Store) proposal(ctx context.Context, id string) (*InstructionProposal, error) {
 	var item InstructionProposal
-	err := s.db.QueryRowContext(ctx, `SELECT id,bot_id,instructions,summary,source,reason,created_at,kind,catalog_id FROM instruction_proposals WHERE id=?`, id).
-		Scan(&item.ID, &item.BotID, &item.Instructions, &item.Summary, &item.Source, &item.Reason, &item.CreatedAt, &item.Kind, &item.CatalogID)
+	err := s.db.QueryRowContext(ctx, `SELECT id,bot_id,instructions,summary,source,reason,created_at,kind,catalog_id,evidence FROM instruction_proposals WHERE id=?`, id).
+		Scan(&item.ID, &item.BotID, &item.Instructions, &item.Summary, &item.Source, &item.Reason, &item.CreatedAt, &item.Kind, &item.CatalogID, jsonScanner{&item.Evidence})
 	if errors.Is(err, sql.ErrNoRows) {
 		return nil, ErrNotFound
 	}
@@ -269,6 +277,23 @@ func (h *Host) answerProposal(w http.ResponseWriter, r *http.Request) {
 		Action string `json:"action"` // apply or discard
 	}
 	if !decode(w, r, &input) {
+		return
+	}
+	if input.Action == "review" {
+		proposal, err := h.Store.proposal(r.Context(), r.PathValue("id"))
+		if err != nil || proposal.Kind != ProposalConnectMCP {
+			writeError(w, 400, errors.New("only an MCP suggestion can open a connection review"))
+			return
+		}
+		proposal, err = h.Store.takeProposal(r.Context(), proposal.ID)
+		if err == nil {
+			err = h.Store.RecordProposalOutcome(r.Context(), *proposal, "reviewed")
+		}
+		if err != nil {
+			writeError(w, 500, err)
+			return
+		}
+		w.WriteHeader(http.StatusNoContent)
 		return
 	}
 	if input.Action != "apply" && input.Action != "discard" {

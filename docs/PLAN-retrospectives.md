@@ -3,6 +3,12 @@
 Status: steps 1 and 3 implemented 2026-10-07 (`internal/rex/retro.go`,
 `internal/rex/catalog.go`). Steps 2 and 4 are planned.
 
+The implemented local revision is specified in [operational memory and retrospective
+learning](PLAN-bot-operational-memory.md). It makes memory review and
+consolidation the first remedies, adds capability research for skills and MCPs,
+and permits instruction proposals only when memory and available capabilities
+cannot close the demonstrated gap. That revision is implemented locally; its generic runtime changes must be released before Rex is pinned and shipped. Its memory-first remedy order supersedes the original instruction-first procedure below.
+
 ## Goal
 
 Every bot improves itself over time. After some tasks it looks back at how

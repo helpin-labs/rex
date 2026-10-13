@@ -94,9 +94,26 @@ function MissedCard({ item, onAnswered }: { item: AttentionItem; onAnswered: () 
 
 // ProposalCard shows instructions a bot proposed for itself. Nothing
 // changes until the user applies them.
-function ProposalCard({ bot, proposal, onAnswered }: { bot: Bot; proposal: InstructionProposal; onAnswered: () => void }) {
+function ProposalCard({ bot, proposal, onAnswered, onOpenApps }: { bot: Bot; proposal: InstructionProposal; onAnswered: () => void; onOpenApps?: (appId: string) => void }) {
+ if (proposal.kind === "connect_mcp") return <MCPProposalCard bot={bot} proposal={proposal} onAnswered={onAnswered} onOpenApps={onOpenApps} />;
   if (proposal.kind === "install_skill") return <SkillProposalCard bot={bot} proposal={proposal} onAnswered={onAnswered} />;
   return <InstructionProposalCard bot={bot} proposal={proposal} onAnswered={onAnswered} />;
+}
+
+function ProposalProof({ bot, proposal }: { bot: Bot; proposal: InstructionProposal }) {
+  const [source, setSource] = useState<import("./types").HistoryExcerpt | null>(null);
+  const [error, setError] = useState("");
+  const read = async (id: string, offset = 0) => { try { setError(""); setSource(await api.historyRead(bot.memory_mode === "shared" ? "shared" : `bot:${bot.id}`, id, offset)); } catch (caught) { setError(errorMessage(caught)); } };
+  const evidence = proposal.evidence;
+  if (!evidence?.gap) return null;
+  return <details><summary>Evidence and remedies reviewed</summary><p>{evidence.gap}</p><p>Memory: {evidence.memory_remedy}. {evidence.memory_insufficient}</p><p>Current capabilities: {evidence.capability_remedy}. {evidence.capability_insufficient}</p><p>{evidence.expected}</p><p>{evidence.access} · {evidence.setup_cost}</p>{evidence.sources?.map(id => <button type="button" className="link-button" key={id} onClick={() => void read(id)}>Read task evidence</button>)}{evidence.documentation?.map(url => <button type="button" key={url} className="link-button" onClick={() => openExternal(url)}>Documentation</button>)}{source && <div className="memory-evidence"><pre>{source.text}</pre>{source.truncated && <button type="button" className="link-button" onClick={() => void read(source.source_id, source.next_offset)}>Read next part</button>}</div>}{error && <p className="inline-error">{error}</p>}</details>;
+}
+
+function MCPProposalCard({ bot, proposal, onAnswered, onOpenApps }: { bot: Bot; proposal: InstructionProposal; onAnswered: () => void; onOpenApps?: (appId: string) => void }) {
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState("");
+  const answer = async (action: "review" | "discard") => { setBusy(true); try { await api.answerProposal(proposal.id, action); onAnswered(); if (action === "review") onOpenApps?.(proposal.catalog_id || ""); } catch (caught) { setError(errorMessage(caught)); } finally { setBusy(false); } };
+  return <div className="approval-card proposal-card"><strong>{proposal.summary}</strong><p>{proposal.reason}</p><p>{proposal.app?.description}</p><ProposalProof bot={bot} proposal={proposal} /><small className="muted">Review the connection, sign in and select its bots in Connect apps.</small>{error && <p className="inline-error">{error}</p>}<div className="approval-actions"><span className="spacer" /><button type="button" className="button secondary" disabled={busy} onClick={() => void answer("discard")}>No thanks</button><button type="button" className="button primary" disabled={busy || !onOpenApps || !proposal.app} onClick={() => void answer("review")}>Review connection</button></div></div>;
 }
 
 // A catalog skill a bot (or a look-back) suggests installing. Installing
@@ -114,7 +131,7 @@ function SkillProposalCard({ bot, proposal, onAnswered }: { bot: Bot; proposal: 
       <strong>{proposal.source === "retrospective" ? `${bot.name} looked back and suggests a skill` : `${bot.name} suggests a skill`}</strong>
       <small>{skill ? `${skill.name} · from ${skill.repo}` : proposal.summary}</small>
     </div></div>
-    {proposal.reason && <p className="proposal-reason">{proposal.reason}</p>}
+    {proposal.reason && <p className="proposal-reason">{proposal.reason}</p>}<ProposalProof bot={bot} proposal={proposal} />
     {skill ? <div className="skill-suggestion">
       <p>{skill.description}</p>
       <div className="catalog-facts">
@@ -143,7 +160,7 @@ function InstructionProposalCard({ bot, proposal, onAnswered }: { bot: Bot; prop
       <strong>{proposal.source === "retrospective" ? `${bot.name} looked back at recent work` : `Update ${bot.name}'s instructions?`}</strong>
       <small>{proposal.summary}</small>
     </div></div>
-    {proposal.reason && <p className="proposal-reason">{proposal.reason}</p>}
+    {proposal.reason && <p className="proposal-reason">{proposal.reason}</p>}<ProposalProof bot={bot} proposal={proposal} />
     {full ? <pre className="approval-input">{proposal.instructions}</pre>
       : <ul className="instruction-diff">{changes.map((change, index) => <li key={index} className={change.kind}>{change.kind === "add" ? "+" : "−"} {change.text}</li>)}{changes.length === 0 && <li>No visible changes.</li>}</ul>}
     <div className="approval-actions">
@@ -241,7 +258,7 @@ function useTurnEvents(turns: Turn[], timelines: Record<string, { events: RunEve
 // A bot's thread can grow long; it opens on its latest turns.
 const TURNS_SHOWN = 30;
 
-export function Chat({ bot, bots, conversationId, status, pending: waiting, defaultModel, onChanged, onEdit, onOpenSettings }: { bot: Bot; bots: Bot[]; conversationId: string; status: Status | null; pending: AttentionItem[]; defaultModel?: string; onChanged: () => void; onEdit: () => void; onOpenSettings?: (tab: "memory") => void }) {
+export function Chat({ bot, bots, conversationId, status, pending: waiting, defaultModel, onChanged, onEdit, onOpenSettings, onOpenApps }: { bot: Bot; bots: Bot[]; conversationId: string; status: Status | null; pending: AttentionItem[]; defaultModel?: string; onChanged: () => void; onEdit: () => void; onOpenSettings?: (tab: "memory") => void; onOpenApps?: (appId: string) => void }) {
   const missed = waiting.filter(item => item.kind === "missed");
   const proposalKey = waiting.filter(item => item.kind === "proposal").map(item => item.id).join(",");
   const [proposals, setProposals] = useState<InstructionProposal[]>([]);
@@ -517,7 +534,7 @@ export function Chat({ bot, bots, conversationId, status, pending: waiting, defa
             onEditMessage={index === turns.length - 1 && !working && pending.length === 0 && !turn.origin && turn.user_text ? editMessage : undefined} />
         </Fragment>)}
         {detail?.conversation.context_start && lastTurn && lastTurn.started_at < detail.conversation.context_start && <p className="fresh-note">Fresh start. {bot.name} won't carry the conversation above into new messages; memories still apply.</p>}
-        {proposals.map(proposal => <ProposalCard key={proposal.id} bot={bot} proposal={proposal} onAnswered={() => { setProposals(current => current.filter(item => item.id !== proposal.id)); onChanged(); }} />)}
+        {proposals.map(proposal => <ProposalCard key={proposal.id} bot={bot} proposal={proposal} onOpenApps={onOpenApps} onAnswered={() => { setProposals(current => current.filter(item => item.id !== proposal.id)); onChanged(); }} />)}
         {missed.map(item => <MissedCard key={item.id} item={item} onAnswered={() => { void load(); onChanged(); }} />)}
         {signIns.map(interaction => <ReconnectCard key={interaction.id} interaction={interaction} />)}
         {approvals.map(interaction => <ApprovalCard key={interaction.id} interaction={interaction} onRespond={(intent, content) => respond(interaction, intent, content)} />)}
