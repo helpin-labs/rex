@@ -384,14 +384,14 @@ func (h *Host) resumeAuthPaused(ctx context.Context, run *Run) bool {
 		return false
 	}
 	for _, interaction := range interactions {
-		if interaction.Status != "pending" || interaction.Kind != "authentication" {
+		if interaction.Status != "pending" || interaction.InteractionKind != "authentication" {
 			continue
 		}
 		var request struct {
 			Provider string `json:"provider"`
 			ServerID string `json:"server_id"`
 		}
-		_ = json.Unmarshal(interaction.Payload, &request)
+		_ = json.Unmarshal(interaction.RequestPayload, &request)
 		if request.Provider != "mcp" || request.ServerID == "" {
 			return false
 		}

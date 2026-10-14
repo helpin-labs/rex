@@ -3,6 +3,8 @@ package rex
 import (
 	"net/http"
 	"strings"
+
+	sdk "github.com/helpin-ai/agent-runtime-go"
 )
 
 // The agent runtime fetches skills from the host (its "skill provider"):
@@ -11,10 +13,7 @@ import (
 // the next run.
 
 // SkillRef points an agent at a skill in Rex's library.
-type SkillRef struct {
-	SkillID string `json:"skill_id,omitempty"`
-	Key     string `json:"key,omitempty"`
-}
+type SkillRef = sdk.SkillRef
 
 // runtimeSkill is the runtime's WorkspaceSkill.
 type runtimeSkill struct {

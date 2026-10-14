@@ -16,6 +16,8 @@ import (
 	"sync"
 	"sync/atomic"
 	"time"
+
+	sdk "github.com/helpin-ai/agent-runtime-go"
 )
 
 // Config holds the host's process-level settings.
@@ -98,8 +100,8 @@ func (h *Host) RequestRuntimeRestart() {
 // Bootstrap runs once the runtime is ready: it seeds first-run bots, syncs
 // every bot definition into the runtime and resumes watching open turns.
 func (h *Host) Bootstrap(ctx context.Context) error {
-	if capabilities, err := h.Runtime.Capabilities(ctx); err == nil {
-		isolation, _ := capabilities["execution_isolation"].(string)
+	if capabilities, err := h.Runtime.GetCapabilities(ctx); err == nil {
+		isolation := capabilities.ExecutionIsolation
 		h.writeTools.Store(isolation == "seatbelt")
 		slog.Info("bot engine command isolation", "isolation", isolation, "write_tools", h.WriteTools())
 	}
@@ -643,8 +645,8 @@ func (h *Host) RunWatcher(ctx context.Context) {
 func (h *Host) checkRun(ctx context.Context, runID string) bool {
 	run, err := h.Runtime.GetRun(ctx, runID)
 	if err != nil {
-		var runtimeErr *RuntimeError
-		if errors.As(err, &runtimeErr) && runtimeErr.Status == 404 {
+		var runtimeErr *sdk.HTTPStatusError
+		if errors.As(err, &runtimeErr) && runtimeErr.StatusCode == 404 {
 			return true
 		}
 		return false
@@ -787,6 +789,43 @@ func (h *Host) settle(ctx context.Context, run *Run, status string) {
 	}
 }
 
+// Recheck persisted turns even when a watcher was lost; transient API errors
+// are never evidence that an active run has finished.
+func (h *Host) reconcileWorkingTurns(ctx context.Context) {
+	turns, err := h.Store.WorkingTurns(ctx)
+	if err != nil {
+		return
+	}
+	for _, turn := range turns {
+		if turn.RunID == "" {
+			continue
+		}
+		run, err := h.Runtime.GetRun(ctx, turn.RunID)
+		if err != nil {
+			var missing *sdk.HTTPStatusError
+			if errors.As(err, &missing) && missing.StatusCode == 404 {
+				if h.Store.SettleTurn(ctx, turn.ID, "failed", "The recorded runtime run no longer exists.") == nil {
+					_ = h.Store.QueueEpisode(ctx, turn)
+					h.Memory.Notify()
+				}
+			}
+			continue
+		}
+		if run.Terminal() || run.Status == "paused" && run.PauseReason == "awaiting_user_message" {
+			status := "settled"
+			if run.Status == "failed" || run.Status == "cancelled" {
+				status = run.Status
+			}
+			h.settle(ctx, run, status)
+			h.watchMu.Lock()
+			delete(h.watched, run.ID)
+			h.watchMu.Unlock()
+		} else if run.Status == "queued" || run.Status == "running" {
+			h.Watch(run.ID)
+		}
+	}
+}
+
 // recoverTurns re-attaches to turns that were open when the host stopped.
 // A turn whose run cannot be found is marked interrupted, never re-run.
 func (h *Host) recoverTurns(ctx context.Context) {
@@ -801,8 +840,13 @@ func (h *Host) recoverTurns(ctx context.Context) {
 			continue
 		}
 		if _, err := h.Runtime.GetRun(ctx, turn.RunID); err != nil {
-			_ = h.Store.SettleTurn(ctx, turn.ID, "failed", "This run was interrupted and could not be recovered.")
-			_ = h.Store.SetTurnMemory(ctx, turn.ID, "skipped", "interrupted", 0)
+			var missing *sdk.HTTPStatusError
+			if errors.As(err, &missing) && missing.StatusCode == 404 {
+				_ = h.Store.SettleTurn(ctx, turn.ID, "failed", "This run was interrupted and could not be recovered.")
+				_ = h.Store.SetTurnMemory(ctx, turn.ID, "skipped", "interrupted", 0)
+			} else {
+				h.Watch(turn.RunID)
+			}
 			continue
 		}
 		h.Watch(turn.RunID)

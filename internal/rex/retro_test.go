@@ -149,7 +149,7 @@ func TestRetrospectiveStartsALookBackRun(t *testing.T) {
 	}))
 	defer runtime.Close()
 	host := newSetupTestHost(t)
-	host.Runtime = NewRuntimeClient(runtime.URL, "")
+	host.Runtime = newTestRuntimeClient(t, runtime.URL, "")
 	bot := &Bot{ID: "monitor", Name: "Domain monitor", Instructions: "You check vendors.", Provider: ProviderLocal, Model: "qwen3"}
 	if err := host.Store.SaveBot(ctx, bot); err != nil {
 		t.Fatal(err)

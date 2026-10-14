@@ -14,7 +14,7 @@ func newSetupTestHost(t *testing.T) *Host {
 	settings := NewSettingsManager(store, NewMemorySecrets())
 	memory := NewMemoryService(filepath.Join(t.TempDir(), "memory.db"), store, settings)
 	t.Cleanup(func() { memory.Close() })
-	return NewHost(Config{WorkspaceRoot: t.TempDir(), HostURL: "http://127.0.0.1:1", MCPSecret: []byte("secret")}, store, NewRuntimeClient("http://127.0.0.1:1", ""), settings, memory, &SkillLibrary{Dir: t.TempDir()})
+	return NewHost(Config{WorkspaceRoot: t.TempDir(), HostURL: "http://127.0.0.1:1", MCPSecret: []byte("secret")}, store, newTestRuntimeClient(t, "http://127.0.0.1:1", ""), settings, memory, &SkillLibrary{Dir: t.TempDir()})
 }
 
 func TestNewBotSetsItselfUp(t *testing.T) {

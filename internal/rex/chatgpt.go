@@ -11,6 +11,8 @@ import (
 	"time"
 
 	"github.com/helpin-ai/agent-runtime-go/chatgptauth"
+
+	sdk "github.com/helpin-ai/agent-runtime-go"
 )
 
 // ChatGPT lets bots run on the user's ChatGPT subscription instead of an
@@ -205,16 +207,7 @@ func chatGPTError(err error) error {
 // refreshChatGPTCredential answers the runtime when a run's ChatGPT token
 // is about to expire or was rejected.
 func (h *Host) refreshChatGPTCredential(w http.ResponseWriter, r *http.Request) {
-	var input struct {
-		CredentialFingerprint string `json:"credential_fingerprint"`
-		AppID                 string `json:"app_id"`
-		RunID                 string `json:"run_id"`
-		HostRunID             string `json:"host_run_id"`
-		ConnectionID          string `json:"connection_id"`
-		Provider              string `json:"provider"`
-		AccountID             string `json:"account_id"`
-		Reason                string `json:"reason"`
-	}
+	var input sdk.ModelCredentialRefreshRequest
 	if !decode(w, r, &input) {
 		return
 	}
@@ -227,7 +220,7 @@ func (h *Host) refreshChatGPTCredential(w http.ResponseWriter, r *http.Request) 
 		writeError(w, http.StatusUnauthorized, errors.New("sign in to ChatGPT again"))
 		return
 	}
-	writeJSON(w, http.StatusOK, map[string]any{"credential": credential})
+	writeJSON(w, http.StatusOK, sdk.ModelCredentialRefreshResponse{Credential: *credential})
 }
 
 func (h *Host) chatGPTStatus(w http.ResponseWriter, r *http.Request) {

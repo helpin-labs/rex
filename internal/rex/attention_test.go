@@ -17,7 +17,7 @@ func TestAttentionListsPendingInputAndFinishedRoutines(t *testing.T) {
 			{"id":"a0","run_id":"run-1","interaction_kind":"tool_approval","status":"resolved"}]`))
 	}))
 	defer runtime.Close()
-	host := NewHost(Config{}, store, NewRuntimeClient(runtime.URL, ""), nil, nil, nil)
+	host := NewHost(Config{}, store, newTestRuntimeClient(t, runtime.URL, ""), nil, nil, nil)
 	host.SetRuntimeReady(true)
 
 	bot := Bot{Name: "Spain trip"}

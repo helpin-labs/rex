@@ -10,6 +10,11 @@ afterEach(() => { cleanup(); vi.clearAllMocks(); });
 const state: MemoryLearning = { episodes: [{ turn_id: "old", status: "failed", forgotten: false, facts: 0, attempts: 3, error: "model unavailable", created_at: new Date().toISOString(), updated_at: new Date().toISOString() }], counts: { indexed: 7, failed: 1, forgotten: 2 }, lessons: [{ id: "candidate", text: "A single observed incident", state: "candidate", task_count: 1, verified_tasks: 1, source_fact_ids: [], updated_at: "", is_stale: false }], available: false, model: "learning-model", consolidation: { attempts: 3, error: "service unavailable" }, context: { enabled: false, warning: "Verified context window required" } };
 
 describe("operational memory inspection", () => {
+  it("shows pending extraction and queued consolidation separately", () => {
+    render(<OperationalMemory bank="bot:a" state={{...state, counts: {queued: 2, extracting: 1}, jobs: [{kind: "consolidation", state: "consolidation_pending"}]}} onRefresh={vi.fn()} />);
+    expect(screen.getByText(/3 tasks awaiting learning/)).toBeTruthy();
+    expect(screen.getByText("Consolidation queued.")).toBeTruthy();
+  });
   it("separates saved tasks, supported lessons and recalled records, and shows failures honestly", () => {
     render(<OperationalMemory bank="bot:a" state={state} onRefresh={vi.fn()} />);
     expect(screen.getByText("8 saved tasks · 0 supported lessons")).toBeTruthy();

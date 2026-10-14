@@ -73,16 +73,18 @@ func (s *Store) Episode(ctx context.Context, turnID string) (TaskEpisode, error)
 
 func (s *Store) episodeQueue(ctx context.Context, status string) (*TaskEpisode, error) {
 	e, err := scanEpisode(s.db.QueryRowContext(ctx, `SELECT `+episodeColumns+` FROM task_episodes
-		WHERE status=? AND forgotten=0 AND (retry_at IS NULL OR retry_at<=?) ORDER BY updated_at,created_at LIMIT 1`, status, time.Now().UTC()))
+		WHERE (status=? OR ?='capture' AND status='captured' AND updated_at<=?)
+		AND (?<>'queued' OR EXISTS(SELECT 1 FROM turns t WHERE t.id=task_episodes.turn_id AND t.status<>'working'))
+		AND forgotten=0 AND (retry_at IS NULL OR retry_at<=?) ORDER BY updated_at,created_at LIMIT 1`, status, status, time.Now().UTC().Add(-30*time.Second), status, time.Now().UTC()))
 	if errors.Is(err, sql.ErrNoRows) {
 		return nil, nil
 	}
 	return &e, err
 }
 
-// Only terminal user-facing tasks are backfilled; helper runs have no turns.
+// User-facing tasks are archived independently of learning; helpers have no turns.
 func (s *Store) reconcileEpisodes(ctx context.Context, limit int) error {
-	turns, err := s.turns(ctx, `SELECT `+turnColumns+` FROM turns WHERE status IN ('settled','failed','cancelled')
+	turns, err := s.turns(ctx, `SELECT `+turnColumns+` FROM turns WHERE status IN ('working','settled','failed','cancelled') AND (status<>'working' OR run_id<>'')
 		AND NOT EXISTS(SELECT 1 FROM task_episodes e WHERE e.turn_id=turns.id) ORDER BY started_at DESC LIMIT ?`, limit)
 	if err != nil {
 		return err
@@ -104,14 +106,25 @@ func (s *Store) saveHistory(ctx context.Context, e TaskEpisode, entries []Histor
 	revision := hex.EncodeToString(digest[:])
 	return withTx(ctx, s.db, func(tx *sql.Tx) error {
 		var forgotten bool
-		var oldRevision, status string
-		if err := tx.QueryRowContext(ctx, `SELECT forgotten,revision,status FROM task_episodes WHERE turn_id=?`, e.TurnID).Scan(&forgotten, &oldRevision, &status); err != nil {
+		var oldRevision, status, taskStatus string
+		if err := tx.QueryRowContext(ctx, `SELECT e.forgotten,e.revision,e.status,t.status FROM task_episodes e JOIN turns t ON t.id=e.turn_id WHERE e.turn_id=? AND e.bank=?`, e.TurnID, e.Bank).Scan(&forgotten, &oldRevision, &status, &taskStatus); err != nil {
 			return err
 		}
 		if forgotten {
 			return errors.New("source was forgotten")
 		}
+		nextStatus := "queued"
+		if taskStatus == "working" {
+			nextStatus = "captured"
+		} else if e.Status == "captured" {
+			// The turn settled while its working snapshot was being fetched.
+			nextStatus = "capture"
+		}
 		if oldRevision == revision {
+			if nextStatus == "captured" || nextStatus == "capture" || status == "captured" || status == "capture" {
+				_, err := tx.ExecContext(ctx, `UPDATE task_episodes SET status=?,updated_at=? WHERE turn_id=?`, nextStatus, time.Now().UTC(), e.TurnID)
+				return err
+			}
 			return nil
 		}
 		if oldRevision != "" {
@@ -120,35 +133,57 @@ func (s *Store) saveHistory(ctx context.Context, e TaskEpisode, entries []Histor
 			}
 		}
 
+		existing := map[string]HistoryEntry{}
+		rows, err := tx.QueryContext(ctx, `SELECT id,kind,text,sequence_no,created_at FROM task_history WHERE turn_id=?`, e.TurnID)
+		if err != nil {
+			return err
+		}
+		for rows.Next() {
+			var entry HistoryEntry
+			if err := rows.Scan(&entry.ID, &entry.Kind, &entry.Text, &entry.Sequence, &entry.CreatedAt); err != nil {
+				rows.Close()
+				return err
+			}
+			existing[entry.ID] = entry
+		}
+		if err := rows.Err(); err != nil {
+			rows.Close()
+			return err
+		}
+		rows.Close()
+		seen := map[string]bool{}
 		for _, entry := range entries {
 			if entry.ID == "" || entry.TurnID != e.TurnID {
 				return errors.New("invalid source identity")
 			}
-			var owner string
-			err := tx.QueryRowContext(ctx, `SELECT turn_id FROM task_history WHERE id=?`, entry.ID).Scan(&owner)
-			if err != nil && !errors.Is(err, sql.ErrNoRows) {
+			if seen[entry.ID] {
+				return errors.New("duplicate source identity")
+			}
+			seen[entry.ID] = true
+			previous, exists := existing[entry.ID]
+			delete(existing, entry.ID)
+			if exists && previous.Text == entry.Text && previous.Kind == entry.Kind && previous.Sequence == entry.Sequence && previous.CreatedAt.Equal(entry.CreatedAt) {
+				continue
+			}
+			result, err := tx.ExecContext(ctx, `INSERT INTO task_history(id,turn_id,kind,text,sequence_no,created_at) VALUES(?,?,?,?,?,?)
+				ON CONFLICT(id) DO UPDATE SET text=excluded.text,kind=excluded.kind,sequence_no=excluded.sequence_no,created_at=excluded.created_at WHERE task_history.turn_id=excluded.turn_id`, entry.ID, e.TurnID, entry.Kind, entry.Text, entry.Sequence, entry.CreatedAt)
+			if err != nil {
 				return err
 			}
-			if err == nil && owner != e.TurnID {
+			changed, err := result.RowsAffected()
+			if err != nil {
+				return err
+			}
+			if changed != 1 {
 				return errors.New("source belongs to another task")
 			}
 		}
-		if _, err := tx.ExecContext(ctx, `DELETE FROM task_history WHERE turn_id=?`, e.TurnID); err != nil {
-			return err
-		}
-		for _, entry := range entries {
-			if _, err := tx.ExecContext(ctx, `INSERT INTO task_history(id,turn_id,kind,text,sequence_no,created_at) VALUES(?,?,?,?,?,?)
-				ON CONFLICT(id) DO UPDATE SET text=excluded.text,kind=excluded.kind,sequence_no=excluded.sequence_no`, entry.ID, e.TurnID, entry.Kind, entry.Text, entry.Sequence, entry.CreatedAt); err != nil {
-				return err
-			}
-			if _, err := tx.ExecContext(ctx, `DELETE FROM task_history_fts WHERE id=?`, entry.ID); err != nil {
-				return err
-			}
-			if _, err := tx.ExecContext(ctx, `INSERT INTO task_history_fts(id,text) VALUES(?,?)`, entry.ID, entry.Text); err != nil {
+		for id := range existing {
+			if _, err := tx.ExecContext(ctx, `DELETE FROM task_history WHERE turn_id=? AND id=?`, e.TurnID, id); err != nil {
 				return err
 			}
 		}
-		_, err := tx.ExecContext(ctx, `UPDATE task_episodes SET status='queued',revision=?,attempts=0,retry_at=NULL,error='',updated_at=? WHERE turn_id=?`, revision, time.Now().UTC(), e.TurnID)
+		_, err = tx.ExecContext(ctx, `UPDATE task_episodes SET status=?,revision=?,attempts=0,retry_at=NULL,error='',updated_at=? WHERE turn_id=?`, nextStatus, revision, time.Now().UTC(), e.TurnID)
 		return err
 	})
 }
@@ -221,7 +256,7 @@ func (s *Store) SearchHistory(ctx context.Context, bank string, request HistoryS
 	query := `SELECT h.id,h.turn_id,h.kind,h.text,h.sequence_no,h.created_at FROM task_history h JOIN task_episodes e ON e.turn_id=h.turn_id JOIN turns t ON t.id=e.turn_id`
 	args := []any{}
 	if strings.TrimSpace(request.Query) != "" {
-		query += ` JOIN task_history_fts f ON f.id=h.id`
+		query += ` JOIN task_history_fts f ON f.rowid=h.rowid`
 	}
 	query += ` WHERE e.bank=? AND e.forgotten=0`
 	args = append(args, bank)

@@ -3,6 +3,8 @@ package rex
 import (
 	"context"
 	"encoding/json"
+	"net/http"
+	"net/http/httptest"
 	"strings"
 	"testing"
 )
@@ -11,6 +13,15 @@ func TestMemoryFirstReviewRepairsWithoutProposalAndGatesPrompt(t *testing.T) {
 	ctx := context.Background()
 	h := newSetupTestHost(t)
 	learningFixture(t, h)
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.Method == "GET" && r.URL.Path == "/v1/memory/jobs" {
+			writeJSON(w, 200, []any{})
+			return
+		}
+		w.WriteHeader(404)
+	}))
+	defer server.Close()
+	h.Runtime = newTestRuntimeClient(t, server.URL, "")
 	bot := Bot{ID: "review", Name: "Review", MemoryMode: MemoryPrivate, Instructions: "You verify sources and deliver concise reports."}
 	_, e := episodeFixture(t, h, bot, "No, from now on follow the required source contract", "failed")
 	saveEpisodeFixture(t, h, e, "tool_failure")

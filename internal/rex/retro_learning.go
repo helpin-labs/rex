@@ -92,6 +92,9 @@ func (h *Host) reviewMemory(ctx context.Context, retroID string, bot Bot, action
 		if err := h.Store.retryEpisode(ctx, bank, strings.TrimPrefix(source, "episode/")); err != nil {
 			return nil, err
 		}
+		if err := h.Memory.retryLearning(ctx, bank, source); err != nil {
+			return nil, err
+		}
 		h.Memory.Notify()
 		review.Remedy = "recorded learning queued for retry"
 	} else if action == "consolidate" {
@@ -100,10 +103,10 @@ func (h *Host) reviewMemory(ctx context.Context, retroID string, bot Bot, action
 			return nil, err
 		}
 		if state.LastSuccess == nil || time.Since(*state.LastSuccess) >= 30*time.Minute {
-			if _, err := h.Memory.consolidateBank(ctx, bank); err != nil {
+			if _, err := h.Memory.requestConsolidation(ctx, bank); err != nil {
 				return nil, err
 			}
-			review.Remedy = "source-backed memory consolidated"
+			review.Remedy = "source-backed memory consolidation queued"
 		} else {
 			review.Remedy = "memory consolidation is current"
 		}

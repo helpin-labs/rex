@@ -28,6 +28,36 @@ serialized learning lane. Local chat can interrupt model learning; capture and
 history lookup continue independently. Failed and cancelled tasks are included.
 Older terminal turns are incrementally reconciled in bounded batches.
 
+Extraction, explicit-note conflict checks and private-bank consolidation now
+use the owning bot's model and provider through runtime helper runs with no
+tools, MCPs or skills. Shared-task extraction uses its originating bot; shared
+bank consolidation uses Rex's model. Default model resolution, credentials and
+ChatGPT OAuth follow the ordinary bot-run path. The separate learning-model
+setting is removed. Embeddings remain independent. Small model windows receive
+bounded evidence; a provider or model failure is surfaced rather than switching
+to another model. Learning waits for active chats and reviews and is cancellable.
+The rebuilt app was restarted while idle. Live verification showed Lead
+Researcher and the newsletter bot selecting `gpt-5.6-sol` through ChatGPT OAuth,
+with two completed newsletter learning helper runs on that provider/model.
+Scribe alone continues to use its configured `openai/gpt-oss-20b` model. Existing
+facts retain their historical model provenance; this change does not discard
+or automatically reinterpret them.
+
+History reads now consult the saved index directly. A separate background worker
+captures task history even while the learning model is busy, refreshing active
+snapshots about every 30 seconds. Updates write only changed source entries; the
+search index uses matching SQLite row IDs and transactional triggers. Capture
+loads known passwords once per batch before redacting and saving evidence. Read
+pages can grow to 16,000 characters when the verified model context permits it.
+Regression checks cover migration, scoping, redaction, active-task scheduling and
+a 40,000-row archive with a 1,200-entry snapshot; a three-row delta took about 2 ms
+in the local synthetic test. These are local test timings, not a production SLA.
+After an idle restart with the corrected build, live checks against 41,599
+recorded entries measured source reads at 1–2 ms, whole-task reads at 34–43 ms,
+and search at about 4 ms. The SQLite index upgrade created a backup first. The
+companion bounded ChatGPT transport retry and historical failure display fixes
+were activated in the same build.
+
 Retrospectives review memory and current capabilities before proposing a change.
 Instruction proposals require an explicit lasting work contract or repeated
 failures after the same supported lesson was recalled. MCP proposals hand off to
@@ -37,8 +67,8 @@ compaction status, learning errors and bounded source readers. Existing facts
 and explicit notes remain available.
 
 Local validation uses fixture tests and an isolated sidecar smoke test in
-`scripts/e2e-operational-memory.py`. The smoke test runs real file tools and real
-local extraction/consolidation, with deterministic task responses by default;
+`scripts/e2e-operational-memory.py`. The smoke test runs real file tools and the
+runtime extraction/consolidation path, using one deterministic model by default;
 it verifies restart and forgetting without touching live bot profiles. An
 explicit real task model can be selected through the existing e2e environment.
 ChatGPT metadata discovery was separately verified against the configured

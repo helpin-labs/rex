@@ -123,7 +123,10 @@ func run() error {
 	if err != nil {
 		return err
 	}
-	runtimeClient := rex.NewRuntimeClient("http://127.0.0.1:"+runtimePort, runtimeToken)
+	runtimeClient, err := rex.NewRuntimeClient("http://127.0.0.1:"+runtimePort, runtimeToken)
+	if err != nil {
+		return err
+	}
 	host := rex.NewHost(cfg, store, runtimeClient, settings, memory, skills)
 	embedder := &rex.Embedder{Binary: resolveSidecar("REX_EMBEDDER_BINARY", "llama-server"), Model: resolveEmbeddingModel(), DataDir: dataDir, Log: logFile}
 	memory.SetEmbedder(embedder)
@@ -318,6 +321,7 @@ func (l runtimeLaunch) start(ctx context.Context) (*exec.Cmd, <-chan error, erro
 			"transport": "http", "base_url": l.hostURL + "/runtime/workspaces", "token": l.internalToken,
 		},
 		// ChatGPT runs ask Rex for a fresh token before theirs expires.
+		"memory_learning_callback":  map[string]any{"url": l.hostURL + "/runtime/memory/learning", "token_env": "REX_MODEL_CALLBACK_TOKEN"},
 		"model_credential_callback": map[string]any{"url": l.hostURL + "/runtime/model-credentials/refresh", "token_env": "REX_MODEL_CALLBACK_TOKEN"},
 		"model_endpoints": []map[string]any{{
 			"id": endpoint.ID, "base_url": endpoint.BaseURL, "auth_mode": endpoint.AuthMode,
@@ -342,6 +346,7 @@ func (l runtimeLaunch) start(ctx context.Context) (*exec.Cmd, <-chan error, erro
 		"AGENT_RUNTIME_ADDR=127.0.0.1:"+l.port,
 		"AGENT_RUNTIME_STORE_DRIVER=sqlite",
 		"AGENT_RUNTIME_SQLITE_DSN="+filepath.Join(l.dataDir, "runtime.db"),
+		"AGENT_RUNTIME_MEMORY_JOBS_SQLITE_PATH="+filepath.Join(l.dataDir, "memory-jobs.db"),
 		"AGENT_RUNTIME_SERVICE_TOKEN="+l.token,
 		"AGENT_RUNTIME_APP_CONFIG="+string(appConfig),
 		"AGENT_RUNTIME_MODEL_CREDENTIAL_ENCRYPTION_KEY="+base64.StdEncoding.EncodeToString(l.modelCredentialKey),

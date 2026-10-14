@@ -78,10 +78,9 @@ type ProviderConfig struct {
 }
 
 type MemorySettings struct {
-	Enabled         bool   `json:"enabled"`
-	Provider        string `json:"provider"`
-	ExtractionModel string `json:"extraction_model"`
-	EmbeddingModel  string `json:"embedding_model"`
+	Enabled        bool   `json:"enabled"`
+	Provider       string `json:"provider"`
+	EmbeddingModel string `json:"embedding_model"`
 	// EmbeddingSource is "bundled" (Rex's own Bekko Embedding, the
 	// default when empty) or "server" (EmbeddingModel on the memory provider).
 	EmbeddingSource string `json:"embedding_source"`

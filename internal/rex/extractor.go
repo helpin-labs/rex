@@ -22,11 +22,13 @@ import (
 // by the embedded memory.Provider.
 type FactExtractor struct {
 	*memory.Provider
-	baseURL string
-	apiKey  string
-	model   string
-	local   bool
-	client  *http.Client
+	baseURL    string
+	apiKey     string
+	model      string
+	local      bool
+	client     *http.Client
+	generate   func(context.Context, string, string) (string, error)
+	inputLimit int
 	// structuredFailed remembers that this model could not follow the
 	// runtime's structured schema, so later saves skip straight to the
 	// simple prompt instead of waiting for the same timeout again.
@@ -56,6 +58,9 @@ Answer only with JSON: {"facts":[{"text":"...","entities":["..."]}]}`
 func (e *FactExtractor) Extract(ctx context.Context, request memory.RetainRequest) ([]memory.ExtractedFact, error) {
 	if request.Metadata["source"] == "episode" {
 		return e.extractOperational(ctx, request)
+	}
+	if e.generate != nil {
+		return e.extractSimple(ctx, request)
 	}
 	if e.structuredFailed.Load() {
 		return e.extractSimple(ctx, request)
@@ -109,25 +114,11 @@ func (e *FactExtractor) extractSimple(ctx context.Context, request memory.Retain
 var jsonObject = regexp.MustCompile(`(?s)\{.*\}`)
 
 func (e *FactExtractor) call(ctx context.Context, body map[string]any, date time.Time) ([]memory.ExtractedFact, error) {
-	headers := map[string]string{}
-	if e.apiKey != "" {
-		headers["Authorization"] = "Bearer " + e.apiKey
-	}
-	var response struct {
-		Choices []struct {
-			FinishReason string `json:"finish_reason"`
-			Message      struct {
-				Content string `json:"content"`
-			} `json:"message"`
-		} `json:"choices"`
-	}
-	if err := httpJSON(ctx, http.MethodPost, e.baseURL+"/chat/completions", headers, body, &response); err != nil {
+	content, err := e.complete(ctx, body)
+	if err != nil {
 		return nil, err
 	}
-	if len(response.Choices) == 0 {
-		return nil, errors.New("empty extraction response")
-	}
-	content := strings.TrimSpace(response.Choices[0].Message.Content)
+	content = strings.TrimSpace(content)
 	// Some models wrap JSON in prose or code fences; take the object.
 	if match := jsonObject.FindString(content); match != "" {
 		content = match
@@ -165,6 +156,13 @@ func (e *FactExtractor) call(ctx context.Context, body map[string]any, date time
 	return facts, nil
 }
 
+func (e *FactExtractor) packetBudget(prompt string, maximum int) int {
+	if e.inputLimit <= 0 {
+		return maximum
+	}
+	return min(maximum, max(256, (e.inputLimit-1024-len([]rune(prompt))/3)*3))
+}
+
 // plausibleText rejects the degenerate output constrained decoding can
 // produce: runs of ellipses, question marks or replacement characters.
 func plausibleText(text string) bool {
@@ -181,4 +179,32 @@ func plausibleText(text string) bool {
 		}
 	}
 	return letters >= 2 && junk*4 <= letters
+}
+
+func (e *FactExtractor) complete(ctx context.Context, body map[string]any) (string, error) {
+	if e.generate != nil {
+		messages, ok := body["messages"].([]map[string]string)
+		if !ok || len(messages) != 2 {
+			return "", errors.New("learning requires a system prompt and evidence")
+		}
+		return e.generate(ctx, messages[0]["content"], messages[1]["content"])
+	}
+	headers := map[string]string{}
+	if e.apiKey != "" {
+		headers["Authorization"] = "Bearer " + e.apiKey
+	}
+	var reply struct {
+		Choices []struct {
+			Message struct {
+				Content string `json:"content"`
+			} `json:"message"`
+		} `json:"choices"`
+	}
+	if err := httpJSON(ctx, http.MethodPost, e.baseURL+"/chat/completions", headers, body, &reply); err != nil {
+		return "", err
+	}
+	if len(reply.Choices) == 0 {
+		return "", errors.New("empty learning response")
+	}
+	return reply.Choices[0].Message.Content, nil
 }

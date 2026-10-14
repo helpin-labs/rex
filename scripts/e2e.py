@@ -27,7 +27,6 @@ sys.path.insert(0, os.path.join(ROOT, "scripts"))
 import rexctl as api  # noqa: E402
 
 MODEL = os.environ.get("REX_E2E_MODEL", "openai/gpt-oss-20b")
-EXTRACTION = os.environ.get("REX_E2E_EXTRACTION_MODEL", "qwen/qwen3.6-35b-a3b")
 EMBEDDING = os.environ.get("REX_E2E_EMBEDDING", "text-embedding-nomic-embed-text-v1.5")
 LOCAL_URL = os.environ.get("REX_E2E_LOCAL_URL", "http://127.0.0.1:1234/v1")
 WORKSPACES = os.path.join(BASE, "workspaces")
@@ -87,7 +86,7 @@ def configure():
     settings = api.call("GET", "/api/settings")
     settings["local"]["base_url"] = LOCAL_URL
     settings["default_model"] = MODEL
-    settings["memory"] = {"enabled": True, "provider": "local", "extraction_model": EXTRACTION, "embedding_model": "", "embedding_source": "bundled"}
+    settings["memory"] = {"enabled": True, "provider": "local", "embedding_model": "", "embedding_source": "bundled"}
     settings["onboarded"] = True
     settings["browser_hidden"] = os.environ.get("REX_E2E_HEADLESS") == "1"
     api.call("PUT", "/api/settings", settings)

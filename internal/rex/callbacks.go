@@ -12,6 +12,8 @@ import (
 	"time"
 
 	protocol "github.com/modelcontextprotocol/go-sdk/mcp"
+
+	sdk "github.com/helpin-ai/agent-runtime-go"
 )
 
 // Callback endpoints are called by agent-runtime, never by the webview.
@@ -39,19 +41,14 @@ func bearerMatches(r *http.Request, expected string) bool {
 // runtimeContext answers the runtime's target-context request. It is where
 // relevant memories are injected before the model sees the new message.
 func (h *Host) runtimeContext(w http.ResponseWriter, r *http.Request) {
-	var request struct {
-		AppID   string         `json:"app_id"`
-		RunID   string         `json:"run_id"`
-		AgentID string         `json:"agent_id"`
-		Target  map[string]any `json:"target"`
-	}
+	var request sdk.TargetContextRequest
 	if err := json.NewDecoder(http.MaxBytesReader(w, r.Body, 1<<20)).Decode(&request); err != nil {
 		writeError(w, http.StatusBadRequest, err)
 		return
 	}
 	// Runs can outlive the conversation they started in (merged threads),
 	// so the conversation is found through the run.
-	conversationID, _ := request.Target["id"].(string)
+	conversationID := request.Target.ID
 	if conversation, err := h.Store.ConversationForRun(r.Context(), request.RunID); err == nil {
 		conversationID = conversation.ID
 	}
@@ -109,16 +106,13 @@ func (h *Host) runtimeContext(w http.ResponseWriter, r *http.Request) {
 			_ = h.Store.SetTurnRecalled(r.Context(), turn.ID, recalled)
 		}
 	}
-	writeJSON(w, http.StatusOK, map[string]any{"target": request.Target, "summary": strings.Join(sections, "\n\n"), "data": data})
+	writeJSON(w, http.StatusOK, sdk.TargetContext{Target: request.Target, Summary: strings.Join(sections, "\n\n"), Data: data})
 }
 
 // Workspace provider: the runtime asks the host to prepare a workspace lease
 // for runs of bots with file access. The lease root is the bot's own folder.
 func (h *Host) prepareWorkspace(w http.ResponseWriter, r *http.Request) {
-	var request struct {
-		AgentID string `json:"agent_id"`
-		RunID   string `json:"run_id"`
-	}
+	var request sdk.PrepareWorkspaceRequest
 	if err := json.NewDecoder(http.MaxBytesReader(w, r.Body, 4<<20)).Decode(&request); err != nil {
 		writeError(w, http.StatusBadRequest, err)
 		return
@@ -136,14 +130,14 @@ func (h *Host) prepareWorkspace(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusInternalServerError, err)
 		return
 	}
-	writeJSON(w, http.StatusOK, map[string]any{
-		"id": "rex-" + bot.ID + "-" + request.RunID, "provider": "rex", "root_path": bot.WorkspaceDir,
-		"cleanup_policy": "manual", "metadata": map[string]any{"bot_id": bot.ID, "workspace_mode": "host_prepared"},
+	writeJSON(w, http.StatusOK, sdk.WorkspaceLease{
+		ID: "rex-" + bot.ID + "-" + request.RunID, Provider: "rex", RootPath: bot.WorkspaceDir,
+		CleanupPolicy: sdk.CleanupManual, Metadata: map[string]any{"bot_id": bot.ID, "workspace_mode": sdk.WorkspaceModeHostPrepared},
 	})
 }
 
 func (h *Host) finalizeWorkspace(w http.ResponseWriter, r *http.Request) {
-	writeJSON(w, http.StatusOK, map[string]any{})
+	writeJSON(w, http.StatusOK, sdk.FinalizeWorkspaceResult{})
 }
 
 func (h *Host) cleanupWorkspace(w http.ResponseWriter, r *http.Request) {

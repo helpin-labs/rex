@@ -280,15 +280,12 @@ export function SettingsView({ status, initialTab, onSaved }: { status: Status |
       </>}
 
       {tab === "memory" && <>
-        <PageHeader title="Memory" description="After each answer, Rex keeps durable facts from what you said, such as preferences, people and plans, in a local database. It happens in the background and never delays a reply. Before each new message, relevant memories are given to the bot." />
+        <PageHeader title="Memory" description="Each bot learns from its recorded tasks using its own model and provider. Outcomes, successful procedures, failures and unfinished work stay in a local database. Learning runs in the background; relevant memories are recalled before the next task." />
         <div className="card">
           <div className="row between"><h3 className="section-title">Status</h3><span className={`chip ${status?.memory.status === "ready" ? "ok" : "warn"}`}>Memory is {status?.memory.status || "starting"}</span></div>
           <Toggle label="Remember things automatically" checked={settings.memory.enabled} onChange={enabled => update({ memory: { ...settings.memory, enabled } })} />
-          {settings.memory.enabled && settings.memory.provider === "local" && local.error && <div className="callout warning"><CircleAlert size={15} /><span>Memories are saved with the local model server, which isn't running. Start it, or run memory with OpenAI below.</span></div>}
-          <Field label="Run memory with"><Select value={settings.memory.provider} onChange={value => update({ memory: { ...settings.memory, provider: value as "local" | "openai" } })}><option value="local">Local model server</option><option value="openai" disabled={!settings.openai.configured}>OpenAI{settings.openai.configured ? "" : " (add key first)"}</option></Select></Field>
+          <p className="muted small">Learning and consolidation use the owning bot's model, including ChatGPT subscription models. Shared-memory consolidation uses Rex's model. There is no separate learning model.</p>
           <div className="two-col">
-            <Field label="Model for saving memories" hint="Each bot's memories are extracted by its own chat model, so your model server never has to swap models. Finding memories only uses the embedding model.">{settings.memory.provider === "local" && chatModels.length ? <Select value={settings.memory.extraction_model} onChange={value => update({ memory: { ...settings.memory, extraction_model: value } })}><option value="">Each bot's own chat model</option>{chatModels.map(model => <option key={model.id}>{model.id}</option>)}</Select>
-              : <input value={settings.memory.extraction_model} onChange={event => update({ memory: { ...settings.memory, extraction_model: event.target.value } })} placeholder="gpt-5.6-mini" />}</Field>
             <Field label="Finding memories" hint="The embedding model turns memories and questions into vectors. The built-in one runs inside Rex (about 180 MB of memory) and needs no model server.">
               <Select value={settings.memory.embedding_source === "server" ? "server" : "bundled"} onChange={value => update({ memory: { ...settings.memory, embedding_source: value as "bundled" | "server" } })}>
                 <option value="bundled">Built into Rex (Bekko)</option>
@@ -296,6 +293,7 @@ export function SettingsView({ status, initialTab, onSaved }: { status: Status |
               </Select>
             </Field>
           </div>
+          {settings.memory.embedding_source === "server" && <Field label="Embedding provider"><Select value={settings.memory.provider} onChange={value => update({ memory: { ...settings.memory, provider: value as "local" | "openai" } })}><option value="local">Local model server</option><option value="openai" disabled={!settings.openai.configured}>OpenAI{settings.openai.configured ? "" : " (add key first)"}</option></Select></Field>}
           {settings.memory.embedding_source === "server" && <Field label="Embedding model on the server">{settings.memory.provider === "local" && embeddingModels.length ? <Select value={settings.memory.embedding_model} onChange={value => update({ memory: { ...settings.memory, embedding_model: value } })}><option value="">Choose…</option>{embeddingModels.map(model => <option key={model.id}>{model.id}</option>)}</Select>
               : <input value={settings.memory.embedding_model} onChange={event => update({ memory: { ...settings.memory, embedding_model: event.target.value } })} placeholder="text-embedding-3-small" />}</Field>}
           <p className="muted small">Changing how memories are found rebuilds memory: the old database is kept as a backup and every remembered source is learned again in the background.</p>

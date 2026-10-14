@@ -1,8 +1,8 @@
 #!/usr/bin/env python3
-"""Operational-memory smoke with real sidecars, local learning and isolated data.
+"""Operational-memory smoke with real sidecars, per-bot learning and isolated data.
 
 Build sidecars first. By default, file-task responses use a deterministic provider
-and learning uses openai/gpt-oss-20b on the local model server. Set REX_E2E_MODEL
+and learning uses that same task model. Set REX_E2E_MODEL
 to test task execution with a real local model whose loaded context fits the tools.
 Uses the existing e2e host lifecycle; leaves live Rex profiles untouched.
 """
@@ -15,12 +15,11 @@ import time
 import urllib.parse
 
 os.environ.setdefault("REX_E2E_MODEL", "fixture-task")
-os.environ.setdefault("REX_E2E_EXTRACTION_MODEL", "openai/gpt-oss-20b")
 import e2e as gate
 
 
 class TaskProvider:
-    """Deterministic file-task model; learning uses the actual local model."""
+    """One deterministic model for task execution and operational learning."""
     def __init__(self):
         local_url = gate.LOCAL_URL
         class Handler(BaseHTTPRequestHandler):
@@ -28,7 +27,7 @@ class TaskProvider:
                 pass
 
             def do_GET(self):
-                data = [{"id": "fixture-task", "context_length": 32768, "loaded_context_length": 32768, "max_completion_tokens": 4096}, {"id": gate.EXTRACTION, "loaded_context_length": 4096}]
+                data = [{"id": "fixture-task", "context_length": 32768, "loaded_context_length": 32768, "max_completion_tokens": 4096}]
                 self.send_response(200)
                 self.send_header("Content-Type", "application/json")
                 self.end_headers()
@@ -46,6 +45,11 @@ class TaskProvider:
                     self.wfile.write(value)
                     return
                 messages = body.get("messages", [])
+                def text(item):
+                    value = item.get("content", "")
+                    return value if isinstance(value, str) else "".join(part.get("text", "") for part in value if isinstance(part, dict))
+                system = "\n".join(text(item) for item in messages if item.get("role") == "system")
+                user = next((text(item) for item in reversed(messages) if item.get("role") == "user"), "")
                 latest = next((item.get("content", "") for item in reversed(messages) if item.get("role") == "user"), "")
                 missing = "Read unavailable.txt" in str(latest)
                 call_id = "fixture-missing" if missing else "fixture-progress"
@@ -54,6 +58,17 @@ class TaskProvider:
                 message = {"role": "assistant", "content": content if completed else ""}
                 if not completed:
                     message["tool_calls"] = [{"id": call_id, "type": "function", "function": {"name": "read_files", "arguments": json.dumps({"files": [{"path": "unavailable.txt" if missing else "progress.txt"}]})}}]
+                if "Extract operational learning" in system:
+                    evidence, _ = json.JSONDecoder().raw_decode(user.lstrip())
+                    source = next((item for item in evidence["entries"] if item["kind"] in ("tool_result", "tool_failure")), None)
+                    facts = [] if not source else [{"text": "The requested file read has a recorded source outcome.", "kind": "failure" if source["kind"] == "tool_failure" else "outcome", "sources": [source["source_id"]], "entities": []}]
+                    message = {"role": "assistant", "content": json.dumps({"facts": facts})}
+                    completed = True
+                elif "Consolidate this bot's operational learning" in system:
+                    evidence, _ = json.JSONDecoder().raw_decode(user.lstrip())
+                    proof = [fact["id"] for fact in evidence["new_evidence"]]
+                    message = {"role": "assistant", "content": json.dumps({"creates": [{"text": "Check the recorded file outcome before reporting task completion.", "source_fact_ids": proof, "reason": "Recorded tool results"}], "updates": [], "deletes": []})}
+                    completed = True
                 choice = {"index": 0, "message": message, "finish_reason": "stop" if completed else "tool_calls"}
                 response = {"id": "fixture", "object": "chat.completion", "model": "fixture-task", "choices": [choice], "usage": {"prompt_tokens": 100, "completion_tokens": 30, "total_tokens": 130}}
                 self.send_response(200)
@@ -116,14 +131,23 @@ def main():
         gate.check(second["turns"][-1]["status"] == "settled", "failed file read still completed its report")
         state = wait_learning(bank, 2)
         gate.check(state["context"]["enabled"], "reported task-model limits enable compaction")
-        gate.check(all(item.get("model") == gate.EXTRACTION for item in state["episodes"]), "actual learning model recorded")
+        gate.check(all(item.get("model") == gate.MODEL for item in state["episodes"]), "learning uses the same model as the task")
         history = gate.api.call("POST", prefix + "/history/search", {"query": "progress"})
         gate.check(bool(history["entries"]), "recorded task found through scoped history search")
         failures = gate.api.call("POST", prefix + "/history/search", {"query": "unavailable"})
         gate.check(any(item["kind"] == "tool_failure" for item in failures["entries"]), "failed tool result captured as evidence")
         gate.api.call("POST", prefix + "/consolidate", {})
-        state = gate.api.call("GET", prefix + "/learning")
-        gate.check(bool(state["lessons"]), "source-backed lessons consolidated")
+        deadline = time.monotonic() + 180
+        while time.monotonic() < deadline:
+            state = gate.api.call("GET", prefix + "/learning")
+            jobs = [job for job in state.get("jobs", []) if job["kind"] == "consolidation"]
+            assert not any(job["state"] == "failed" for job in jobs), "consolidation failed"
+            if state["lessons"] and any(job["state"] == "consolidated" for job in jobs):
+                break
+            time.sleep(1)
+        else:
+            raise AssertionError("runtime-owned consolidation did not finish")
+        gate.check(bool(state["lessons"]), "source-backed lessons consolidated through runtime job")
         gate.restart_host()
         restored = gate.api.call("GET", prefix + "/learning")
         gate.check(restored["consolidation"].get("last_success") == state["consolidation"].get("last_success"), "consolidation cooldown survives restart")

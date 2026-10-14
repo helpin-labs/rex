@@ -3,28 +3,35 @@ package rex
 import (
 	"context"
 	"errors"
+	"fmt"
+	sdk "github.com/helpin-ai/agent-runtime-go"
 	"net/http"
-	"net/url"
 	"time"
 )
 
-type RuntimeBrowserStatus struct {
-	Backend string `json:"backend"`
-	Active  bool   `json:"active"`
-	Held    bool   `json:"held"`
-	RunID   string `json:"run_id,omitempty"`
-}
+type RuntimeBrowserStatus = sdk.BrowserStatus
 
 func (c *RuntimeClient) BrowserControl(ctx context.Context, botID, action string) (RuntimeBrowserStatus, error) {
-	method := http.MethodPost
-	var input any = map[string]string{"action": action}
-	if action == "status" {
-		method = http.MethodGet
-		input = nil
+	var status *sdk.BrowserStatus
+	var err error
+	switch action {
+	case "status":
+		status, err = c.GetBrowserStatus(ctx, botID)
+	case "open":
+		status, err = c.OpenBrowser(ctx, botID)
+	case "takeover":
+		status, err = c.TakeOverBrowser(ctx, botID)
+	case "handback":
+		status, err = c.ReleaseBrowser(ctx, botID)
+	case "close":
+		status, err = c.CloseBrowser(ctx, botID)
+	default:
+		return RuntimeBrowserStatus{}, fmt.Errorf("unknown browser action %q", action)
 	}
-	var status RuntimeBrowserStatus
-	err := c.do(ctx, method, "/v1/browser/"+url.PathEscape(botID)+"?app_id="+AppID, input, &status)
-	return status, err
+	if err != nil {
+		return RuntimeBrowserStatus{}, err
+	}
+	return *status, nil
 }
 
 func (b *BrowserControl) extensionControl(ctx context.Context, botID, action string) (RuntimeBrowserStatus, error) {

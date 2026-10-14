@@ -32,8 +32,8 @@ export function Onboarding({ initial, onDone }: { initial: Settings; onDone: (se
     setBusy(true); setError("");
     try {
       const next: Settings = mode === "local"
-        ? { ...settings, default_provider: "local", onboarded: true, memory: { ...settings.memory, enabled: true, provider: "local", extraction_model: "", embedding_source: "bundled" } }
-        : { ...settings, onboarded: true, memory: { ...settings.memory, provider: settings.openai.api_key || settings.openai.configured ? "openai" : "local", extraction_model: settings.memory.extraction_model || "gpt-5.6-mini", embedding_model: settings.memory.embedding_model || "text-embedding-3-small" } };
+        ? { ...settings, default_provider: "local", onboarded: true, memory: { ...settings.memory, enabled: true, provider: "local", embedding_source: "bundled" } }
+        : { ...settings, onboarded: true, memory: { ...settings.memory, embedding_source: "bundled" } };
       const saved = await api.saveSettings(next);
       for (const bot of await api.bots()) {
         if (!bot.model) await api.saveBot({ ...bot, provider: saved.default_provider, model: saved.default_model });

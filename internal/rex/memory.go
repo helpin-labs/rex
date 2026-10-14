@@ -16,6 +16,7 @@ import (
 	"sync"
 	"time"
 
+	sdk "github.com/helpin-ai/agent-runtime-go"
 	"github.com/helpin-ai/agent-runtime/memory"
 )
 
@@ -29,18 +30,16 @@ type MemoryService struct {
 
 	mu        sync.RWMutex
 	backend   *memory.SQLite
-	extractor *FactExtractor
-	pool      *extractorPool
 	embedder  *Embedder
 	reader    *sql.DB
 	status    string
 	signature string
 
-	workMu         sync.Mutex
-	cancelMu       sync.Mutex
-	learningCancel context.CancelFunc
-	notify         chan struct{}
-	host           *Host
+	workMu          sync.RWMutex
+	cancelMu        sync.Mutex
+	learningCancels map[context.Context]context.CancelFunc
+	notify          chan struct{}
+	host            *Host
 }
 
 func NewMemoryService(path string, store *Store, settings *SettingsManager) *MemoryService {
@@ -105,14 +104,28 @@ func (m *MemoryService) Configure(ctx context.Context) error {
 		apiKey, _ = m.settings.APIKey(ProviderLocal)
 	}
 	embeddingURL, embeddingKey, embeddingModel, embeddingID, embeddingErr := m.embeddingConfig(config, baseURL, apiKey)
-	baseModel := m.baseExtractionModel(ctx, settings)
-	signature := strings.Join([]string{fmt.Sprint(config.Enabled), config.Provider, baseURL, baseModel, embeddingURL, embeddingID, fmt.Sprintf("%x", sha256.Sum256([]byte(apiKey)))}, "|")
+	bots, err := m.store.ListBots(ctx)
+	if err != nil {
+		return err
+	}
+	models := []string{settings.DefaultProvider, settings.DefaultModel}
+	var configuredAt time.Time
+	_ = m.store.db.QueryRowContext(ctx, `SELECT updated_at FROM settings WHERE key='settings.v1'`).Scan(&configuredAt)
+	models = append(models, configuredAt.Format(time.RFC3339Nano))
+	if settings.ChatGPT.ExpiresAt != nil {
+		models = append(models, settings.ChatGPT.ExpiresAt.Format(time.RFC3339Nano))
+	}
+	for _, bot := range bots {
+		models = append(models, fmt.Sprintf("%s:%s:%s:%d", bot.ID, bot.Provider, bot.Model, bot.ContextWindow))
+	}
+	modelSignature := strings.Join(models, "|")
+	signature := strings.Join([]string{"per-bot-v1", fmt.Sprint(config.Enabled), config.Provider, baseURL, modelSignature, embeddingURL, embeddingID, fmt.Sprintf("%x", sha256.Sum256([]byte(apiKey)))}, "|")
 	m.mu.Lock()
 	defer m.mu.Unlock()
 	if signature == m.signature && (m.backend != nil || !config.Enabled) {
 		return nil
 	}
-	stableSignature := strings.Join([]string{fmt.Sprint(config.Enabled), config.Provider, baseURL, baseModel, embeddingID, fmt.Sprintf("%x", sha256.Sum256([]byte(apiKey)))}, "|")
+	stableSignature := strings.Join([]string{"per-bot-v1", fmt.Sprint(config.Enabled), config.Provider, baseURL, modelSignature, embeddingID, fmt.Sprintf("%x", sha256.Sum256([]byte(apiKey)))}, "|")
 	priorSignature, _ := m.store.GetSetting(ctx, "memory.learning_signature")
 	if priorSignature != "" && priorSignature != stableSignature {
 		_, _ = m.store.db.ExecContext(ctx, `UPDATE task_episodes SET status=CASE WHEN revision='' THEN 'capture' ELSE 'queued' END,attempts=0,retry_at=NULL,error='' WHERE status='failed' AND forgotten=0`)
@@ -131,16 +144,13 @@ func (m *MemoryService) Configure(ctx context.Context) error {
 		m.signature = ""
 		return nil
 	}
-	if baseModel == "" {
-		m.status = "choose a chat model for your bots so memory can extract facts"
-		return nil
-	}
 	if err := m.rebuildIfEmbeddingChanged(ctx, embeddingID); err != nil {
 		m.status = "could not prepare memory: " + err.Error()
 		return err
 	}
 	provider, err := memory.NewProvider(memory.ProviderConfig{
-		BaseURL: baseURL, APIKey: apiKey, ExtractionModel: baseModel,
+		// This provider only embeds; extraction is routed through each bot's runtime.
+		BaseURL: baseURL, APIKey: apiKey, ExtractionModel: "unused",
 		EmbeddingBaseURL: embeddingURL, EmbeddingAPIKey: embeddingKey, EmbeddingModel: embeddingModel, EmbeddingModelID: embeddingID,
 		ExtractionOptions: extractionOptions(config.Provider),
 		Client:            &http.Client{Timeout: 10 * time.Minute},
@@ -149,10 +159,7 @@ func (m *MemoryService) Configure(ctx context.Context) error {
 		m.status = "memory model settings are invalid: " + err.Error()
 		return err
 	}
-	extractor := NewFactExtractor(provider, baseURL, apiKey, baseModel)
-	extractor.local = config.Provider == ProviderLocal
-	pool := &extractorPool{baseURL: baseURL, apiKey: apiKey, embeddingModel: embeddingModel, local: extractor.local, base: extractor, byKey: map[string]*FactExtractor{}}
-	backend, err := memory.OpenSQLite(ctx, memory.SQLiteConfig{Path: m.path, Extractor: routingExtractor{pool: pool}, Embedder: provider, MaxObservations: 2000})
+	backend, err := memory.OpenSQLite(ctx, memory.SQLiteConfig{Path: m.path, Extractor: routingExtractor{service: m}, Embedder: provider, MaxObservations: 2000})
 	if err != nil {
 		m.status = "could not open memory: " + err.Error()
 		return err
@@ -162,7 +169,7 @@ func (m *MemoryService) Configure(ctx context.Context) error {
 		backend.Close()
 		return err
 	}
-	m.backend, m.reader, m.extractor, m.pool, m.status = backend, reader, extractor, pool, "ready"
+	m.backend, m.reader, m.status = backend, reader, "ready"
 	select {
 	case m.notify <- struct{}{}:
 	default:
@@ -182,6 +189,13 @@ func (m *MemoryService) closeLocked() {
 }
 
 func (m *MemoryService) Close() {
+	m.cancelMu.Lock()
+	for _, cancel := range m.learningCancels {
+		cancel()
+	}
+	m.cancelMu.Unlock()
+	m.workMu.Lock()
+	defer m.workMu.Unlock()
 	m.mu.Lock()
 	defer m.mu.Unlock()
 	m.closeLocked()
@@ -249,13 +263,12 @@ func scope(bank string) memory.Scope { return memory.Scope{AppID: AppID, BankID:
 func turnDocument(turnID string) string { return "turn/" + turnID }
 func noteDocument(noteID string) string { return "note/" + noteID }
 
-// Worker retains pending turns and notes one at a time and consolidates
-// banks once the app has been idle for a while.
+// Worker captures evidence and projects the runtime-owned learning queue.
 func (m *MemoryService) Worker(ctx context.Context) {
-	_, _ = m.store.db.ExecContext(ctx, `UPDATE task_episodes SET status='queued' WHERE status='extracting' AND forgotten=0`)
+	go m.captureWorker(ctx)
+	go m.learningPermissions(ctx)
 	ticker := time.NewTicker(30 * time.Second)
 	defer ticker.Stop()
-	consolidated := map[string]time.Time{}
 	for {
 		select {
 		case <-ctx.Done():
@@ -263,57 +276,18 @@ func (m *MemoryService) Worker(ctx context.Context) {
 		case <-m.notify:
 		case <-ticker.C:
 		}
-		// Cheap when nothing changed; picks up the embedding model starting
-		// or restarting on a new port.
-		_ = m.Configure(ctx)
-		if err := m.store.reconcileEpisodes(ctx, 5); err != nil {
-			slog.Warn("reconcile task history", "error", err)
-		}
-		for n := 0; n < 5 && m.captureNext(ctx); n++ {
-		}
-		if !m.Available() || !m.learningReady(ctx) {
+		if m.host == nil || !m.host.RuntimeReady() {
 			continue
 		}
-		for n := 0; n < 2 && m.retainNext(ctx); n++ {
-			if ctx.Err() != nil {
-				return
-			}
+		m.host.reconcileWorkingTurns(ctx)
+		if err := m.Configure(ctx); err != nil {
+			slog.Warn("configure learning", "error", err)
+			continue
 		}
-		if m.host != nil && m.idleLearningReady(ctx) {
-			m.consolidateIdle(ctx, consolidated)
+		if err := m.syncLearningJobs(ctx); err != nil {
+			slog.Warn("sync memory learning", "error", err)
 		}
 	}
-}
-
-// retainNext processes one pending note or turn. It returns false when
-// nothing is pending.
-func (m *MemoryService) retainNext(ctx context.Context) bool {
-	m.workMu.Lock()
-	defer m.workMu.Unlock()
-	if !m.learningReady(ctx) {
-		return false
-	}
-	ctx, cancel := m.learningContext(ctx)
-	defer cancel()
-	notes, err := m.store.MemoryNotes(ctx, "", "pending")
-	if err == nil && len(notes) > 0 {
-		note := notes[len(notes)-1]
-		facts, err := m.retain(withExtractionModel(ctx, m.extractionModelForBank(ctx, note.Bank)), note.Bank, memory.RetainRequest{
-			DocumentID: noteDocument(note.ID), Content: note.Content, Timestamp: note.CreatedAt,
-			Context:  "A fact or preference the user explicitly asked to remember. It supersedes earlier conflicting memories.",
-			Metadata: map[string]string{"source": "note"},
-		})
-		if err != nil {
-			_ = m.store.SetMemoryNoteStatus(ctx, note.ID, "failed", err.Error(), 0)
-			return true
-		}
-		if note.Replaces != "" {
-			_ = m.Forget(ctx, note.Bank, note.Replaces)
-		}
-		_ = m.store.SetMemoryNoteStatus(ctx, note.ID, "retained", "", facts)
-		return true
-	}
-	return m.retainEpisode(ctx)
 }
 
 func (m *MemoryService) retain(ctx context.Context, bank string, request memory.RetainRequest) (int, error) {
@@ -336,6 +310,7 @@ func (m *MemoryService) retain(ctx context.Context, bank string, request memory.
 	}
 	retainCtx, cancel := context.WithTimeout(ctx, 10*time.Minute)
 	defer cancel()
+	retainCtx = context.WithValue(retainCtx, learningBankKey{}, bank)
 	result, err := backend.Retain(retainCtx, scope(bank), request)
 	if err != nil {
 		return 0, err
@@ -357,12 +332,16 @@ var secretPatterns = []*regexp.Regexp{
 var storedPasswords = func() []string { return nil }
 
 func redactSecrets(text string) string {
+	return redactSecretsWithPasswords(text, storedPasswords())
+}
+
+func redactSecretsWithPasswords(text string, passwords []string) string {
 	text = credentialJSON.ReplaceAllString(text, `${1}"[redacted]"`)
 	text = bearerSecret.ReplaceAllString(text, "Bearer [redacted]")
 	for _, pattern := range secretPatterns {
 		text = pattern.ReplaceAllString(text, "[redacted]")
 	}
-	for _, password := range storedPasswords() {
+	for _, password := range passwords {
 		text = strings.ReplaceAll(text, password, "[redacted]")
 	}
 	return text
@@ -495,31 +474,8 @@ func (m *MemoryService) Forget(ctx context.Context, bank, documentID string) err
 	return m.pruneInvalidOperationalFacts(ctx, bank)
 }
 
-func (m *MemoryService) consolidateIdle(ctx context.Context, _ map[string]time.Time) {
-	for _, bank := range m.Banks(ctx) {
-		state, err := m.store.maintenance(ctx, bank)
-		if err != nil || state.Attempts >= 3 || (state.LastSuccess != nil && time.Since(*state.LastSuccess) < 30*time.Minute) || (state.RetryAt != nil && time.Now().Before(*state.RetryAt)) {
-			continue
-		}
-		m.mu.RLock()
-		reader := m.reader
-		m.mu.RUnlock()
-		if reader == nil {
-			return
-		}
-		var pending int
-		if reader.QueryRowContext(ctx, `SELECT count(*) FROM memory_facts f WHERE app_id=? AND bank_id=? AND NOT EXISTS(SELECT 1 FROM memory_consolidated c WHERE c.fact_id=f.id)`, AppID, bank).Scan(&pending) != nil || pending == 0 {
-			continue
-		}
-		if _, err := m.consolidateBank(ctx, bank); err != nil {
-			slog.Warn("memory consolidation failed", "bank", bank, "error", err)
-		}
-		return // One bounded bank per cycle prevents background work from monopolizing the model.
-	}
-}
-
-func (m *MemoryService) Consolidate(ctx context.Context, bank string) (memory.ConsolidationResult, error) {
-	return m.consolidateBank(ctx, bank)
+func (m *MemoryService) Consolidate(ctx context.Context, bank string) (sdk.MemoryLearningJob, error) {
+	return m.requestConsolidation(ctx, bank)
 }
 
 // Banks lists memory banks that have stored facts.
@@ -745,6 +701,10 @@ var credentialJSON = regexp.MustCompile(`(?i)("(?:password|passwd|passphrase|api
 var bearerSecret = regexp.MustCompile(`(?i)\bBearer\s+[A-Za-z0-9._~+/=-]{10,}`)
 
 func redactToolInput(input json.RawMessage) string {
+	return redactSecrets(maskToolInput(input))
+}
+
+func maskToolInput(input json.RawMessage) string {
 	var fields map[string]any
 	if json.Unmarshal(input, &fields) == nil {
 		for _, key := range []string{"selector", "field", "type"} {
@@ -758,7 +718,7 @@ func redactToolInput(input json.RawMessage) string {
 			}
 		}
 		body, _ := json.Marshal(fields)
-		return redactSecrets(string(body))
+		return string(body)
 	}
-	return redactSecrets(string(input))
+	return string(input)
 }

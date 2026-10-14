@@ -26,6 +26,7 @@ func (h *Host) Handler() http.Handler {
 	mux := http.NewServeMux()
 	mux.HandleFunc("GET /healthz", func(w http.ResponseWriter, r *http.Request) { writeJSON(w, 200, map[string]string{"status": "ok"}) })
 
+	mux.HandleFunc("POST /runtime/memory/learning", h.requireInternal(h.processMemoryLearning))
 	mux.HandleFunc("POST /runtime/context", h.requireInternal(h.runtimeContext))
 	mux.HandleFunc("POST /runtime/browser/ensure", h.requireInternal(h.ensureBrowser))
 	mux.HandleFunc("POST /runtime/skills/by-id", h.requireInternal(h.lookupSkill))
@@ -820,6 +821,10 @@ func (h *Host) memoryRetryTurn(w http.ResponseWriter, r *http.Request) {
 	}
 	if err != nil {
 		writeError(w, http.StatusBadRequest, err)
+		return
+	}
+	if err := h.Memory.retryLearning(r.Context(), firstNonEmpty(turn.MemoryBank, "bot:"+turn.BotID), episodeDocument(turn.ID)); err != nil {
+		writeError(w, 503, err)
 		return
 	}
 	h.Memory.Notify()

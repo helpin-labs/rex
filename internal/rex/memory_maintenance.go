@@ -8,6 +8,7 @@ import (
 	"strings"
 	"time"
 
+	sdk "github.com/helpin-ai/agent-runtime-go"
 	"github.com/helpin-ai/agent-runtime/memory"
 )
 
@@ -152,37 +153,13 @@ func (m *MemoryService) consolidateBank(ctx context.Context, bank string) (memor
 	}
 	callCtx, cancel := context.WithTimeout(ctx, 2*time.Minute)
 	defer cancel()
+	callCtx = context.WithValue(callCtx, learningBankKey{}, bank)
 	result, err := backend.ConsolidateMemory(callCtx, scope(bank), 25)
 	for batch := 12; err != nil && strings.Contains(err.Error(), "model packet budget") && batch >= 1; batch = max(0, batch/2) {
 		result, err = backend.ConsolidateMemory(callCtx, scope(bank), batch)
 	}
 	if err == nil {
 		err = m.archiveLessons(ctx, bank)
-	}
-	state, _ := m.store.maintenance(context.WithoutCancel(ctx), bank)
-	var last, retry any
-	attempts := 0
-	message := ""
-	if err == nil {
-		last = time.Now().UTC()
-	} else {
-		attempts = state.Attempts + 1
-		if ctx.Err() != nil {
-			attempts = state.Attempts
-		}
-		message = excerpt(redactSecrets(err.Error()), 1000)
-		if state.LastSuccess != nil {
-			last = *state.LastSuccess
-		}
-		if attempts < 3 {
-			retry = time.Now().UTC().Add(time.Duration(attempts*attempts) * time.Minute)
-		}
-	}
-	body, _ := json.Marshal(result)
-	_, saveErr := m.store.db.ExecContext(context.WithoutCancel(ctx), `INSERT INTO memory_maintenance(bank,last_success,retry_at,attempts,error,result) VALUES(?,?,?,?,?,?)
-		ON CONFLICT(bank) DO UPDATE SET last_success=excluded.last_success,retry_at=excluded.retry_at,attempts=excluded.attempts,error=excluded.error,result=excluded.result`, bank, last, retry, attempts, message, string(body))
-	if err == nil && saveErr != nil {
-		return result, saveErr
 	}
 	if err == nil && result.Created+result.Updated+result.Deleted > 0 && m.host != nil {
 		if botID, ok := strings.CutPrefix(bank, "bot:"); ok {
@@ -297,12 +274,11 @@ func (m *MemoryService) learningReady(ctx context.Context) bool {
 	if m.store.db.QueryRowContext(ctx, `SELECT count(*) FROM retrospectives WHERE status='running'`).Scan(&running) != nil || running > 0 {
 		return false
 	}
-	settings, err := m.settings.Get(ctx)
 	var working int
 	if m.store.db.QueryRowContext(ctx, `SELECT count(*) FROM turns WHERE status='working'`).Scan(&working) != nil {
 		return false
 	}
-	return err == nil && (settings.Memory.Provider != ProviderLocal || m.host.ActiveRuns() == 0 && working == 0)
+	return m.host.ActiveRuns() == 0 && working == 0
 }
 
 func (m *MemoryService) invalidateForgottenProposals(ctx context.Context, bank string) {
@@ -332,15 +308,32 @@ func (m *MemoryService) invalidateForgottenProposals(ctx context.Context, bank s
 func (m *MemoryService) learningContext(ctx context.Context) (context.Context, context.CancelFunc) {
 	child, cancel := context.WithCancel(ctx)
 	m.cancelMu.Lock()
-	m.learningCancel = cancel
+	if m.learningCancels == nil {
+		m.learningCancels = make(map[context.Context]context.CancelFunc)
+	}
+	m.learningCancels[child] = cancel
 	m.cancelMu.Unlock()
-	return child, func() { cancel(); m.cancelMu.Lock(); m.learningCancel = nil; m.cancelMu.Unlock() }
+	return child, func() {
+		cancel()
+		m.cancelMu.Lock()
+		delete(m.learningCancels, child)
+		m.cancelMu.Unlock()
+	}
 }
 func (m *MemoryService) yieldToChat() {
+	if m.host != nil && m.host.RuntimeReady() {
+		go func() {
+			ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+			defer cancel()
+			if client, err := m.learningClient(); err == nil {
+				_ = client.SetMemoryLearningPolicy(ctx, sdk.MemoryLearningPolicy{})
+			}
+		}()
+	}
 	m.cancelMu.Lock()
 	defer m.cancelMu.Unlock()
-	if m.learningCancel != nil {
-		m.learningCancel()
+	for _, cancel := range m.learningCancels {
+		cancel()
 	}
 }
 

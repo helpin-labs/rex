@@ -68,7 +68,7 @@ export type Settings = {
   kernel?: ProviderConfig;
   kernel_browser?: boolean;
   default_model: string;
-  memory: { enabled: boolean; provider: "local" | "openai"; extraction_model: string; embedding_model: string; embedding_source?: "" | "bundled" | "server" };
+  memory: { enabled: boolean; provider: "local" | "openai"; embedding_model: string; embedding_source?: "" | "bundled" | "server" };
   browser_enabled: boolean;
   browser_path: string;
   browser_hidden: boolean;
@@ -337,7 +337,7 @@ export type BotLogin = { id: string; bot_id: string; site: string; username: str
 
 export type TaskEpisode = { turn_id: string; status: string; forgotten: boolean; facts: number; model?: string; error?: string; created_at: string; updated_at: string; attempts: number; retry_at?: string };
 export type OperationalLesson = { id: string; text: string; state: string; task_count: number; verified_tasks: number; source_fact_ids: string[]; source_ids?: string[]; updated_at: string; is_stale: boolean };
-export type MemoryLearning = { episodes: TaskEpisode[]; counts: Record<string, number>; lessons: OperationalLesson[]; available: boolean; model: string; consolidation: { last_success?: string; retry_at?: string; error?: string; attempts: number }; context: { enabled: boolean; context_window?: number; trigger_tokens?: number; warning?: string; model?: string } };
+export type MemoryLearning = { jobs?: { kind: string; state: string }[]; episodes: TaskEpisode[]; counts: Record<string, number>; lessons: OperationalLesson[]; available: boolean; model: string; consolidation: { last_success?: string; retry_at?: string; error?: string; attempts: number }; context: { enabled: boolean; context_window?: number; trigger_tokens?: number; warning?: string; model?: string } };
 export type HistoryEntry = { source_id: string; turn_id: string; kind: string; text: string; created_at: string; truncated?: boolean };
 export type HistoryPage = { entries: HistoryEntry[]; next_cursor?: number };
 export type HistoryExcerpt = HistoryEntry & { offset: number; truncated: boolean; next_offset?: number };

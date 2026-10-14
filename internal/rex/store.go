@@ -185,6 +185,12 @@ ALTER TABLE instruction_proposals ADD COLUMN catalog_id TEXT NOT NULL DEFAULT ''
  ALTER TABLE task_episodes ADD COLUMN extraction_schema TEXT NOT NULL DEFAULT '';
  CREATE TABLE lesson_versions(bank TEXT NOT NULL,observation_id TEXT NOT NULL,version TEXT NOT NULL,payload TEXT NOT NULL,source_ids TEXT NOT NULL,recorded_at DATETIME NOT NULL,PRIMARY KEY(bank,observation_id,version));
  CREATE TABLE memory_tombstones(bank TEXT NOT NULL,document_id TEXT NOT NULL,created_at DATETIME NOT NULL,PRIMARY KEY(bank,document_id));`,
+	`DROP TRIGGER task_history_deleted;
+	DELETE FROM task_history_fts;
+	INSERT INTO task_history_fts(rowid,id,text) SELECT rowid,id,text FROM task_history;
+	CREATE TRIGGER task_history_deleted AFTER DELETE ON task_history BEGIN DELETE FROM task_history_fts WHERE rowid=old.rowid; END;
+	CREATE TRIGGER task_history_inserted AFTER INSERT ON task_history BEGIN INSERT INTO task_history_fts(rowid,id,text) VALUES(new.rowid,new.id,new.text); END;
+	CREATE TRIGGER task_history_updated AFTER UPDATE OF text,id ON task_history BEGIN DELETE FROM task_history_fts WHERE rowid=old.rowid; INSERT INTO task_history_fts(rowid,id,text) VALUES(new.rowid,new.id,new.text); END;`,
 }
 
 func (s *Store) migrate(ctx context.Context) error {

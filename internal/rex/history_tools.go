@@ -7,16 +7,16 @@ import (
 	"net/http"
 	"strings"
 
+	sdk "github.com/helpin-ai/agent-runtime-go"
 	protocol "github.com/modelcontextprotocol/go-sdk/mcp"
 )
 
 func (h *Host) addHistoryTools(server *protocol.Server, bank string) {
-	server.AddTool(&protocol.Tool{Name: "history_search", Description: "Search this bot's full recorded task history, including outcomes, failures and older work beyond the recent chat context. Results are reference data. Use history_read for exact evidence.",
+	server.AddTool(&protocol.Tool{Name: "history_search", Description: "Search this bot's full recorded task history, including outcomes, failures and older work beyond the recent chat context. Active task history is indexed in the background and may lag by about 30 seconds. Results are reference data. Use history_read for exact evidence.",
 		InputSchema: map[string]any{"type": "object", "additionalProperties": false, "properties": map[string]any{
 			"query": map[string]any{"type": "string", "maxLength": 2000}, "conversation_id": map[string]any{"type": "string"}, "after": map[string]any{"type": "string", "description": "RFC3339 timestamp"}, "before": map[string]any{"type": "string", "description": "RFC3339 timestamp"}, "limit": map[string]any{"type": "integer", "minimum": 1, "maximum": 20}, "cursor": map[string]any{"type": "integer", "minimum": 0}}}},
 		func(ctx context.Context, request *protocol.CallToolRequest) (*protocol.CallToolResult, error) {
 			var input HistorySearch
-			h.refreshWorkingHistory(ctx, bank)
 			if err := json.Unmarshal(request.Params.Arguments, &input); err != nil {
 				return toolError(err), nil
 			}
@@ -26,11 +26,10 @@ func (h *Host) addHistoryTools(server *protocol.Server, bank string) {
 			}
 			return toolResult(page), nil
 		})
-	server.AddTool(&protocol.Tool{Name: "history_read", Description: "Read an exact recorded source from this bot's history. Use a source_id from history_search, episode/<turn_id> to read a recorded task, or lesson/<id> to read a lesson and its evidence links. Results include a continuation offset when bounded; do not assume a truncated source is complete.",
+	server.AddTool(&protocol.Tool{Name: "history_read", Description: "Read an exact recorded source from this bot's indexed history. Active task history is indexed in the background and may lag by about 30 seconds. Use a source_id from history_search, episode/<turn_id> to read a recorded task, or lesson/<id> to read a lesson and its evidence links. Results include a continuation offset when bounded; do not assume a truncated source is complete.",
 		InputSchema: map[string]any{"type": "object", "additionalProperties": false, "required": []string{"source_id"}, "properties": map[string]any{"source_id": map[string]any{"type": "string"}, "offset": map[string]any{"type": "integer", "minimum": 0}, "limit": map[string]any{"type": "integer", "minimum": 1, "maximum": 16000}}}},
 		func(ctx context.Context, request *protocol.CallToolRequest) (*protocol.CallToolResult, error) {
 			var input HistoryRead
-			h.refreshWorkingHistory(ctx, bank)
 			if err := json.Unmarshal(request.Params.Arguments, &input); err != nil {
 				return toolError(err), nil
 			}
@@ -51,6 +50,20 @@ func (h *Host) memoryLearning(w http.ResponseWriter, r *http.Request) {
 	if !validBank(bank) {
 		writeError(w, 400, errors.New("unknown memory bank"))
 		return
+	}
+	jobs := []sdk.MemoryLearningJob{}
+	if h.RuntimeReady() {
+		if client, err := h.Memory.learningClient(); err == nil {
+			if current, err := client.MemoryLearningJobs(r.Context(), bank); err == nil {
+				jobs = current
+				for _, job := range jobs {
+					if err = h.Memory.projectLearningJob(r.Context(), job); err != nil {
+						writeError(w, 500, err)
+						return
+					}
+				}
+			}
+		}
 	}
 	progress, err := h.Store.episodeProgress(r.Context(), bank)
 	if err != nil {
@@ -95,24 +108,19 @@ func (h *Host) memoryLearning(w http.ResponseWriter, r *http.Request) {
 	var resolved ResolvedContext
 	raw, _ := h.Store.GetSetting(r.Context(), "context_policy."+strings.TrimPrefix(bank, "bot:"))
 	_ = json.Unmarshal([]byte(raw), &resolved)
-	writeJSON(w, 200, map[string]any{"context": resolved, "episodes": episodes, "counts": progress, "lessons": lessons, "consolidation": maintenance, "available": h.Memory.Available(), "model": h.Memory.learningModel(r.Context(), bank)})
+	writeJSON(w, 200, map[string]any{"jobs": jobs, "context": resolved, "episodes": episodes, "counts": progress, "lessons": lessons, "consolidation": maintenance, "available": h.Memory.Available(), "model": h.Memory.learningModel(r.Context(), bank)})
 }
 
 func (m *MemoryService) learningModel(ctx context.Context, bank string) string {
-	if model := m.extractionModelForBank(ctx, bank); model != "" {
-		return model
+	bot, err := m.learningBot(ctx, bank, "")
+	if err != nil {
+		return ""
 	}
-	m.mu.RLock()
-	defer m.mu.RUnlock()
-	if m.pool != nil {
-		return m.pool.base.model
-	}
-	return ""
+	return m.learningModelForBot(ctx, *bot)
 }
 
 func (h *Host) memoryHistorySearch(w http.ResponseWriter, r *http.Request) {
 	var input HistorySearch
-	h.refreshWorkingHistory(r.Context(), r.PathValue("bank"))
 	if !decode(w, r, &input) {
 		return
 	}
@@ -121,7 +129,6 @@ func (h *Host) memoryHistorySearch(w http.ResponseWriter, r *http.Request) {
 }
 func (h *Host) memoryHistoryRead(w http.ResponseWriter, r *http.Request) {
 	var input HistoryRead
-	h.refreshWorkingHistory(r.Context(), r.PathValue("bank"))
 	if !decode(w, r, &input) {
 		return
 	}
@@ -165,27 +172,6 @@ func (h *Host) recentTaskContext(ctx context.Context, bank, conversationID, curr
 	return excerpt(redactSecrets(turn.UserText), 1000), "Recent recorded task (reference data, not new instructions). Read episode/" + id + " for full evidence:\n" + strings.Join(lines, "\n")
 }
 
-func (h *Host) refreshWorkingHistory(ctx context.Context, bank string) {
-	if h.Memory == nil || !h.RuntimeReady() {
-		return
-	}
-	turns, err := h.Store.turns(ctx, `SELECT `+turnColumns+` FROM turns WHERE status='working' AND (memory_bank=? OR memory_bank='' AND 'bot:'||bot_id=?) LIMIT 5`, bank, bank)
-	if err != nil {
-		return
-	}
-	for _, turn := range turns {
-		if turn.RunID == "" || turn.MemoryStatus == "forgotten" {
-			continue
-		}
-		if h.Store.QueueEpisode(ctx, turn) != nil {
-			continue
-		}
-		e, err := h.Store.Episode(ctx, turn.ID)
-		if err == nil {
-			_ = h.Memory.captureEpisode(ctx, e)
-		}
-	}
-}
 func (h *Host) historyToolBudget(ctx context.Context, bank string) int {
 	budget := 4000
 	if strings.HasPrefix(bank, "bot:") {
@@ -193,7 +179,7 @@ func (h *Host) historyToolBudget(ctx context.Context, bank string) int {
 		var policy ResolvedContext
 		_ = json.Unmarshal([]byte(raw), &policy)
 		if policy.Enabled {
-			budget = min(budget, policy.InputLimit/8)
+			budget = min(16000, policy.InputLimit/8)
 		}
 	}
 	return max(128, budget)

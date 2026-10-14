@@ -13,6 +13,8 @@ export function OperationalMemory({ bank, state, onRefresh }: { bank: string; st
   const search = (cursor = 0) => run(async () => { setPage(await api.historySearch(bank, query, cursor)); setSource(null); });
   const read = (id: string, offset = 0) => run(async () => { setSource(await api.historyRead(bank, id, offset)); });
   if (!state) return null;
+  const pending = ["capture", "captured", "queued", "extracting"].reduce((sum, key) => sum + (state.counts[key] || 0), 0);
+  const consolidation = state.jobs?.find(job => job.kind === "consolidation");
   const saved = Object.values(state.counts).reduce((sum, count) => sum + count, 0) - (state.counts.forgotten || 0);
   return <section className="operational-memory">
     <strong>{saved} saved {saved === 1 ? "task" : "tasks"} · {state.lessons.filter(lesson => lesson.state === "supported").length} supported lessons</strong>
@@ -20,6 +22,9 @@ export function OperationalMemory({ bank, state, onRefresh }: { bank: string; st
     <small>Learning model: {state.model || "Not configured"}{!state.available && " · unavailable"}</small>
     <small>{state.context.enabled ? `Compaction at ${state.context.trigger_tokens?.toLocaleString()} tokens · ${state.context.context_window?.toLocaleString()} token window` : state.context.warning || "Compaction status appears after this bot starts a task."}</small>
     <div className="row"><small className="muted">{state.consolidation.last_success ? `Consolidated ${relativeTime(state.consolidation.last_success)}` : "No consolidation yet"}</small><span className="spacer" /><button type="button" className="button secondary small" disabled={busy || !state.available} onClick={() => void run(async () => { await api.consolidateMemory(bank); await onRefresh(); })}>{busy ? "Working…" : "Consolidate now"}</button></div>
+    {pending > 0 && <small>{pending} tasks awaiting learning. Extraction runs when all bots are idle.</small>}
+    {consolidation?.state === "consolidation_pending" && <small>Consolidation queued.</small>}
+    {consolidation?.state === "consolidating" && <small>Consolidating memory…</small>}
     {state.consolidation.error && <p className="inline-error" role="alert">Consolidation: {state.consolidation.error}{state.consolidation.retry_at ? ` · retry ${relativeTime(state.consolidation.retry_at)}` : " · retry limit reached; use Consolidate now after fixing the model"}</p>}
     {state.lessons.length > 0 && <details><summary>Operational lessons (latest {state.lessons.length})</summary><ul className="memory-facts">{state.lessons.map(lesson => <li className="memory-card" key={lesson.id}><small className="muted">{lesson.state} · {lesson.task_count} distinct tasks · {lesson.verified_tasks} verified</small><p>{lesson.text}</p>{lesson.source_ids?.map(id => <button type="button" className="link-button small" key={id} onClick={() => void read(id)}>Read evidence</button>)}</li>)}</ul></details>}
     <details><summary>Saved task history ({saved})</summary>

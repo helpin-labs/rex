@@ -57,7 +57,7 @@ func (h *Host) Attention(ctx context.Context) ([]AttentionItem, error) {
 					continue
 				}
 				kind := "approval"
-				switch interaction.Kind {
+				switch interaction.InteractionKind {
 				case "request_user_input":
 					kind = "question"
 				case "authentication":

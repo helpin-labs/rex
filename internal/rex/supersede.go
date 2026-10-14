@@ -4,7 +4,6 @@ import (
 	"context"
 	"encoding/json"
 	"log/slog"
-	"net/http"
 	"strings"
 	"time"
 )
@@ -19,13 +18,10 @@ import (
 const maxSupersedeChecks = 4
 
 func (m *MemoryService) resolveConflicts(ctx context.Context, bank, documentID string) {
-	m.mu.RLock()
-	pool := m.pool
-	m.mu.RUnlock()
-	if pool == nil {
+	extractor, err := m.learningExtractor(ctx, bank, "")
+	if err != nil {
 		return
 	}
-	extractor := pool.forContext(ctx)
 	facts := m.documentFacts(ctx, bank, documentID)
 	checks := 0
 	for _, fact := range facts {
@@ -110,24 +106,11 @@ func (e *FactExtractor) Replaces(ctx context.Context, older, newer string) (bool
 			body[key] = value
 		}
 	}
-	headers := map[string]string{}
-	if e.apiKey != "" {
-		headers["Authorization"] = "Bearer " + e.apiKey
-	}
-	var response struct {
-		Choices []struct {
-			Message struct {
-				Content string `json:"content"`
-			} `json:"message"`
-		} `json:"choices"`
-	}
-	if err := httpJSON(ctx, http.MethodPost, e.baseURL+"/chat/completions", headers, body, &response); err != nil {
+	content, err := e.complete(ctx, body)
+	if err != nil {
 		return false, err
 	}
-	if len(response.Choices) == 0 {
-		return false, nil
-	}
-	answer := strings.ToLower(strings.TrimSpace(response.Choices[0].Message.Content))
+	answer := strings.ToLower(strings.TrimSpace(content))
 	return strings.HasPrefix(answer, "yes"), nil
 }
 

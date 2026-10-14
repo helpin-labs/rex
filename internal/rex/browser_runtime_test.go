@@ -47,7 +47,7 @@ func TestRexForwardsExtensionControlsToRuntime(t *testing.T) {
 		_ = json.NewEncoder(w).Encode(RuntimeBrowserStatus{Backend: "extension", Active: true, Held: held})
 	}))
 	defer server.Close()
-	h.Runtime = NewRuntimeClient(server.URL, "runtime-token")
+	h.Runtime = newTestRuntimeClient(t, server.URL, "runtime-token")
 	if _, err := h.Browser.TakeOver(context.Background(), "first"); err != nil {
 		t.Fatal(err)
 	}
@@ -106,7 +106,7 @@ func TestChangingModeChecksRuntimeHoldAndClosesOldProfile(t *testing.T) {
 		_ = json.NewEncoder(w).Encode(RuntimeBrowserStatus{Backend: "extension", Held: held})
 	}))
 	defer server.Close()
-	h.Runtime = NewRuntimeClient(server.URL, "runtime-token")
+	h.Runtime = newTestRuntimeClient(t, server.URL, "runtime-token")
 	bot, _ := h.Store.GetBot(t.Context(), "first")
 	bot.BrowserBackend = "standard"
 	if err := h.SaveBot(t.Context(), bot); err == nil || !strings.Contains(err.Error(), "hand back") {

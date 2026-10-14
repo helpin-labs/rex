@@ -206,14 +206,14 @@ func TestEpisodeCaptureSeparatesClaimsRetrievalFailureAndPartialWork(t *testing.
 		case strings.HasSuffix(r.URL.Path, "/tool-calls"):
 			result = []ToolCall{{ID: "failed", ToolName: "browser_open", Status: "failed", Error: "navigation lost", CreatedAt: at}, {ID: "done", ToolName: "write_file", Status: "completed", Output: json.RawMessage(`{"success":true}`), CreatedAt: at}, {ID: "recall", ToolName: "mcp__memory__recall", Status: "completed", Output: json.RawMessage(`{"success":true}`), CreatedAt: at}}
 		case strings.HasSuffix(r.URL.Path, "/artifacts"):
-			result = []Artifact{{ID: "report", Type: "file", CreatedAt: at, Metadata: json.RawMessage(`{"path":"report.md"}`)}}
+			result = []Artifact{{ID: "report", ArtifactType: "file", CreatedAt: at, Metadata: json.RawMessage(`{"path":"report.md"}`)}}
 		case strings.HasSuffix(r.URL.Path, "/interactions"):
-			result = []Interaction{{ID: "help", Kind: "user_input", Title: "Takeover", CreatedAt: at}}
+			result = []Interaction{{ID: "help", InteractionKind: "user_input", Title: "Takeover", CreatedAt: at}}
 		}
 		_ = json.NewEncoder(w).Encode(result)
 	}))
 	defer runtime.Close()
-	h.Runtime = NewRuntimeClient(runtime.URL, "")
+	h.Runtime = newTestRuntimeClient(t, runtime.URL, "")
 	if err := h.Memory.captureEpisode(context.Background(), e); err != nil {
 		t.Fatal(err)
 	}
@@ -262,10 +262,10 @@ func TestOperationalExtractionRequiresProofAndNeverConfirmsClaims(t *testing.T) 
 		t.Fatalf("failure: %+v %v", facts, err)
 	}
 }
-func TestLearningConsolidationDistinctTasksRetryCooldownAndForget(t *testing.T) {
+func TestLearningConsolidationDistinctTasksAndForget(t *testing.T) {
 	ctx := context.Background()
 	h := newSetupTestHost(t)
-	model := learningFixture(t, h)
+	learningFixture(t, h)
 	bot := Bot{ID: "learn", Name: "Learn", MemoryMode: MemoryPrivate, Capabilities: Capabilities{Memory: true}, RetroOff: true}
 	first, e := episodeFixture(t, h, bot, "Check the source", "settled")
 	saveEpisodeFixture(t, h, e, "tool_result")
@@ -283,15 +283,6 @@ func TestLearningConsolidationDistinctTasksRetryCooldownAndForget(t *testing.T) 
 	lessons, err := h.Memory.Lessons(ctx, e.Bank)
 	if err != nil || len(lessons) != 1 || lessons[0].State != "candidate" || lessons[0].TaskCount != 1 {
 		t.Fatalf("independence %+v %v", lessons, err)
-	}
-	calls := model.calls
-	h.Memory.consolidateIdle(ctx, nil)
-	if model.calls != calls {
-		t.Fatal("cooldown ignored")
-	}
-	state, _ := h.Store.maintenance(ctx, e.Bank)
-	if state.LastSuccess == nil {
-		t.Fatal("cooldown not persisted")
 	}
 	second, e2 := episodeFixture(t, h, bot, "Check another source", "settled")
 	saveEpisodeFixture(t, h, e2, "tool_result")
@@ -313,18 +304,6 @@ func TestLearningConsolidationDistinctTasksRetryCooldownAndForget(t *testing.T) 
 				t.Fatal("forgotten lesson survived")
 			}
 		}
-	}
-	// Errors use bounded retries and do not consume the successful-pass cooldown.
-	model.err = errors.New("model unavailable")
-	_, e3 := episodeFixture(t, h, bot, "Try another", "cancelled")
-	saveEpisodeFixture(t, h, e3, "tool_failure")
-	for i := 0; i < 3; i++ {
-		h.Memory.retainEpisode(ctx)
-		_, _ = h.Store.db.ExecContext(ctx, `UPDATE task_episodes SET retry_at=NULL WHERE turn_id=?`, e3.TurnID)
-	}
-	failed, _ := h.Store.Episode(ctx, e3.TurnID)
-	if failed.Status != "failed" || failed.Attempts != 3 {
-		t.Fatalf("retries %+v", failed)
 	}
 	if second.ID == "" {
 		t.Fatal("fixture failed")
@@ -432,10 +411,10 @@ func TestOperationalMigrationBacksUpExistingSQLite(t *testing.T) {
 	}
 }
 
-func TestHostAttachmentIdleSchedulingAndFairLearningBatches(t *testing.T) {
+func TestHostAttachmentAndIdleLearningPolicy(t *testing.T) {
 	ctx := context.Background()
 	h := newSetupTestHost(t)
-	model := learningFixture(t, h)
+	learningFixture(t, h)
 	if h.Memory.host != h {
 		t.Fatal("memory worker never attached to host")
 	}
@@ -449,19 +428,6 @@ func TestHostAttachmentIdleSchedulingAndFairLearningBatches(t *testing.T) {
 		saveEpisodeFixture(t, h, e, "tool_result")
 		h.Memory.retainEpisode(ctx)
 	}
-	h.Memory.consolidateIdle(ctx, nil)
-	h.Memory.consolidateIdle(ctx, nil)
-	for _, id := range []string{"fair-a", "fair-b"} {
-		state, _ := h.Store.maintenance(ctx, "bot:"+id)
-		if state.LastSuccess == nil {
-			t.Fatal("bank starved", id)
-		}
-	}
-	calls := model.calls
-	h.Memory.consolidateIdle(ctx, nil)
-	if model.calls != calls {
-		t.Fatal("quiet host repeatedly consolidated")
-	}
 	_ = h.Store.QueueRetrospective(ctx, "fair-a", retroAsked)
 	reviews, _ := h.Store.retrospectives(ctx, `WHERE status='queued'`)
 	_ = h.Store.updateRetro(ctx, reviews[0].ID, "running", "review", "")
@@ -471,11 +437,17 @@ func TestHostAttachmentIdleSchedulingAndFairLearningBatches(t *testing.T) {
 }
 func TestLocalChatPreemptsLearningWithoutUsingRetryBudget(t *testing.T) {
 	h := newSetupTestHost(t)
-	ctx, done := h.Memory.learningContext(context.Background())
-	defer done()
+	first, finishFirst := h.Memory.learningContext(context.Background())
+	second, finishSecond := h.Memory.learningContext(context.Background())
+	defer finishSecond()
+	finishFirst()
+	third, finishThird := h.Memory.learningContext(context.Background())
+	defer finishThird()
 	h.Memory.yieldToChat()
-	if !errors.Is(ctx.Err(), context.Canceled) {
-		t.Fatal("local chat couldn't yield learning")
+	for _, ctx := range []context.Context{first, second, third} {
+		if !errors.Is(ctx.Err(), context.Canceled) {
+			t.Fatal("local chat couldn't yield every learning call")
+		}
 	}
 }
 func TestForgottenSourceStaysUnavailableWhileMemoryBackendIsOffline(t *testing.T) {
