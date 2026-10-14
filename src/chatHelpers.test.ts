@@ -23,6 +23,7 @@ describe("turn failures", () => {
     expect(turnFailure("This model's maximum context length is 128000 tokens")).toMatch(/too long/);
     expect(turnFailure("402 Payment Required: insufficient credits")).toMatch(/out of credits/);
     expect(turnFailure('Post "https://openrouter.ai/api/v1/chat/completions": dial tcp: lookup openrouter.ai: no such host')).toMatch(/Couldn't reach/);
+    expect(turnFailure("failed to read stream: stream error: stream ID 27; INTERNAL_ERROR; received from peer")).toMatch(/connection dropped while streaming/);
   });
   it("falls back to the error itself, shortened", () => {
     expect(turnFailure(undefined)).toBe("The bot could not finish this message.");

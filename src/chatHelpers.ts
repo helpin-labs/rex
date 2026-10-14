@@ -22,6 +22,7 @@ export function turnFailure(error?: string): string {
   if (/\b402\b|insufficient (credits|funds|quota)|billing|payment required/i.test(error)) return "The model provider account is out of credits.";
   if (/\b429\b|rate limit|too many requests|overloaded/i.test(error)) return "The model provider is busy or rate limiting. Try again in a moment.";
   if (/model.*(not found|does not exist|unavailable)|no such model|\b404\b/i.test(error)) return "This model isn't available. Pick another in the bot's settings.";
+  if (/failed to read stream|stream ended before completion|connection reset by peer/i.test(error)) return "The model connection dropped while streaming. Earlier completed steps are saved.";
   if (/no such host|network is unreachable|connection refused|i\/o timeout|dial tcp|timed out/i.test(error)) return "Couldn't reach the model provider. Check the connection, then try again.";
   return error.length > 200 ? `${error.slice(0, 200)}…` : error;
 }

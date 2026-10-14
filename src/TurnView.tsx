@@ -140,6 +140,7 @@ export const TurnView = memo(function TurnView({ turn, bot, events, working, mem
   };
   // Events arrive in order (stored by sequence, live by arrival).
   const state = useRunState(events);
+  const failure = error || state.error;
   const [open, setOpen] = useState(false);
   const now = useNow(working);
 
@@ -208,9 +209,9 @@ export const TurnView = memo(function TurnView({ turn, bot, events, working, mem
         {turn.origin?.startsWith("report:") && <span className="reply-tag">Report from {turn.origin.slice("report:".length)}</span>}</div>
       {workRow}
       {answerText && <div className={`bubble bot ${smooth.animating ? "streaming" : ""}`}>{smooth.animating ? <StreamingMarkdown text={smooth.text} /> : <Markdown>{answerText}</Markdown>}</div>}
-      {turn.status === "failed" && <div className="turn-failure" title={error}>
+      {turn.status === "failed" && <div className="turn-failure" title={failure}>
         <CircleAlert size={15} />
-        <div className="grow"><strong>{answerText ? "The bot stopped before finishing" : "This message didn't go through"}</strong><span>{turnFailure(error)}</span></div>
+        <div className="grow"><strong>{answerText ? "The bot stopped before finishing" : "This message didn't go through"}</strong><span>{turnFailure(failure)}</span></div>
         {onRetry && turn.user_text && <button type="button" className="button secondary small" onClick={() => onRetry(turn.user_text)}><RotateCcw size={12} />Try again</button>}
       </div>}
       {turn.status === "cancelled" && <div className="turn-note">Stopped.</div>}
