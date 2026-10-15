@@ -78,7 +78,7 @@ function RoutineEditor({ initial, bots, onClose, onSaved }: { initial: Partial<R
     <Field label="What should it do?"><textarea rows={4} value={routine.prompt || ""} onChange={event => update({ prompt: event.target.value })} placeholder="Summarise the top three AI news stories from today with links." /></Field>
     <ScheduleBuilder routine={routine} onChange={update} />
     <Toggle label="Enabled" checked={routine.enabled ?? true} onChange={enabled => update({ enabled })} />
-    <p className="muted small">Routines run while your Mac is awake and Rex is open. If a run is missed while the Mac was off, Rex asks whether to run it when you're back, once, for the latest missed run only. Failed runs retry up to twice; five failures in a row pause the routine.</p>
+    <p className="muted small">Routines run while your Mac is awake and Rex is open. If a run is missed while the Mac was off, Rex asks whether to run it when you're back, once, for the latest missed run only. Failed runs retry up to twice; five failures in a row stop retries until the next scheduled time. A successful Run now clears the failure pause.</p>
   </Modal>;
 }
 
@@ -86,13 +86,13 @@ type Filter = "all" | "active" | "off";
 
 const templateIcons = { sunrise: Sunrise, binoculars: Binoculars, bookmarked: BookMarked, eye: Eye };
 
-// A routine is active when it is on and not paused after failures.
+// Failure cooldowns keep their next scheduled run.
 function isActive(routine: Routine) {
-  return routine.enabled && !routine.paused_reason;
+  return routine.enabled;
 }
 
 function routineStatus(routine: Routine): { label: string; tone: "ok" | "warn" | "" } {
-  if (routine.paused_reason) return { label: "Paused", tone: "warn" };
+  if (routine.paused_reason) return { label: routine.next_run_at ? `Retry ${relativeTime(routine.next_run_at)}` : "Paused", tone: "warn" };
   if (!routine.enabled) return { label: "Off", tone: "" };
   return { label: routine.next_run_at ? `Next ${relativeTime(routine.next_run_at)}` : "On", tone: "ok" };
 }

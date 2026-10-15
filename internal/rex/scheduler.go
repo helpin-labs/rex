@@ -175,8 +175,19 @@ func (s *Scheduler) Tick(ctx context.Context) {
 	}
 	now := s.now().UTC()
 	for _, routine := range routines {
-		if !routine.Enabled {
+		// Older versions disabled failure-paused routines but retained their next slot.
+		if !routine.Enabled && !(routine.PausedReason != "" && routine.NextRunAt != nil) {
 			continue
+		}
+		if routine.PausedReason != "" {
+			if routine.NextRunAt == nil || routine.NextRunAt.After(now) {
+				continue
+			}
+			if err := s.host.Store.ResetRoutineFailures(ctx, routine.ID); err != nil {
+				continue
+			}
+			routine.Enabled, routine.PausedReason, routine.ConsecutiveFailures = true, "", 0
+			routine.RetryAt, routine.retrySlot = nil, nil
 		}
 		if routine.RetryAt != nil && !routine.RetryAt.After(now) && routine.retrySlot != nil {
 			s.fire(ctx, routine, *routine.retrySlot, routine.retryAttempt)
@@ -277,6 +288,10 @@ func (s *Scheduler) RunSettled(ctx context.Context, run *Run) {
 			status = "needs_input"
 		}
 		_ = s.host.Store.FinishRoutineRun(ctx, claim.ID, status, "")
+		if routine, err := s.host.Store.GetRoutine(ctx, claim.RoutineID); err == nil && routine.PausedReason != "" && routine.NextRunAt != nil && !routine.NextRunAt.After(s.now()) {
+			// A successful manual run covers the overdue slot; do not run it again.
+			_ = s.host.Store.AdvanceRoutine(ctx, routine.ID, *routine.NextRunAt, routine.NextSlot(s.now()))
+		}
 		_ = s.host.Store.ResetRoutineFailures(ctx, claim.RoutineID)
 	case "cancelled":
 		_ = s.host.Store.FinishRoutineRun(ctx, claim.ID, "cancelled", "")
@@ -293,7 +308,7 @@ func (s *Scheduler) afterFailure(ctx context.Context, routineID string, slot tim
 		return
 	}
 	if failures >= MaxConsecutiveFailed {
-		_ = s.host.Store.PauseRoutine(ctx, routineID, fmt.Sprintf("Paused after %d failures in a row. Last error: %s", failures, message))
+		_ = s.host.Store.PauseRoutine(ctx, routineID, fmt.Sprintf("Retries paused after %d failures in a row; scheduling resumes at the next scheduled time. Last error: %s", failures, message))
 		return
 	}
 	if attempt < MaxAttempts {
@@ -525,12 +540,14 @@ func (s *Store) IncrementRoutineFailures(ctx context.Context, id string) (int, e
 }
 
 func (s *Store) ResetRoutineFailures(ctx context.Context, id string) error {
-	_, err := s.db.ExecContext(ctx, `UPDATE routines SET consecutive_failures=0 WHERE id=?`, id)
+	_, err := s.db.ExecContext(ctx, `UPDATE routines SET consecutive_failures=0,
+		enabled=CASE WHEN paused_reason<>'' AND next_run_at IS NOT NULL THEN 1 ELSE enabled END,
+		paused_reason='',retry_slot=NULL,retry_attempt=0,retry_at=NULL,updated_at=? WHERE id=?`, time.Now().UTC(), id)
 	return err
 }
 
 func (s *Store) PauseRoutine(ctx context.Context, id, reason string) error {
-	_, err := s.db.ExecContext(ctx, `UPDATE routines SET enabled=0, paused_reason=?, retry_slot=NULL, retry_at=NULL, updated_at=? WHERE id=?`, reason, time.Now().UTC(), id)
+	_, err := s.db.ExecContext(ctx, `UPDATE routines SET paused_reason=?, retry_slot=NULL, retry_attempt=0, retry_at=NULL, updated_at=? WHERE id=?`, reason, time.Now().UTC(), id)
 	return err
 }
 
