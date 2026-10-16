@@ -41,7 +41,7 @@ func TestWindowsClosesOnlyExactProfileHolder(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if err := os.Link(self, binary); err != nil {
+	if err := linkBrowserShim(self, binary); err != nil {
 		t.Fatal(err)
 	}
 	profile := filepath.Join(t.TempDir(), "bot with spaces")
@@ -78,6 +78,15 @@ func TestWindowsClosesOnlyExactProfileHolder(t *testing.T) {
 		windows.CloseHandle(handle)
 		if err != nil || (status == 259) != test.alive {
 			t.Fatalf("process %d status %d alive expected %v: %v", test.cmd.Process.Pid, status, test.alive, err)
+		}
+	}
+}
+
+func TestWindowsBrowserShimCanBeRecreatedWhileHostRuns(t *testing.T) {
+	data := t.TempDir()
+	for range 2 {
+		if _, err := BrowserShimEnv(data, "http://127.0.0.1:1", "fixture"); err != nil {
+			t.Fatalf("could not recreate shim: %v", err)
 		}
 	}
 }

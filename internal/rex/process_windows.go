@@ -78,9 +78,7 @@ func forwardBrowserProcess(real string, args, env []string) error {
 }
 
 func linkBrowserShim(self, link string) error {
-	if err := os.Link(self, link); err == nil {
-		return nil
-	}
+	// A hard link to the running image cannot be removed on the next launch.
 	input, err := os.Open(self)
 	if err != nil {
 		return err

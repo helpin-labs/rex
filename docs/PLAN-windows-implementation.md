@@ -294,3 +294,14 @@ optional architecture/OS support separately when its gates remain unverified.
   the Windows API, matches the exact profile and excludes renderer children. It
   holds the process handle during tree termination to prevent PID reuse. Native
   tests ensure a similarly prefixed unrelated profile remains running.
+
+- Rex setup/repair and sidecar smoke checks passed natively in run 38879760629;
+  the installer build is running. The ARM64 full WSL bridge also passed in the
+  supplied VM: command/Python file writes, timeout, cancellation, runtime death,
+  outside-file/interop denial. The existing probe distro remains unchanged.
+- ARM64 timezone cases now pass without Go installed, and both private-data and
+  WSL-specific SYSTEM ACL tests pass. Native process-profile assertions passed;
+  its temporary hard link exposed a Windows image-lock issue. The shim now copies
+  its executable, with a repeated-launch regression test.
+- Windows taskbar attention now renders the actual count (capped at 99+) and
+  clears at zero. Rust count/overflow tests pass; interactive rendering is pending.

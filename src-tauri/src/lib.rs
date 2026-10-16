@@ -1,3 +1,6 @@
+#[cfg(any(target_os = "windows", test))]
+mod attention_badge;
+
 use std::net::{SocketAddr, TcpListener, TcpStream};
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Mutex;
@@ -45,7 +48,7 @@ fn set_attention(app: tauri::AppHandle, count: u32) {
         {
             let attention = shown.map(|_| tauri::UserAttentionType::Informational);
             let _ = window.request_user_attention(attention);
-            let icon = if shown.is_some() { app.default_window_icon().cloned() } else { None };
+            let icon = attention_badge::image(count);
             let _ = window.set_overlay_icon(icon);
         }
     }
