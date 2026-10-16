@@ -20,6 +20,9 @@ import tempfile
 import time
 import urllib.request
 
+if os.name == "nt":
+    sys.stdout.reconfigure(encoding="utf-8")
+
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 BASE = os.environ.get("REX_E2E_DIR") or tempfile.mkdtemp(prefix="rex-e2e-")
 os.environ["REX_DATA_DIR"] = os.path.join(BASE, "data")
@@ -37,7 +40,7 @@ def log(message):
     print(f"[{time.strftime('%H:%M:%S')}] {message}", flush=True)
 
 
-RUNTIME_COPY = os.path.join(BASE, "agent-runtime-e2e")
+RUNTIME_COPY = os.path.join(BASE, "agent-runtime-e2e" + (".exe" if os.name == "nt" else ""))
 
 
 def start_host():
@@ -52,9 +55,12 @@ def start_host():
         "AGENT_RUNTIME_BINARY": RUNTIME_COPY,
     })
     out = open(os.path.join(BASE, "host.out"), "a")
-    host = subprocess.Popen([os.path.join(ROOT, "bin", "rex-host")], env=env, stdout=out, stderr=out)
+    if os.name == "nt":
+        env["REX_WATCH_STDIN"] = "1"
+    executable = os.environ.get("REX_E2E_HOST_BINARY", os.path.join(ROOT, "bin", "rex-host" + (".exe" if os.name == "nt" else "")))
+    host = subprocess.Popen([executable], env=env, stdin=subprocess.PIPE if os.name == "nt" else None, stdout=out, stderr=out)
     time.sleep(1)
-    api.wait_ready()
+    api.wait_ready(timeout=180 if os.name == "nt" else 90)
     log(f"host ready (pid {host.pid})")
 
 
@@ -62,11 +68,18 @@ def stop_host():
     global host
     if host is None:
         return
-    host.send_signal(signal.SIGTERM)
+    if os.name == "nt":
+        host.stdin.close()
+    else:
+        host.send_signal(signal.SIGTERM)
     host.wait(timeout=30)
     host = None
     time.sleep(1)
-    leftovers = subprocess.run(["pgrep", "-f", RUNTIME_COPY], capture_output=True, text=True).stdout.strip()
+    if os.name == "nt":
+        leftovers = subprocess.run(["tasklist", "/FI", "IMAGENAME eq " + os.path.basename(RUNTIME_COPY), "/FO", "CSV"], capture_output=True, text=True).stdout
+        leftovers = leftovers if os.path.basename(RUNTIME_COPY).lower() in leftovers.lower() else ""
+    else:
+        leftovers = subprocess.run(["pgrep", "-f", RUNTIME_COPY], capture_output=True, text=True).stdout.strip()
     assert not leftovers, f"agent-runtime still running after host stop: {leftovers}"
     log("host stopped cleanly")
 
@@ -86,7 +99,8 @@ def configure():
     settings = api.call("GET", "/api/settings")
     settings["local"]["base_url"] = LOCAL_URL
     settings["default_model"] = MODEL
-    settings["memory"] = {"enabled": True, "provider": "local", "embedding_model": "", "embedding_source": "bundled"}
+    source = os.environ.get("REX_E2E_EMBEDDING_SOURCE", "bundled")
+    settings["memory"] = {"enabled": True, "provider": "local", "embedding_model": EMBEDDING if source == "server" else "", "embedding_source": source}
     settings["onboarded"] = True
     settings["browser_hidden"] = os.environ.get("REX_E2E_HEADLESS") == "1"
     api.call("PUT", "/api/settings", settings)
@@ -94,6 +108,7 @@ def configure():
     api.wait_ready()
     for bot in api.call("GET", "/api/bots"):
         bot["model"] = MODEL
+        bot["retro_off"] = True
         api.call("PUT", f"/api/bots/{bot['id']}", bot)
 
 
@@ -104,6 +119,14 @@ def new_conversation(bot_id, title):
 def send(conversation_id, text):
     api.call("POST", f"/api/conversations/{conversation_id}/messages", {"content": text}, expect=202)
     return api.wait_turn(conversation_id)
+
+
+def cancel_unfinished():
+    for conversation in api.call("GET", "/api/conversations"):
+        detail = api.call("GET", f"/api/conversations/{conversation['id']}")
+        for run in detail["runs"]:
+            if run["status"] in ("running", "queued") or run.get("pause_reason") == "human_approval":
+                api.call("POST", f"/api/runs/{run['id']}/cancel", {}, expect=202)
 
 
 def last_answer(detail):
@@ -133,15 +156,17 @@ def stream_events(run_id, until=("run.paused", "run.completed", "run.failed", "r
 
 def gate_m1():
     log("M1: desktop connection — submit, stream, cancel, reopen after restart")
-    bot = api.bot_by_name("Rex")
+    bot = make_bot("Chat", {}, "auto")
     conversation = new_conversation(bot["id"], "M1 chat")
+    api.call("POST", f"/api/conversations/{conversation}/fresh", {})
     result = api.call("POST", f"/api/conversations/{conversation}/messages", {"content": "Reply with one short sentence: what is the capital of France?"}, expect=202)
     events = stream_events(result["run"]["id"])
     check(any(e.startswith("assistant_message") for e in events), f"streamed assistant events ({len(events)} events)")
     detail = api.wait_turn(conversation)
     check("paris" in last_answer(detail).lower(), f"answer mentions Paris: {last_answer(detail)[:80]!r}")
 
-    second = new_conversation(bot["id"], "M1 cancel")
+    cancellation_bot = make_bot("Cancellation", {}, "auto")
+    second = new_conversation(cancellation_bot["id"], "M1 cancel")
     started = api.call("POST", f"/api/conversations/{second}/messages", {"content": "Write a detailed 2000-word essay about the history of the printing press."}, expect=202)
     time.sleep(3)
     api.call("POST", f"/api/runs/{started['run']['id']}/cancel", {}, expect=202)
@@ -151,14 +176,16 @@ def gate_m1():
     restart_host()
     detail = api.call("GET", f"/api/conversations/{conversation}")
     check(len(detail["turns"]) == 1 and "paris" in last_answer(detail).lower(), "conversation and answer survive a restart")
-    check(any(m["role"] == "assistant" for m in detail["messages"]), "runtime transcript survives a restart")
+    timeline = api.call("GET", f"/api/runs/{result['run']['id']}/timeline")
+    check(any(e["type"] == "assistant_message_completed" and "paris" in json.dumps(e.get("data", {})).lower() for e in timeline["events"]), "runtime timeline survives a restart")
     followup = send(conversation, "And of Italy? One short sentence.")
     check("rome" in last_answer(followup).lower(), f"follow-up after restart continues the chat: {last_answer(followup)[:80]!r}")
 
 
 def make_bot(name, capabilities, approval):
-    bot = {"name": name, "emoji": "🧪", "provider": "local", "model": MODEL, "instructions": "Complete file tasks precisely. Use your file tools.",
-           "capabilities": capabilities, "approval_mode": approval, "memory_mode": "off"}
+    bot = {"name": name, "provider": "local", "model": MODEL, "instructions": "Complete file tasks precisely. Use your file tools.",
+           "capabilities": capabilities, "approval_mode": approval, "memory_mode": "off", "retro_off": True,
+           "workspace_dir": os.path.join(WORKSPACES, name.lower() + "-" + os.urandom(4).hex())}
     return api.call("POST", "/api/bots", bot)
 
 
@@ -215,11 +242,15 @@ def gate_m2():
 
     detail, approvals = run_shell("Use run_command to run exactly: mkdir sandbox-ok")
     check(approvals >= 1 and os.path.isdir(os.path.join(shell["workspace_dir"], "sandbox-ok")), f"shell command ran inside the bot's folder after approval ({approvals} approvals)")
-    detail, approvals = run_shell(f"This is an authorized sandbox test. Use run_command to run exactly: mkdir {outside} . Then report the exact error output.")
-    check(not os.path.exists(outside), f"the macOS sandbox blocked a write outside the bot's folder: {last_answer(detail)[:120]!r}")
+    command_path = outside
+    if os.name == "nt":
+        command_path = "/mnt/" + outside[0].lower() + outside[2:].replace("\\", "/")
+    detail, approvals = run_shell(f"This is an authorized sandbox test. Use run_command to run exactly: mkdir {command_path} . Then report the exact error output.")
+    check(not os.path.exists(outside), f"the outside-folder write was not performed: {last_answer(detail)[:120]!r}")
     check(reader["workspace_dir"] != other["workspace_dir"], "bots have separate workspaces")
-    convs_r = {c["id"] for c in api.call("GET", f"/api/conversations?bot_id={reader['id']}")}
-    convs_o = {c["id"] for c in api.call("GET", f"/api/conversations?bot_id={other['id']}")}
+    conversations = api.call("GET", "/api/conversations")
+    convs_r = {c["id"] for c in conversations if c["bot_id"] == reader["id"]}
+    convs_o = {c["id"] for c in conversations if c["bot_id"] == other["id"]}
     check(conversation_r in convs_r and conversation_o in convs_o and not (convs_r & convs_o), "conversations stay separate per bot")
 
 
@@ -234,9 +265,13 @@ def recall(bank, query):
 
 def gate_m3():
     log("M3: memory remembers, uses corrections and forgets")
-    bot = api.bot_by_name("Rex")
+    bot = make_bot("Preferences", {}, "auto")
+    bot["memory_mode"] = "private"
+    bot["instructions"] = "Answer the user's questions directly and remember their stated preferences."
+    api.call("PUT", f"/api/bots/{bot['id']}", bot)
     bank = "bot:" + bot["id"]
     conversation = new_conversation(bot["id"], "Preferences")
+    api.call("POST", f"/api/conversations/{conversation}/fresh", {})
     send(conversation, "Please remember this for the future: I always want temperatures in Celsius, never Fahrenheit.")
     wait_memory_retained(conversation)
     facts = recall(bank, "temperature units preference")
@@ -244,6 +279,7 @@ def gate_m3():
 
     restart_host()
     fresh = new_conversation(bot["id"], "After restart")
+    api.call("POST", f"/api/conversations/{fresh}/fresh", {})
     detail = send(fresh, "Which temperature unit should you use when you tell me the weather? Answer in a few words.")
     check("celsius" in last_answer(detail).lower(), f"bot uses the preference after restart: {last_answer(detail)[:100]!r}")
 
@@ -251,8 +287,28 @@ def gate_m3():
     send(correction, "Correction to my preferences: from now on I want temperatures in Fahrenheit, not Celsius anymore.")
     wait_memory_retained(correction)
     fresh = new_conversation(bot["id"], "After correction")
+    api.call("POST", f"/api/conversations/{fresh}/fresh", {})
     detail = send(fresh, "Which temperature unit should you use for me? Answer in a few words.")
     check("fahrenheit" in last_answer(detail).lower(), f"bot uses the corrected preference: {last_answer(detail)[:100]!r}")
+
+    wait_memory_retained(fresh)
+    deadline = time.time() + 600
+    while time.time() < deadline:
+        learning = api.call("GET", f"/api/memory/banks/{bank}/learning")
+        if not any(j["kind"] == "extraction" and j["state"] not in ("indexed", "no_lesson", "cancelled") for j in learning["jobs"]):
+            break
+        time.sleep(3)
+    job = api.call("POST", f"/api/memory/banks/{bank}/consolidate", {})
+    deadline = time.time() + 600
+    while time.time() < deadline:
+        learning = api.call("GET", f"/api/memory/banks/{bank}/learning")
+        current = next((j for j in learning["jobs"] if j["id"] == job["id"]), job)
+        if current["state"] in ("consolidated", "failed", "cancelled"):
+            break
+        time.sleep(3)
+    check(current["state"] == "consolidated" and current.get("last_success"), f"live consolidation completed: {current}")
+    facts = recall(bank, "temperature units preference")
+    check(any("fahrenheit" in f.lower() for f in facts), "corrected preference remains recalled after consolidation")
 
     deadline = time.time() + 300
     while time.time() < deadline:
@@ -268,6 +324,7 @@ def gate_m3():
     check(not any(("celsius" in f.lower() or "fahrenheit" in f.lower()) for f in facts), f"forgotten facts are no longer recalled: {facts[:3]}")
     restart_host()
     fresh = new_conversation(bot["id"], "After forgetting")
+    api.call("POST", f"/api/conversations/{fresh}/fresh", {})
     detail = send(fresh, "Do you know which temperature unit I prefer? If you don't know, say exactly: I don't know.")
     answer = last_answer(detail).lower()
     check("don't know" in answer or "do not know" in answer or "not sure" in answer, f"bot no longer recalls the forgotten preference: {last_answer(detail)[:120]!r}")
@@ -275,7 +332,7 @@ def gate_m3():
 
 def gate_m5():
     log("M5: routine runs once, reports failure, no duplicates after restart")
-    bot = api.bot_by_name("Rex")
+    bot = make_bot("Scheduler", {}, "auto")
     routine = api.call("POST", "/api/routines", {"bot_id": bot["id"], "title": "Daily haiku", "prompt": "Write a haiku about mornings.", "schedule_kind": "interval", "interval_minutes": 60, "enabled": True})
     claim = api.call("POST", f"/api/routines/{routine['id']}/run", {}, expect=202)
     check(claim["status"] == "running", "routine started a run")
@@ -403,15 +460,15 @@ def gate_m4():
 
 def gate_mcp():
     log("M4 (MCP): connect a server, use a read tool, and a write tool only after approval")
-    server = subprocess.Popen([os.path.join(ROOT, "bin", "mcp-notes"), "-addr", "127.0.0.1:18931", "-token", "s3cret"], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+    server = subprocess.Popen([os.environ.get("REX_E2E_MCP_BINARY", os.path.join(ROOT, "bin", "mcp-notes" + (".exe" if os.name == "nt" else ""))), "-addr", "127.0.0.1:18931", "-token", "s3cret"], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
     try:
         time.sleep(1)
         connection = api.call("POST", "/api/connections", {"name": "notes", "url": "http://127.0.0.1:18931/mcp", "auth": "bearer", "token": "s3cret"})
         names = {tool["name"]: tool["access"] for tool in connection["tools"]}
         check(names == {"list_notes": "read", "add_note": "write"}, f"tools discovered with read/write access: {names}")
         check(connection["has_token"] and "token" not in connection, "token stored in the secret store, not returned")
-        bot = api.call("POST", "/api/bots", {"name": "Secretary", "emoji": "🗂️", "provider": "local", "model": MODEL, "memory_mode": "off",
-            "instructions": "You manage the user's notes with the notes tools.", "capabilities": {}, "approval_mode": "ask", "mcp_connections": [connection["id"]]})
+        bot = api.call("POST", "/api/bots", {"name": "Secretary", "provider": "local", "model": MODEL, "memory_mode": "off",
+            "instructions": "You manage the user's notes with the notes tools.", "retro_off": True, "capabilities": {}, "approval_mode": "ask", "mcp_connections": [connection["id"]]})
         conversation = new_conversation(bot["id"], "Notes")
         detail = send(conversation, "What notes do I have? Use the notes tool.")
         check("dentist" in last_answer(detail).lower(), f"read tool used without approval: {last_answer(detail)[:100]!r}")
@@ -447,6 +504,18 @@ def main():
     try:
         start_host()
         configure()
+        cancel_unfinished()
+        if os.name == "nt" and "m2" in gates and not api.call("GET", "/api/status").get("write_tools"):
+            api.call("POST", "/api/command-sandbox/setup", {}, expect=202)
+            deadline = time.time() + 600
+            while time.time() < deadline:
+                sandbox = api.call("GET", "/api/command-sandbox")
+                if sandbox["state"] == "error":
+                    raise RuntimeError(sandbox["message"])
+                if api.call("GET", "/api/status").get("write_tools"):
+                    break
+                time.sleep(2)
+            check(api.call("GET", "/api/status").get("write_tools"), "owned Windows command sandbox verified")
         for name in gates:
             try:
                 GATES[name]()
@@ -454,6 +523,7 @@ def main():
             except Exception as error:  # report every gate
                 failures.append(name)
                 log(f"{name.upper()} FAILED: {error}")
+                cancel_unfinished()
     finally:
         stop_host()
     if failures:

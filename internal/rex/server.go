@@ -573,10 +573,13 @@ func (h *Host) getConversation(w http.ResponseWriter, r *http.Request) {
 	if h.RuntimeReady() && conversation.ActiveRunID != nil {
 		if run, err := h.Runtime.GetRun(ctx, *conversation.ActiveRunID); err == nil {
 			detail.Runs = append(detail.Runs, *run)
-			if interactions, err := h.Runtime.ListInteractions(ctx, run.ID); err == nil {
-				for _, interaction := range interactions {
-					if interaction.Status == "pending" {
-						detail.Interactions = append(detail.Interactions, interaction)
+			// The adapter can publish an interaction before its paused checkpoint is saved.
+			if run.Status == "paused" {
+				if interactions, err := h.Runtime.ListInteractions(ctx, run.ID); err == nil {
+					for _, interaction := range interactions {
+						if interaction.Status == "pending" {
+							detail.Interactions = append(detail.Interactions, interaction)
+						}
 					}
 				}
 			}
