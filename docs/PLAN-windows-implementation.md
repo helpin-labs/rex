@@ -131,11 +131,11 @@ Do not duplicate these responsibilities in Rex or change other apps' defaults.
 | Plan saved before implementation | complete | This file, initial plan commit |
 | Runtime Windows amd64 build | native build passed | [Windows run 38870509025](https://github.com/helpin-ai/agent-runtime/actions/runs/38870509025): locks, snapshot ACLs, SQLite URIs, memory jobs and banks |
 | Runtime Windows arm64 build | cross-build passed on Windows runner | run 38870509025 |
-| Rex Windows amd64 build | cross-build passed | isolated workspace against runtime feature branch; native CI pending |
-| Rex Windows arm64 build | cross-build passed | isolated workspace against runtime feature branch |
+| Rex Windows amd64 build | native build and full host suite passed | Rex run 38873145341, host job |
+| Rex Windows arm64 build | cross-build passed on Windows runner | Rex run 38873145341; native ARM64 execution not verified |
 | Windows native core/memory/credentials | core tests passed; bundled service startup pending | Runtime run 38873202939; Rex run 38872456628 credential/ACL/job checks |
 | Windows browser integration | native Chrome E2E and Chrome/Edge pipes passed; installer/browser cleanup gates remain | Runtime run 38872748373; Rex run 38872456628 |
-| WSL confinement proof | pending, requires Windows | |
+| WSL confinement proof | passed on tested WSL2 kernel, ext4 and Windows-mounted drive | [run 38874224638](https://github.com/helpin-ai/agent-runtime/actions/runs/38874224638), kernel 6.18.40.1, ABI 7 |
 | WSL setup/commands/cancel/restart | pending | |
 | Installer/signing/upgrade/uninstall | pending | |
 | Windows notifications and attention | pending | |
@@ -218,3 +218,20 @@ optional architecture/OS support separately when its gates remain unverified.
   agent-browser install. Legacy CDP mode's separate CLI dependency remains a gate.
 - Windows-facing copy and bot instructions now use platform-neutral wording.
   Commands continue to fail closed with a verified-sandbox message.
+
+- WSL proof run 38874224638 passed on kernel `6.18.40.1-microsoft-standard-WSL2`,
+  Landlock ABI 7. Filesystems: ext4 `0xef53` and Windows-mounted drive `0x1021997`.
+  Both allowed workspace writes and denied outside reads/writes, symlink escapes,
+  and Windows executable launches. Distribution-local interop was functionally
+  tested; a global binfmt registration is not evidence that this distro permits it.
+- Full native Rex host tests and both architecture builds passed in run 38873145341.
+- The first real host/runtime startup caught the runtime store's CGO-only driver.
+  Windows now selects the already-installed pure Go SQLite GORM driver; Unix keeps
+  its existing driver. Rex CI pins the fix while live startup is reverified.
+- File reads/uploads now use `os.Root`; native junction-escape tests are queued.
+  Windows browser discovery also checks registered App Paths for custom installs.
+- Phase 6 implementation reuses the runtime's Linux workspace handlers for command
+  validation, Python environments, output limits and confinement. The Windows
+  bridge passes execution scope over stdin, holds a cancellation pipe, and leaves
+  artifact publishing and credentials on the native runtime side. No commands
+  will be enabled until the bridge, cancellation and startup probe pass WSL CI.

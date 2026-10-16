@@ -23,7 +23,7 @@ jobs:
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           repository: helpin-ai/agent-runtime
-          ref: 635935693ff5ebffd369b18cc87619bfbe3782ac
+          ref: e2385b5d93391bd9eb0f4c0a521e250088959d0a
           path: .ci/runtime
           persist-credentials: false
       - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
@@ -83,7 +83,7 @@ jobs:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           repository: helpin-ai/agent-runtime
-          ref: 635935693ff5ebffd369b18cc87619bfbe3782ac
+          ref: e2385b5d93391bd9eb0f4c0a521e250088959d0a
           path: .ci/runtime
           persist-credentials: false
       - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
