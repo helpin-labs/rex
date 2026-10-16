@@ -14,8 +14,8 @@ $env:WEBVIEW2_ADDITIONAL_BROWSER_ARGUMENTS = "--remote-debugging-port=$port --re
 $app = $null
 function Invoke-Browser([string]$arguments) {
     # A CLI daemon can keep its parent's stdout handle open; wait only for the CLI.
-    $output = Join-Path $evidence 'command.out'
-    $errors = Join-Path $evidence 'command.err'
+    $output = Join-Path $evidence ('command-' + [Guid]::NewGuid().ToString('N') + '.out')
+    $errors = $output + '.err'
     $process = Start-Process $cli -ArgumentList "--session $session --cdp $port $arguments" -RedirectStandardOutput $output -RedirectStandardError $errors -PassThru
     if (!$process.WaitForExit(60000)) { $process.Kill(); throw "Browser check timed out: $arguments" }
     $result = Get-Content -Raw $output -ErrorAction SilentlyContinue
@@ -23,7 +23,7 @@ function Invoke-Browser([string]$arguments) {
     return $result
 }
 try {
-    $app = Start-Process (Join-Path $InstallDirectory 'rex-desktop.exe') -PassThru
+    $app = Start-Process (Join-Path $InstallDirectory 'rex-desktop.exe') -RedirectStandardOutput (Join-Path $evidence 'app.out') -RedirectStandardError (Join-Path $evidence 'app.err') -PassThru
     $deadline = [DateTime]::UtcNow.AddMinutes(2)
     do {
         if ($app.HasExited) { throw "Installed desktop exited: $($app.ExitCode)" }
@@ -31,6 +31,9 @@ try {
         if (@($targets | Where-Object type -eq 'page').Count -gt 0) { break }
         Start-Sleep -Milliseconds 500
     } while ([DateTime]::UtcNow -lt $deadline)
+    if (@($targets | Where-Object type -eq 'page').Count -eq 0) { throw 'Installed WebView2 did not expose a page; inspect app.err in the evidence directory' }
+    Invoke-Browser 'snapshot' | Set-Content (Join-Path $evidence 'initial.txt')
+    Invoke-Browser "screenshot $evidence/initial.png" | Out-Null
     Invoke-Browser 'wait --text "Welcome to Rex"' | Out-Null
     $snapshot = Invoke-Browser 'snapshot -i'
     $snapshot | Set-Content (Join-Path $evidence 'onboarding.txt')
@@ -43,6 +46,10 @@ try {
     Invoke-Browser "screenshot $evidence/installed-desktop.png" | Out-Null
     Write-Host "Installed WebView2 onboarding, provider switching and native attention commands passed. Evidence: $evidence"
 } finally {
+    foreach ($name in @('rex.log', 'embedder.log')) {
+        $log = Join-Path $env:LOCALAPPDATA "ai.rex.desktop/$name"
+        if (Test-Path $log) { Copy-Item $log (Join-Path $evidence $name) -ErrorAction Continue }
+    }
     $env:WEBVIEW2_ADDITIONAL_BROWSER_ARGUMENTS = $previousArguments
     if ($app -and !$app.HasExited) { $app.Kill($true); $app.WaitForExit(10000) | Out-Null }
     Get-Process agent-browser -ErrorAction SilentlyContinue | Where-Object { $_.Path -eq $cli } | Stop-Process -Force -ErrorAction SilentlyContinue

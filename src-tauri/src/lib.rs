@@ -216,7 +216,7 @@ pub fn run() {
             });
 
             let open = MenuItemBuilder::with_id("open", "Open Rex").build(app)?;
-            let quit = MenuItemBuilder::with_id("quit", "Quit Rex").accelerator("Cmd+Q").build(app)?;
+            let quit = MenuItemBuilder::with_id("quit", "Quit Rex").accelerator("CmdOrCtrl+Q").build(app)?;
             let menu = MenuBuilder::new(app).item(&open).separator().item(&quit).build()?;
             TrayIconBuilder::with_id("rex")
                 // The logo's face as a template image: macOS draws it in the

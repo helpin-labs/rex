@@ -31,6 +31,7 @@ try {
     if ((Get-Content -Raw $sentinel) -ne 'preserve-this-data') { throw 'Default uninstall removed app data' }
     Write-Host 'Install, reinstall, bundled service readiness and default uninstall data retention passed.'
 } finally {
-    Remove-Item $dataDirectory -Recurse -Force
-    if (Test-Path $directory) { Remove-Item $directory -Recurse -Force }
+    # Preserve the original test exception and evidence if a dying WebView still holds a file.
+    Remove-Item $dataDirectory -Recurse -Force -ErrorAction Continue
+    if (Test-Path $directory) { Remove-Item $directory -Recurse -Force -ErrorAction Continue }
 }

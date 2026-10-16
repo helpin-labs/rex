@@ -133,12 +133,12 @@ Do not duplicate these responsibilities in Rex or change other apps' defaults.
 | Runtime Windows arm64 build | cross-build passed on Windows runner | run 38870509025 |
 | Rex Windows amd64 build | native build and full host suite passed | Rex run 38873145341, host job |
 | Rex Windows arm64 build | cross-build passed on Windows runner | Native ARM64 host suite in supplied VM; timezone and interactive credential follow-ups passed |
-| Windows native core/memory/credentials | native suites and bundled CPU memory startup passed; real-model gates running | Rex runs 38879760629 and 38883376932; ARM64 VM interactive Credential Manager passed |
+| Windows native core/memory/credentials | native suites, bundled CPU readiness and real-model backend gates passed | ARM64 VM: chat/stream/cancel/restart, MCP approvals, routines, memory correction/consolidation/forget; interactive Credential Manager passed |
 | Windows browser integration | Chrome E2E, Chrome/Edge pipes, exact-profile cleanup and real cookie handoff passed | Runtime run 38882994906; Rex run 38883376932 |
 | WSL confinement proof | passed on tested WSL2 kernel, ext4 and Windows-mounted drive | [run 38874224638](https://github.com/helpin-ai/agent-runtime/actions/runs/38874224638), kernel 6.18.40.1, ABI 7 |
 | WSL setup/commands/cancel/restart | native x64 and ARM64 passed; ARM64 repair/removal passed | Runtime run 38879116759; supplied VM bridge and 459-second setup/repair/removal test |
-| Installer/signing/upgrade/uninstall | unsigned package built; native lifecycle check added, signing pending | Rex run 38883376932; ARM64 VM x86/x64 installer stalls before extraction |
-| Windows notifications and attention | pending | |
+| Installer/signing/upgrade/uninstall | native x64 lifecycle and full interactive VM lifecycle passed; signing pending | Rex run 38888788644; clean install/GUI/reinstall/uninstall passed in the fast Windows 11 VM |
+| Windows notifications and attention | interactive Windows 11 passed | Installed x64 app in ARM64 HVF VM: numeric taskbar badge/clear, native toast, click-through from another bot and tray Quit; all sidecars stopped |
 | macOS regression checks | foundation passed | Rex full Go tests/vet; runtime workspace/memory/runtime/API/cancellation tests; lock/memory race tests |
 | Linux regression checks | passed | Runtime run 38882994906, command/isolation regression job |
 
@@ -331,3 +331,37 @@ optional architecture/OS support separately when its gates remain unverified.
   v0.13.16-0.20261016094832-26f2748cde84. The Windows workflow's temporary
   cross-repository checkout/workspace is removed, so ordinary local builds and
   CI consume the same code. SDK stays at v0.9.0, with no SDK changes required.
+
+- Live native ARM64 application gates passed against the dedicated 32K local
+  model: streaming/cancel/restart/follow-up, per-bot files and approvals, real
+  command confinement, MCP read/approve/decline, routines/retries, and complete
+  memory extraction/recall/correction/consolidation/forget across restarts.
+  Consolidation processed five facts and created two observations. An invalid
+  source citation was rejected and recovered on its bounded retry; no manual
+  source cleanup was needed.
+- Fast approval responses exposed a Rex UI race: pending interactions were
+  visible while the runtime was still saving its paused checkpoint. Rex now
+  exposes controls only for paused runs. Four-state regression passes on Mac
+  and native ARM64 Windows; the complete real-model file/command gate passed.
+- Actual explicit-path CLI teardown removed only the disposable Rex WSL distro,
+  preserved a conflicting environment directory, and left Rex-VM-Probe intact.
+  The WSL VM was cleanly shut down and an independent APFS-cloned fast Windows
+  disk is being used for installer/GUI checks.
+
+- Installed x64 desktop checks passed in the independent hardware-accelerated
+  Windows 11 ARM64 VM: default Credential Manager, bundled CPU memory readiness,
+  onboarding/local model check, real streamed chat, numeric badge/clear, native
+  toast delivery and click-through to the correct conversation. Tray Quit left
+  no Rex/runtime/embedder processes. This is x64 emulation on ARM64, separately
+  from the native x64 CI lifecycle gate.
+- The exact installed-WebView2 smoke script passed in the interactive tester
+  session. Diagnostics now retain app/host logs, initial DOM and screenshots;
+  cleanup cannot mask the original exception. The Quit shortcut now selects
+  Ctrl+Q on Windows and preserves Cmd+Q on macOS. Final CI rerun is pending.
+
+- The complete installer acceptance script passed locally in the interactive VM:
+  clean install, real bundled sidecars, installed WebView2 onboarding/provider
+  switching/attention commands, reinstall, and default uninstall retaining the
+  sentinel data. No owned services remained. An SSH-session attempt was rejected
+  by Windows Credential Manager's missing logon session; no storage fallback or
+  production change was added for that noninteractive environment.
