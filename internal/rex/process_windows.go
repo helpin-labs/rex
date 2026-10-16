@@ -9,11 +9,13 @@ import (
 	"path/filepath"
 	"slices"
 	"strconv"
+	"strings"
 	"syscall"
 	"time"
 	"unsafe"
 
 	"golang.org/x/sys/windows"
+	"golang.org/x/sys/windows/registry"
 )
 
 // Keep the sole job handle in this host: Windows closes it on host death and
@@ -183,4 +185,28 @@ func browserVersion(executable string) string {
 		return ""
 	}
 	return fmt.Sprintf("%d.%d.%d.%d", version.FileVersionMS>>16, version.FileVersionMS&65535, version.FileVersionLS>>16, version.FileVersionLS&65535)
+}
+
+func registeredBrowserExecutable(name string) string {
+	for _, hive := range []registry.Key{registry.CURRENT_USER, registry.LOCAL_MACHINE} {
+		for _, view := range []uint32{registry.WOW64_64KEY, registry.WOW64_32KEY} {
+			key, err := registry.OpenKey(hive, `Software\Microsoft\Windows\CurrentVersion\App Paths\`+name, registry.QUERY_VALUE|view)
+			if err != nil {
+				continue
+			}
+			value, _, err := key.GetStringValue("")
+			key.Close()
+			if err != nil {
+				continue
+			}
+			path := strings.Trim(strings.TrimSpace(value), `"`)
+			if !filepath.IsAbs(path) {
+				continue
+			}
+			if info, err := os.Stat(path); err == nil && info.Mode().IsRegular() {
+				return path
+			}
+		}
+	}
+	return ""
 }

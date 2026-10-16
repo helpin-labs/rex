@@ -11,7 +11,6 @@ import (
 	"fmt"
 	"log/slog"
 	"os"
-	"path/filepath"
 	"strings"
 	"sync"
 	"sync/atomic"
@@ -266,8 +265,16 @@ func (h *Host) SaveBot(ctx context.Context, bot *Bot) error {
 }
 
 func ensureWorkspace(root string) error {
-	for _, dir := range []string{root, filepath.Join(root, "inbox"), filepath.Join(root, "outputs")} {
-		if err := os.MkdirAll(dir, 0o755); err != nil {
+	if err := os.MkdirAll(root, 0755); err != nil {
+		return fmt.Errorf("create workspace folder: %w", err)
+	}
+	directory, err := os.OpenRoot(root)
+	if err != nil {
+		return err
+	}
+	defer directory.Close()
+	for _, name := range []string{"inbox", "outputs"} {
+		if err := directory.MkdirAll(name, 0755); err != nil {
 			return fmt.Errorf("create workspace folder: %w", err)
 		}
 	}

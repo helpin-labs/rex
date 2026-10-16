@@ -12,6 +12,7 @@ import (
 	"unsafe"
 
 	"golang.org/x/sys/windows"
+	"golang.org/x/sys/windows/registry"
 )
 
 func TestWindowsJobKillsDescendantsOnHostDeath(t *testing.T) {
@@ -165,5 +166,41 @@ func TestWindowsWorkspaceRejectsDriveAndHomeAliases(t *testing.T) {
 		if err := bot.Normalize(t.TempDir()); err == nil {
 			t.Fatalf("accepted unsafe Windows workspace %s", path)
 		}
+	}
+}
+
+func TestWindowsBrowserRegistry(t *testing.T) {
+	name := "rex-discovery-test-" + strconv.Itoa(os.Getpid()) + ".exe"
+	keyPath := `Software\Microsoft\Windows\CurrentVersion\App Paths\` + name
+	key, _, err := registry.CreateKey(registry.CURRENT_USER, keyPath, registry.SET_VALUE)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer registry.DeleteKey(registry.CURRENT_USER, keyPath)
+	path := filepath.Join(t.TempDir(), "browser.exe")
+	if err := os.WriteFile(path, nil, 0700); err != nil {
+		t.Fatal(err)
+	}
+	if err := key.SetStringValue("", `"`+path+`"`); err != nil {
+		t.Fatal(err)
+	}
+	key.Close()
+	if got := registeredBrowserExecutable(name); got != path {
+		t.Fatalf("registered browser = %q", got)
+	}
+}
+
+func TestWindowsWorkspaceRejectsJunctionEscape(t *testing.T) {
+	root, outside := t.TempDir(), t.TempDir()
+	system, err := windows.GetSystemDirectory()
+	if err != nil {
+		t.Fatal(err)
+	}
+	junction := filepath.Join(root, "inbox")
+	if output, err := exec.Command(filepath.Join(system, "cmd.exe"), "/c", "mklink", "/J", junction, outside).CombinedOutput(); err != nil {
+		t.Fatalf("junction fixture: %v %s", err, output)
+	}
+	if err := ensureWorkspace(root); err == nil {
+		t.Fatal("workspace accepted an outside junction")
 	}
 }

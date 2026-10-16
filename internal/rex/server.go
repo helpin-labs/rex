@@ -402,7 +402,18 @@ func (h *Host) readFile(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusBadRequest, err)
 		return
 	}
-	content, err := os.ReadFile(path)
+	directory, err := os.OpenRoot(bot.WorkspaceDir)
+	if err != nil {
+		writeError(w, http.StatusNotFound, errors.New("workspace not found"))
+		return
+	}
+	defer directory.Close()
+	relative, err := filepath.Rel(bot.WorkspaceDir, path)
+	if err != nil {
+		writeError(w, http.StatusBadRequest, err)
+		return
+	}
+	content, err := directory.ReadFile(relative)
 	if err != nil {
 		writeError(w, http.StatusNotFound, errors.New("file not found"))
 		return
@@ -441,15 +452,25 @@ func (h *Host) uploadFile(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusInternalServerError, err)
 		return
 	}
-	target := filepath.Join(bot.WorkspaceDir, "inbox", name)
+
+	directory, err := os.OpenRoot(bot.WorkspaceDir)
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, err)
+		return
+	}
+	defer directory.Close()
+	target := filepath.Join("inbox", name)
 	for index := 2; ; index++ {
-		if _, err := os.Stat(target); errors.Is(err, os.ErrNotExist) {
+		if _, err := directory.Lstat(target); errors.Is(err, os.ErrNotExist) {
 			break
+		} else if err != nil {
+			writeError(w, http.StatusInternalServerError, err)
+			return
 		}
 		extension := filepath.Ext(name)
-		target = filepath.Join(bot.WorkspaceDir, "inbox", fmt.Sprintf("%s-%d%s", strings.TrimSuffix(name, extension), index, extension))
+		target = filepath.Join("inbox", fmt.Sprintf("%s-%d%s", strings.TrimSuffix(name, extension), index, extension))
 	}
-	out, err := os.OpenFile(target, os.O_CREATE|os.O_EXCL|os.O_WRONLY, 0o644)
+	out, err := directory.OpenFile(target, os.O_CREATE|os.O_EXCL|os.O_WRONLY, 0644)
 	if err != nil {
 		writeError(w, http.StatusInternalServerError, err)
 		return
@@ -457,11 +478,12 @@ func (h *Host) uploadFile(w http.ResponseWriter, r *http.Request) {
 	size, copyErr := io.Copy(out, file)
 	closeErr := out.Close()
 	if copyErr != nil || closeErr != nil {
-		_ = os.Remove(target)
+		_ = directory.Remove(target)
 		writeError(w, http.StatusInternalServerError, errors.Join(copyErr, closeErr))
 		return
 	}
-	relative, _ := filepath.Rel(bot.WorkspaceDir, target)
+	relative := target
+
 	writeJSON(w, http.StatusCreated, WorkspaceFile{Path: filepath.ToSlash(relative), Size: size, Modified: time.Now()})
 }
 

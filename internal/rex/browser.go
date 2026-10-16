@@ -110,6 +110,7 @@ func DetectBrowsers() []BrowserApp {
 		}
 	}
 	for _, app := range apps {
+		matched := false
 		for _, root := range roots {
 			if root == "" {
 				continue
@@ -117,9 +118,16 @@ func DetectBrowsers() []BrowserApp {
 			path := filepath.Join(root, app.Path)
 			if info, err := os.Stat(path); err == nil && !info.IsDir() {
 				found = append(found, BrowserApp{Name: app.Name, Path: path})
+				matched = true
 				break
 			}
 		}
+		if !matched {
+			if path := registeredBrowserExecutable(filepath.Base(app.Path)); path != "" {
+				found = append(found, BrowserApp{Name: app.Name, Path: path})
+			}
+		}
+
 	}
 	return found
 }
@@ -745,25 +753,33 @@ func (h *Host) saveArtifact(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	defer file.Close()
-	dir := filepath.Join(bot.WorkspaceDir, "outputs", "screenshots")
-	if err := os.MkdirAll(dir, 0o755); err != nil {
+
+	directory, err := os.OpenRoot(bot.WorkspaceDir)
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, err)
+		return
+	}
+	defer directory.Close()
+	dir := filepath.Join("outputs", "screenshots")
+	if err := directory.MkdirAll(dir, 0755); err != nil {
 		writeError(w, http.StatusInternalServerError, err)
 		return
 	}
 	name := time.Now().Format("2006-01-02-150405") + "-" + filepath.Base(header.Filename)
 	target := filepath.Join(dir, name)
-	out, err := os.Create(target)
+	out, err := directory.OpenFile(target, os.O_CREATE|os.O_TRUNC|os.O_WRONLY, 0644)
 	if err != nil {
 		writeError(w, http.StatusInternalServerError, err)
 		return
 	}
+
 	_, copyErr := io.Copy(out, file)
 	closeErr := out.Close()
 	if err := errors.Join(copyErr, closeErr); err != nil {
 		writeError(w, http.StatusInternalServerError, err)
 		return
 	}
-	relative, _ := filepath.Rel(bot.WorkspaceDir, target)
+	relative := target
 	var metadata map[string]any
 	_ = json.Unmarshal([]byte(r.FormValue("metadata")), &metadata)
 	writeJSON(w, http.StatusOK, map[string]any{

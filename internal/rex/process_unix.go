@@ -80,3 +80,5 @@ func browserVersion(executable string) string {
 	}
 	return strings.TrimSpace(string(output))
 }
+
+func registeredBrowserExecutable(name string) string { return "" }
