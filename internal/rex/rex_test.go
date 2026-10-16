@@ -38,7 +38,7 @@ func TestCapabilitiesMapToRuntimeTools(t *testing.T) {
 			t.Errorf("read-only bot must not get %s", unwanted)
 		}
 	}
-	if string(bot.executionConfig()) != `{"workspace":{"access":"read_only","mode":"host_prepared"}}` {
+	if string(bot.executionConfig()) != `{"max_tool_steps":2000,"workspace":{"access":"read_only","mode":"host_prepared"}}` {
 		t.Errorf("unexpected execution config %s", bot.executionConfig())
 	}
 }
