@@ -19,6 +19,7 @@ import (
 
 	"github.com/helpin-ai/agent-runtime/sandbox/wsl"
 	"golang.org/x/sys/windows"
+	"golang.org/x/sys/windows/registry"
 )
 
 type ownedDistribution struct{ Name, Nonce, Directory string }
@@ -239,4 +240,63 @@ func (s *CommandSandbox) install(ctx context.Context) error {
 	}
 	committed = true
 	return nil
+}
+
+// Remove unregisters only environments recorded here and still bearing our marker.
+func (s *CommandSandbox) Remove(ctx context.Context) error {
+	installed, err := s.installation()
+	if os.IsNotExist(err) {
+		return nil
+	}
+	if err != nil {
+		return err
+	}
+	for _, d := range append(installed.Retired, installed.Active) {
+		registered, err := registeredWSLDistribution(d.Name)
+		if err != nil {
+			return err
+		}
+		if registered {
+			if !s.owns(ctx, d) {
+				return errors.New("WSL ownership could not be verified; local data was preserved")
+			}
+			if _, err := runWSL(ctx, "--unregister", d.Name); err != nil {
+				return err
+			}
+		}
+		if err := os.RemoveAll(d.Directory); err != nil {
+			return err
+		}
+	}
+	return os.Remove(filepath.Join(s.dataDir, "wsl", "installation.json"))
+}
+
+func registeredWSLDistribution(name string) (bool, error) {
+	root, err := registry.OpenKey(registry.CURRENT_USER, `Software\Microsoft\Windows\CurrentVersion\Lxss`, registry.READ)
+	if errors.Is(err, registry.ErrNotExist) {
+		return false, nil
+	}
+	if err != nil {
+		return false, err
+	}
+	defer root.Close()
+	names, err := root.ReadSubKeyNames(-1)
+	if err != nil {
+		return false, err
+	}
+	for _, keyName := range names {
+		key, err := registry.OpenKey(root, keyName, registry.QUERY_VALUE)
+		if err != nil {
+			return false, err
+		}
+		distribution, _, err := key.GetStringValue("DistributionName")
+		key.Close()
+		if err != nil {
+			return false, err
+		}
+		if strings.EqualFold(distribution, name) {
+			return true, nil
+		}
+	}
+	return false, nil
 }

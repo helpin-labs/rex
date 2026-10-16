@@ -27,6 +27,19 @@ import (
 )
 
 func main() {
+	if len(os.Args) == 2 && os.Args[1] == "--remove-sandbox" {
+		dataDir, err := resolveDataDir()
+		if err == nil {
+			ctx, cancel := context.WithTimeout(context.Background(), 2*time.Minute)
+			defer cancel()
+			err = rex.NewCommandSandbox(dataDir, "").Remove(ctx)
+		}
+		if err != nil {
+			fmt.Fprintln(os.Stderr, err)
+			os.Exit(1)
+		}
+		return
+	}
 	// Linked as agent-browser, rex-host opens a bot's browser on first use
 	// and hands the command to the real agent-browser.
 	if strings.TrimSuffix(filepath.Base(os.Args[0]), ".exe") == rex.BrowserShimName {

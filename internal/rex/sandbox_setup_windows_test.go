@@ -2,6 +2,7 @@ package rex
 
 import (
 	"context"
+	"encoding/json"
 	"golang.org/x/sys/windows"
 	"os"
 	"path/filepath"
@@ -86,6 +87,18 @@ func TestWindowsWSLSetupRepairAndProbe(t *testing.T) {
 	if err != nil || unchanged.Active.Name != second.Active.Name {
 		t.Fatalf("failed install replaced working sandbox: %+v %v", unchanged, err)
 	}
+	if registered, err := registeredWSLDistribution(second.Active.Name); err != nil || !registered {
+		t.Fatalf("owned sandbox registry: %v %v", registered, err)
+	}
+	if err := s.Remove(t.Context()); err != nil {
+		t.Fatal(err)
+	}
+	if registered, err := registeredWSLDistribution(second.Active.Name); err != nil || registered {
+		t.Fatalf("sandbox survived removal: %v %v", registered, err)
+	}
+	if err := s.Remove(t.Context()); err != nil {
+		t.Fatalf("repeated removal must be harmless: %v", err)
+	}
 }
 
 func TestWindowsWSLStorageACLDoesNotExposeOtherData(t *testing.T) {
@@ -141,5 +154,31 @@ func TestWindowsWSLStorageACLDoesNotExposeOtherData(t *testing.T) {
 		if system != wantSystem {
 			t.Fatalf("SYSTEM access for %s: %v, expected %v", path, system, wantSystem)
 		}
+	}
+}
+
+func TestWindowsWSLRemovalRejectsForeignRecord(t *testing.T) {
+	s := NewCommandSandbox(t.TempDir(), "")
+	outside := filepath.Join(t.TempDir(), "keep.txt")
+	if err := os.WriteFile(outside, []byte("kept"), 0600); err != nil {
+		t.Fatal(err)
+	}
+	root := filepath.Join(s.dataDir, "wsl")
+	if err := os.Mkdir(root, 0700); err != nil {
+		t.Fatal(err)
+	}
+	raw, _ := json.Marshal(sandboxInstallation{Active: ownedDistribution{Name: "Ubuntu", Nonce: strings.Repeat("a", 32), Directory: filepath.Dir(outside)}})
+	path := filepath.Join(root, "installation.json")
+	if err := os.WriteFile(path, raw, 0600); err != nil {
+		t.Fatal(err)
+	}
+	if err := s.Remove(t.Context()); err == nil {
+		t.Fatal("foreign ownership record accepted")
+	}
+	if data, err := os.ReadFile(outside); err != nil || string(data) != "kept" {
+		t.Fatal("foreign data changed", err)
+	}
+	if _, err := os.Stat(path); err != nil {
+		t.Fatal("rejected record was removed", err)
 	}
 }

@@ -132,15 +132,15 @@ Do not duplicate these responsibilities in Rex or change other apps' defaults.
 | Runtime Windows amd64 build | native build passed | [Windows run 38870509025](https://github.com/helpin-ai/agent-runtime/actions/runs/38870509025): locks, snapshot ACLs, SQLite URIs, memory jobs and banks |
 | Runtime Windows arm64 build | cross-build passed on Windows runner | run 38870509025 |
 | Rex Windows amd64 build | native build and full host suite passed | Rex run 38873145341, host job |
-| Rex Windows arm64 build | cross-build passed on Windows runner | Rex run 38873145341; native ARM64 execution not verified |
-| Windows native core/memory/credentials | core tests passed; bundled service startup pending | Runtime run 38873202939; Rex run 38872456628 credential/ACL/job checks |
-| Windows browser integration | native Chrome E2E and Chrome/Edge pipes passed; installer/browser cleanup gates remain | Runtime run 38872748373; Rex run 38872456628 |
+| Rex Windows arm64 build | cross-build passed on Windows runner | Native ARM64 host suite in supplied VM; timezone and interactive credential follow-ups passed |
+| Windows native core/memory/credentials | native suites and bundled CPU memory startup passed; real-model gates running | Rex runs 38879760629 and 38883376932; ARM64 VM interactive Credential Manager passed |
+| Windows browser integration | Chrome E2E, Chrome/Edge pipes, exact-profile cleanup and real cookie handoff passed | Runtime run 38882994906; Rex run 38883376932 |
 | WSL confinement proof | passed on tested WSL2 kernel, ext4 and Windows-mounted drive | [run 38874224638](https://github.com/helpin-ai/agent-runtime/actions/runs/38874224638), kernel 6.18.40.1, ABI 7 |
-| WSL setup/commands/cancel/restart | pending | |
-| Installer/signing/upgrade/uninstall | pending | |
+| WSL setup/commands/cancel/restart | native x64 and ARM64 passed; ARM64 repair/removal passed | Runtime run 38879116759; supplied VM bridge and 459-second setup/repair/removal test |
+| Installer/signing/upgrade/uninstall | unsigned package built; native lifecycle check added, signing pending | Rex run 38883376932; ARM64 VM x86/x64 installer stalls before extraction |
 | Windows notifications and attention | pending | |
 | macOS regression checks | foundation passed | Rex full Go tests/vet; runtime workspace/memory/runtime/API/cancellation tests; lock/memory race tests |
-| Linux regression checks | pending | |
+| Linux regression checks | passed | Runtime run 38882994906, command/isolation regression job |
 
 ## Stop conditions and verification rules
 
@@ -314,3 +314,15 @@ optional architecture/OS support separately when its gates remain unverified.
   helper with a bounded pipe wait; real subprocess tests cover retained daemon
   output, nonzero exit and cancellation. Rex consumes it rather than duplicating
   the fix. Native cookie-handoff verification is rerunning.
+
+- Rex run 38883376932 is fully green: native host suite, Chrome/Edge pipes,
+  Standard-mode cookie handoff, bundled CPU memory readiness, WSL setup/repair,
+  and unsigned NSIS build. Runtime run 38882994906 is fully green too.
+- Native ARM64 setup/repair/removal passed in the supplied VM (459 seconds).
+  Removal is idempotent and rejects a foreign ownership record. The uninstall
+  hook preserves data if ownership/removal cannot be verified. A native x64
+  install/reinstall/uninstall gate now reuses the sidecar smoke check.
+- The VM's x86/x64 installer and CLI stall under software ARM64 emulation before
+  product initialization; this does not establish a native x64 installer result.
+  Actual model-driven native ARM64 chat/memory/permissions/MCP/routine gates are
+  running against the existing local model server with isolated data.

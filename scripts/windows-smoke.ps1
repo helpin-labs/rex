@@ -1,12 +1,19 @@
 # Exercise real Windows sidecars in an isolated profile. No real account/model keys.
-param([switch]$RuntimeOnly)
+param([switch]$RuntimeOnly, [string]$InstallDirectory)
 $ErrorActionPreference = 'Stop'
 $repoRoot = Split-Path -Parent $PSScriptRoot
 $binDir = Join-Path $repoRoot 'src-tauri/binaries'
 $triple = 'x86_64-pc-windows-msvc'
+$resourceDir = Join-Path $repoRoot 'src-tauri/resources'
+$suffix = "-$triple.exe"
+if ($InstallDirectory) {
+    $binDir = $InstallDirectory
+    $resourceDir = Join-Path $InstallDirectory 'resources'
+    $suffix = '.exe'
+}
 $testRoot = Join-Path ([IO.Path]::GetTempPath()) ('rex-windows-smoke-' + [Guid]::NewGuid().ToString('N'))
 New-Item -ItemType Directory $testRoot | Out-Null
-$processInfo = [Diagnostics.ProcessStartInfo]::new((Join-Path $binDir "rex-host-$triple.exe"))
+$processInfo = [Diagnostics.ProcessStartInfo]::new((Join-Path $binDir "rex-host$suffix"))
 $processInfo.UseShellExecute = $false
 $processInfo.CreateNoWindow = $true
 $processInfo.RedirectStandardOutput = $true
@@ -15,10 +22,10 @@ $processInfo.Environment['REX_DATA_DIR'] = Join-Path $testRoot 'data'
 $processInfo.Environment['REX_WORKSPACE_ROOT'] = Join-Path $testRoot 'workspace'
 $processInfo.Environment['REX_HOST_ADDR'] = '127.0.0.1:0'
 $processInfo.Environment['REX_SECRETS'] = 'memory'
-$processInfo.Environment['AGENT_RUNTIME_BINARY'] = Join-Path $binDir "agent-runtime-$triple.exe"
-$processInfo.Environment['REX_EMBEDDER_BINARY'] = Join-Path $binDir "llama-server-$triple.exe"
-$processInfo.Environment['REX_BROWSER_EXECUTABLE'] = Join-Path $repoRoot 'src-tauri/resources/browser/chrome-win64/chrome.exe'
-$processInfo.Environment['REX_EMBEDDING_MODEL'] = Join-Path $repoRoot 'src-tauri/resources/models/bekko-embedding-v1-a8m-Q8_0.gguf'
+$processInfo.Environment['AGENT_RUNTIME_BINARY'] = Join-Path $binDir "agent-runtime$suffix"
+$processInfo.Environment['REX_EMBEDDER_BINARY'] = Join-Path $binDir "llama-server$suffix"
+$processInfo.Environment['REX_BROWSER_EXECUTABLE'] = Join-Path $resourceDir 'browser/chrome-win64/chrome.exe'
+$processInfo.Environment['REX_EMBEDDING_MODEL'] = Join-Path $resourceDir 'models/bekko-embedding-v1-a8m-Q8_0.gguf'
 $hostProcess = [Diagnostics.Process]::Start($processInfo)
 $stdout = $hostProcess.StandardOutput.ReadToEndAsync()
 $stderr = $hostProcess.StandardError.ReadToEndAsync()

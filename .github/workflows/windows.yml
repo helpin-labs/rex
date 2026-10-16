@@ -143,6 +143,9 @@ jobs:
           go test ./internal/rex -run '^TestWindowsWSL' -count=1 -timeout 8m
       - name: Build unsigned development installer
         run: pnpm tauri build --config src-tauri/tauri.windows.conf.json
+      - name: Install, reinstall and uninstall the built package
+        shell: pwsh
+        run: ./scripts/windows-installer-smoke.ps1
       - name: Save development installer
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         with:

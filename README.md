@@ -4,6 +4,8 @@ Personal AI bots that live on your Mac. Each one has its own chat, memory, brows
 
 Rex runs on a local model (LM Studio, Ollama), your API keys (Anthropic, OpenAI, OpenRouter) or your ChatGPT subscription. Conversations, memory and files stay on your Mac; only the model calls you choose leave it.
 
+Windows support is in development; see the [Windows preview instructions and verification status](docs/WINDOWS.md).
+
 ## Features
 
 - **Bots.** Make as many as you like, each with its own instructions, model, permissions, workspace folder and face. A new bot sets itself up by asking you a few questions.
