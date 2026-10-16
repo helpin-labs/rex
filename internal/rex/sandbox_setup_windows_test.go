@@ -2,11 +2,13 @@ package rex
 
 import (
 	"context"
+	"golang.org/x/sys/windows"
 	"os"
 	"path/filepath"
 	"strings"
 	"testing"
 	"time"
+	"unsafe"
 )
 
 func TestWindowsWSLOwnershipRejectsForeignTargets(t *testing.T) {
@@ -83,5 +85,61 @@ func TestWindowsWSLSetupRepairAndProbe(t *testing.T) {
 	unchanged, err := s.installation()
 	if err != nil || unchanged.Active.Name != second.Active.Name {
 		t.Fatalf("failed install replaced working sandbox: %+v %v", unchanged, err)
+	}
+}
+
+func TestWindowsWSLStorageACLDoesNotExposeOtherData(t *testing.T) {
+	data := t.TempDir()
+	if err := SecureDataDirectory(data); err != nil {
+		t.Fatal(err)
+	}
+	private := filepath.Join(data, "connection.json")
+	if err := os.WriteFile(private, []byte("fixture"), 0600); err != nil {
+		t.Fatal(err)
+	}
+	storage := filepath.Join(data, "wsl")
+	if err := os.Mkdir(storage, 0700); err != nil {
+		t.Fatal(err)
+	}
+	if err := secureDataDirectory(storage, true); err != nil {
+		t.Fatal(err)
+	}
+	disk := filepath.Join(storage, "disk.vhdx")
+	if err := os.WriteFile(disk, []byte("fixture"), 0600); err != nil {
+		t.Fatal(err)
+	}
+	user, err := windows.GetCurrentProcessToken().GetTokenUser()
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, path := range []string{data, private, storage, disk} {
+		sd, err := windows.GetNamedSecurityInfo(path, windows.SE_FILE_OBJECT, windows.DACL_SECURITY_INFORMATION)
+		if err != nil {
+			t.Fatal(err)
+		}
+		acl, _, err := sd.DACL()
+		if err != nil || acl == nil {
+			t.Fatal("missing ACL", err)
+		}
+		system := false
+		for i := uint32(0); i < uint32(acl.AceCount); i++ {
+			var ace *windows.ACCESS_ALLOWED_ACE
+			if err := windows.GetAce(acl, i, &ace); err != nil {
+				t.Fatal(err)
+			}
+			sid := (*windows.SID)(unsafe.Pointer(&ace.SidStart))
+			if ace.Header.AceType != windows.ACCESS_ALLOWED_ACE_TYPE {
+				t.Fatal("unexpected ACL entry")
+			}
+			if sid.String() == "S-1-5-18" {
+				system = true
+			} else if !sid.Equals(user.User.Sid) {
+				t.Fatal("storage grants another principal access")
+			}
+		}
+		wantSystem := path == storage || path == disk
+		if system != wantSystem {
+			t.Fatalf("SYSTEM access for %s: %v, expected %v", path, system, wantSystem)
+		}
 	}
 }

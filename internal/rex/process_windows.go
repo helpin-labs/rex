@@ -103,7 +103,9 @@ func linkBrowserShim(self, link string) error {
 }
 
 // Keep databases, callback tokens, and browser profiles private on NTFS.
-func SecureDataDirectory(path string) error {
+func SecureDataDirectory(path string) error { return secureDataDirectory(path, false) }
+
+func secureDataDirectory(path string, systemAccess bool) error {
 	absolute, err := filepath.Abs(path)
 	if err != nil {
 		return err
@@ -133,7 +135,11 @@ func SecureDataDirectory(path string) error {
 	if err != nil {
 		return err
 	}
-	descriptor, err := windows.SecurityDescriptorFromString("D:P(A;OICI;FA;;;" + user.User.Sid.String() + ")")
+	rules := "D:P(A;OICI;FA;;;" + user.User.Sid.String() + ")"
+	if systemAccess {
+		rules += "(A;OICI;FA;;;SY)"
+	}
+	descriptor, err := windows.SecurityDescriptorFromString(rules)
 	if err != nil {
 		return err
 	}

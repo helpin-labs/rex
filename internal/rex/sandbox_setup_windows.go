@@ -175,6 +175,10 @@ func (s *CommandSandbox) install(ctx context.Context) error {
 	if err := os.MkdirAll(filepath.Dir(target.Directory), 0700); err != nil {
 		return err
 	}
+	// The WSL system service opens VHDX files; credentials keep their owner-only ACL.
+	if err := secureDataDirectory(filepath.Dir(target.Directory), true); err != nil {
+		return err
+	}
 	// Import never overwrites a registered distribution with the same name.
 	if _, err := runWSL(ctx, "--import", target.Name, target.Directory, archive, "--version", "2"); err != nil {
 		return err

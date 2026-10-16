@@ -270,3 +270,11 @@ optional architecture/OS support separately when its gates remain unverified.
   remove the unavailable tools. Unrelated bot edits remain possible; new command
   permissions still require a verified sandbox. Windows command permission also
   admits the bundled run_python handler and its private venv.
+
+- Native setup caught a Windows service ACL requirement: WSL could not mount a
+  VHDX inheriting Rex's owner-only ACL. Only the managed WSL storage subtree now
+  grants SYSTEM access; callback tokens, credentials and other app data keep
+  owner-only ACLs. A native inheritance/containment test and setup rerun cover it.
+- The ARM64 VM's next WSL instance hit a CreateInstance timeout under software
+  emulation before application tests ran. The previous confinement/worker and
+  runtime-death results stand; the full bridge and product setup remain pending.
