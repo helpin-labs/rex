@@ -216,7 +216,11 @@ pub fn run() {
             });
 
             let open = MenuItemBuilder::with_id("open", "Open Rex").build(app)?;
-            let quit = MenuItemBuilder::with_id("quit", "Quit Rex").accelerator("CmdOrCtrl+Q").build(app)?;
+            let quit = MenuItemBuilder::with_id("quit", "Quit Rex");
+            // Windows tray accelerators are display-only while the WebView has focus.
+            #[cfg(not(target_os = "windows"))]
+            let quit = quit.accelerator("CmdOrCtrl+Q");
+            let quit = quit.build(app)?;
             let menu = MenuBuilder::new(app).item(&open).separator().item(&quit).build()?;
             TrayIconBuilder::with_id("rex")
                 // The logo's face as a template image: macOS draws it in the

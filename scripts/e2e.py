@@ -7,7 +7,7 @@ Usage:
   python3 scripts/e2e.py [m1] [m2] [m3] [m5]
 
 Starts its own rex-host (bin/rex-host) with a temporary data directory,
-in-memory secrets and a temporary workspace root, and restarts it where a
+test-only file secrets and a temporary workspace root, and restarts it where a
 gate requires surviving a restart.
 """
 import json
@@ -284,7 +284,7 @@ def gate_m3():
     check("celsius" in last_answer(detail).lower(), f"bot uses the preference after restart: {last_answer(detail)[:100]!r}")
 
     correction = new_conversation(bot["id"], "Correction")
-    send(correction, "Correction to my preferences: from now on I want temperatures in Fahrenheit, not Celsius anymore.")
+    send(correction, "Please remember this correction to my saved preferences: my preferred temperature unit is now Fahrenheit instead of Celsius.")
     wait_memory_retained(correction)
     fresh = new_conversation(bot["id"], "After correction")
     api.call("POST", f"/api/conversations/{fresh}/fresh", {})

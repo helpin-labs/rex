@@ -133,7 +133,7 @@ Do not duplicate these responsibilities in Rex or change other apps' defaults.
 | Runtime Windows arm64 build | cross-build passed on Windows runner | run 38870509025 |
 | Rex Windows amd64 build | native build and full host suite passed | Rex run 38873145341, host job |
 | Rex Windows arm64 build | cross-build passed on Windows runner | Native ARM64 host suite in supplied VM; timezone and interactive credential follow-ups passed |
-| Windows native core/memory/credentials | native suites, bundled CPU readiness and real-model backend gates passed | ARM64 VM: chat/stream/cancel/restart, MCP approvals, routines, memory correction/consolidation/forget; interactive Credential Manager passed |
+| Windows native core/memory/credentials | native suites and complete real-model gates passed | ARM64 backend gates; installed x64 CPU memory gate: extraction, restart recall, saved-preference correction, consolidation (7 facts, 1 observation), forget and no recall after restart; interactive Credential Manager passed |
 | Windows browser integration | Chrome E2E, Chrome/Edge pipes, exact-profile cleanup and real cookie handoff passed | Runtime run 38882994906; Rex run 38883376932 |
 | WSL confinement proof | passed on tested WSL2 kernel, ext4 and Windows-mounted drive | [run 38874224638](https://github.com/helpin-ai/agent-runtime/actions/runs/38874224638), kernel 6.18.40.1, ABI 7 |
 | WSL setup/commands/cancel/restart | native x64 and ARM64 passed; ARM64 repair/removal passed | Runtime run 38879116759; supplied VM bridge and 459-second setup/repair/removal test |
@@ -356,8 +356,8 @@ optional architecture/OS support separately when its gates remain unverified.
   from the native x64 CI lifecycle gate.
 - The exact installed-WebView2 smoke script passed in the interactive tester
   session. Diagnostics now retain app/host logs, initial DOM and screenshots;
-  cleanup cannot mask the original exception. The Quit shortcut now selects
-  Ctrl+Q on Windows and preserves Cmd+Q on macOS. Final CI rerun is pending.
+  cleanup cannot mask the original exception. The macOS Quit shortcut is preserved; Windows uses the
+  tested native tray Quit action. Final CI rerun is pending.
 
 - The complete installer acceptance script passed locally in the interactive VM:
   clean install, real bundled sidecars, installed WebView2 onboarding/provider
@@ -365,3 +365,25 @@ optional architecture/OS support separately when its gates remain unverified.
   sentinel data. No owned services remained. An SSH-session attempt was rejected
   by Windows Credential Manager's missing logon session; no storage fallback or
   production change was added for that noninteractive environment.
+
+- The installed x64 package also passed the complete live memory gate with its
+  bundled llama-server/Bekko CPU embedder: extraction, recall after restart,
+  explicit saved-preference correction, fresh-context use, manual consolidation
+  (seven facts processed, one observation created), recall, Forget and no recall
+  after another restart. This closes the earlier server-embedding distinction.
+- One ambiguous “from now on” correction made the model propose an instruction
+  change instead of saving a note. Inspection confirmed the correction evidence
+  was stored and retrieved newest-first; the proposal remained unapplied. The
+  memory fixture now explicitly requests a saved-memory correction. Its fresh
+  complete run passed, with no manual alteration of stored facts.
+- Final native host CI run 38899795851 passed all host tests, real Chrome/Edge
+  pipes, cookie handoff and the ARM64 cross-build. Its desktop job passed UI,
+  real bundled sidecars and WSL setup/repair; final installer verification is
+  still running. Production signing, Windows 10, fresh provider OAuth and a
+  native ARM64 desktop installer remain separate unverified gates.
+
+- Physical Ctrl+Q input reached the Windows WebView but did not trigger the
+  native menu accelerator, even after registering a window menu through Tauri.
+  The Windows tray now omits the unsupported shortcut hint. Native tray Quit
+  remains the verified shutdown action; no global hotkey or frontend workaround
+  was added. This final Rust change requires another native installer build.

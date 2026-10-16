@@ -60,7 +60,9 @@ reinstall/uninstall retention. Do not run that check against personal app data.
 `scripts/e2e.py` runs actual model-driven conversations, approvals, memory, MCP
 and routines with a separate data directory. See the
 [implementation ledger](PLAN-windows-implementation.md) for verified results and
-remaining interactive checks.
+remaining release gates. Desktop and Credential Manager checks require a
+signed-in Windows desktop session; an SSH network logon can be rejected by
+Credential Manager. Backend fixtures use their own test data and secrets.
 
 ## Release signing
 
