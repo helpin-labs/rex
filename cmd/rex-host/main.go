@@ -27,8 +27,8 @@ import (
 )
 
 func main() {
-	if len(os.Args) == 2 && os.Args[1] == "--remove-sandbox" {
-		dataDir, err := resolveDataDir()
+	if len(os.Args) == 3 && os.Args[1] == "--remove-sandbox" {
+		dataDir, err := filepath.Abs(os.Args[2])
 		if err == nil {
 			ctx, cancel := context.WithTimeout(context.Background(), 2*time.Minute)
 			defer cancel()

@@ -45,4 +45,5 @@ try {
 } finally {
     $env:WEBVIEW2_ADDITIONAL_BROWSER_ARGUMENTS = $previousArguments
     if ($app -and !$app.HasExited) { $app.Kill($true); $app.WaitForExit(10000) | Out-Null }
+    Get-Process agent-browser -ErrorAction SilentlyContinue | Where-Object { $_.Path -eq $cli } | Stop-Process -Force -ErrorAction SilentlyContinue
 }

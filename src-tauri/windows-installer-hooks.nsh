@@ -5,7 +5,7 @@
     MessageBox MB_YESNO|MB_DEFBUTTON2 "Also remove Rex's Linux command environment and package caches? Other WSL distributions are kept. Choosing No preserves Rex's local app data." IDYES rex_remove_wsl IDNO rex_keep_data
     rex_remove_wsl:
       !insertmacro CheckIfAppIsRunning "${MAINBINARYNAME}.exe" "${PRODUCTNAME}"
-      nsExec::ExecToStack /TIMEOUT=120000 '"$INSTDIR\rex-host.exe" --remove-sandbox'
+      nsExec::ExecToStack /TIMEOUT=120000 '"$INSTDIR\rex-host.exe" --remove-sandbox "$LOCALAPPDATA\${BUNDLEID}"'
       Pop $0
       Pop $1
       ${If} $0 != 0
