@@ -305,3 +305,12 @@ optional architecture/OS support separately when its gates remain unverified.
   its executable, with a repeated-launch regression test.
 - Windows taskbar attention now renders the actual count (capped at 99+) and
   clears at zero. Rust count/overflow tests pass; interactive rendering is pending.
+
+- ARM64 Rex-owned setup/repair passed in the VM, including replacing the sandbox,
+  retaining the previous environment until activation, preserving it through
+  failed install, ownership checks and WSL storage ACLs (191 seconds under TCG).
+- Windows Standard browser handoff found inherited daemon stdout keeping Go's
+  capture open after the CLI exited. Runtime now owns a shared browser.RunCLI
+  helper with a bounded pipe wait; real subprocess tests cover retained daemon
+  output, nonzero exit and cancellation. Rex consumes it rather than duplicating
+  the fix. Native cookie-handoff verification is rerunning.

@@ -8,6 +8,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	runtimebrowser "github.com/helpin-ai/agent-runtime/browser"
 	"io"
 	"log/slog"
 	"net/http"
@@ -182,11 +183,11 @@ func agentBrowserPath() string {
 func agentBrowserEnv(ctx context.Context, env []string, args ...string) (string, error) {
 	ctx, cancel := context.WithTimeout(ctx, 60*time.Second)
 	defer cancel()
-	command := exec.CommandContext(ctx, agentBrowserPath(), args...)
+	var commandEnv []string
 	if len(env) > 0 {
-		command.Env = append(os.Environ(), env...)
+		commandEnv = append(os.Environ(), env...)
 	}
-	output, err := command.CombinedOutput()
+	output, err := runtimebrowser.RunCLI(ctx, agentBrowserPath(), commandEnv, args...)
 	if err != nil {
 		return string(output), fmt.Errorf("agent-browser %s: %w: %s", args[len(args)-1], err, strings.TrimSpace(excerpt(string(output), 300)))
 	}
