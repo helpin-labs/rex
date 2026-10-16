@@ -20,6 +20,7 @@ try {
         if (!(Test-Path (Join-Path $directory $name))) { throw "Installed resource missing: $name" }
     }
     & "$PSScriptRoot/windows-smoke.ps1" -InstallDirectory $directory
+    & "$PSScriptRoot/windows-desktop-smoke.ps1" -InstallDirectory $directory
     Invoke-Installer $installers[0].FullName "/S /D=$directory"
     if ((Get-Content -Raw $sentinel) -ne 'preserve-this-data') { throw 'Reinstall changed app data' }
     & "$PSScriptRoot/windows-smoke.ps1" -InstallDirectory $directory

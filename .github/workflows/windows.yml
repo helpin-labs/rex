@@ -146,6 +146,14 @@ jobs:
       - name: Install, reinstall and uninstall the built package
         shell: pwsh
         run: ./scripts/windows-installer-smoke.ps1
+      - name: Save desktop verification evidence
+        if: always()
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: rex-windows-desktop-evidence
+          path: ${{ runner.temp }}/rex-desktop-smoke-*/
+          if-no-files-found: ignore
+          retention-days: 7
       - name: Save development installer
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         with:
