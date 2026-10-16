@@ -19,6 +19,7 @@ try {
     go list -m github.com/helpin-ai/agent-runtime
     & (Join-Path $PSScriptRoot 'build-embedder.ps1') -Architecture $Architecture
     & (Join-Path $PSScriptRoot 'build-browser.ps1') -Architecture $Architecture
+    & (Join-Path $PSScriptRoot 'build-wsl.ps1') -Architecture $Architecture
 } finally {
     $env:GOOS = $previousGOOS; $env:GOARCH = $previousGOARCH; $env:CGO_ENABLED = $previousCGO
     Pop-Location

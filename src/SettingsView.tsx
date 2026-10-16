@@ -3,7 +3,7 @@ import { Select } from "./Select";
 import { Bell, Check, CircleAlert, Copy, ExternalLink, FolderOpen, Globe, LoaderCircle, Palette, ShieldCheck } from "lucide-react";
 import { api } from "./api";
 import { SideList } from "./SideList";
-import type { ChatGPTStatus, ModelInfo, Provider, ProviderTest, Settings, Status } from "./types";
+import type { CommandSandboxStatus, ChatGPTStatus, ModelInfo, Provider, ProviderTest, Settings, Status } from "./types";
 import { Field, PageHeader, TileMark, Toggle, errorMessage, openExternal } from "./ui";
 import { type Theme, loadTheme, saveTheme } from "./theme";
 import { siAnthropic, siBrave, siLmstudio, siOpenrouter } from "simple-icons";
@@ -147,6 +147,14 @@ export function SettingsView({ status, initialTab, onSaved }: { status: Status |
   const [saving, setSaving] = useState(false);
   const [message, setMessage] = useState("");
   const [error, setError] = useState("");
+  const [sandbox, setSandbox] = useState<CommandSandboxStatus | null>(null);
+  useEffect(() => {
+    let stopped = false;
+    const refreshSandbox = () => { void api.commandSandbox().then(value => { if (!stopped) setSandbox(value); }).catch(() => undefined); };
+    refreshSandbox();
+    const timer = window.setInterval(refreshSandbox, 3000);
+    return () => { stopped = true; window.clearInterval(timer); };
+  }, []);
   const [browsers, setBrowsers] = useState<{ name: string; path: string }[]>([]);
   const [theme, setTheme] = useState<Theme>(loadTheme);
   useEffect(() => { api.browsers().then(setBrowsers).catch(() => undefined); }, []);
@@ -268,6 +276,17 @@ export function SettingsView({ status, initialTab, onSaved }: { status: Status |
             </div>
           </>}
         </div>
+        {sandbox?.supported && <div className="card">
+          <h3 className="section-title">Command sandbox</h3>
+          <p className="muted small">Commands and Python run in a separate Linux environment. Your files stay in the bot's folder. Setup needs WSL2; chat, browsing and memory work without it.</p>
+          <p role="status">{sandbox.message}</p>
+          <button type="button" className="button secondary" disabled={sandbox.busy || !!status?.active_runs} onClick={async () => {
+            setError("");
+            try { setSandbox(await api.setupCommandSandbox()); } catch (caught) { setError(errorMessage(caught)); }
+          }}>{sandbox.busy ? "Setting up…" : sandbox.state === "ready" ? "Repair sandbox" : "Set up or repair"}</button>
+          {!!status?.active_runs && <small className="muted">Finish or cancel active tasks before setup.</small>}
+          <small className="muted">Repair replaces only Rex's Linux environment and its package caches. Bot files and other WSL distributions are preserved.</small>
+        </div>}
         <div className="card">
           <div className="provider-head"><TileMark seed="review" icon={<ShieldCheck size={18} />} size={36} /><div className="grow"><strong>Command review (TypeSafe)</strong><small className="muted">A second opinion on file edits and commands, so routine local steps don't need your approval.</small></div>
             {keyChip(!!settings.typesafe?.configured)}</div>

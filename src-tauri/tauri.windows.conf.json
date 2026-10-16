@@ -16,7 +16,8 @@
     },
     "resources": {
       "resources/models/bekko-embedding-v1-a8m-Q8_0.gguf": "resources/models/bekko-embedding-v1-a8m-Q8_0.gguf",
-      "resources/browser/": "resources/browser/"
+      "resources/browser/": "resources/browser/",
+      "resources/wsl/": "resources/wsl/"
     }
   }
 }

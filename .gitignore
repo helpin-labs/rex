@@ -22,3 +22,4 @@ go.work.sum
 go.windows.work
 go.windows.work.sum
 src-tauri/resources/browser/
+src-tauri/resources/wsl/

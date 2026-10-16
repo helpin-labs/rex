@@ -329,6 +329,9 @@ func (b Bot) SystemPrompt(skills []Skill) string {
 		rules = append(rules, "You have no file access.")
 	}
 	if b.Capabilities.Shell {
+		if runtime.GOOS == "windows" {
+			rules = append(rules, "Commands and Python run in Linux through WSL2. Use relative paths in commands. Native Windows paths are for file tools; Windows executables are unavailable inside commands.")
+		}
 		rules = append(rules, "Shell commands run in a workspace sandbox that only allows writing inside your workspace folder. Commands may need the user's approval; prefer file tools when they are enough.",
 			"Call run_command with program and args, for example program \"python3\" with args [\"scripts/report.py\"]. Never pass one combined command string: routine commands can only be approved automatically in the program-and-args form.")
 	}

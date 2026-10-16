@@ -341,3 +341,5 @@ export type MemoryLearning = { jobs?: { kind: string; state: string }[]; episode
 export type HistoryEntry = { source_id: string; turn_id: string; kind: string; text: string; created_at: string; truncated?: boolean };
 export type HistoryPage = { entries: HistoryEntry[]; next_cursor?: number };
 export type HistoryExcerpt = HistoryEntry & { offset: number; truncated: boolean; next_offset?: number };
+
+export type CommandSandboxStatus = { supported: boolean; state: string; message: string; busy: boolean };

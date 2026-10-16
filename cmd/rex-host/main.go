@@ -134,6 +134,7 @@ func run() error {
 		return err
 	}
 	host := rex.NewHost(cfg, store, runtimeClient, settings, memory, skills)
+	host.Sandbox = rex.NewCommandSandbox(dataDir, os.Getenv("REX_WSL_RESOURCES"))
 	embedder := &rex.Embedder{Binary: resolveSidecar("REX_EMBEDDER_BINARY", "llama-server"), Model: resolveEmbeddingModel(), DataDir: dataDir, Log: logFile}
 	memory.SetEmbedder(embedder)
 	if err := memory.Configure(context.Background()); err != nil {
@@ -196,7 +197,7 @@ func run() error {
 		slog.Warn("bot browsers open at the start of each run", "error", err)
 		host.Browser.OpenEagerly = true
 	}
-	runtimeArgs := runtimeLaunch{browserShim: browserShim, dataDir: dataDir, port: runtimePort, token: runtimeToken, hostURL: hostURL, internalToken: cfg.InternalToken,
+	runtimeArgs := runtimeLaunch{sandbox: host.Sandbox, browserShim: browserShim, dataDir: dataDir, port: runtimePort, token: runtimeToken, hostURL: hostURL, internalToken: cfg.InternalToken,
 		modelCredentialKey: modelCredentialKey, mcpCredentialKey: mcpCredentialKey, settings: settings, logFile: logFile}
 	host.PrepareInterruptedRuns(ctx)
 	command, done, err := runtimeArgs.start(ctx)
@@ -292,6 +293,7 @@ func shutdown(server *http.Server, host *rex.Host, command *exec.Cmd, done <-cha
 }
 
 type runtimeLaunch struct {
+	sandbox                                      *rex.CommandSandbox
 	dataDir, port, token, hostURL, internalToken string
 	// browserShim routes the runtime's agent-browser calls through Rex.
 	browserShim                          []string
@@ -376,6 +378,9 @@ func (l runtimeLaunch) start(ctx context.Context) (*exec.Cmd, <-chan error, erro
 	)
 	if executable := os.Getenv("REX_BROWSER_EXECUTABLE"); executable != "" {
 		command.Env = append(command.Env, "AGENT_RUNTIME_BROWSER_EXTENSION_EXECUTABLE="+executable)
+	}
+	if l.sandbox != nil {
+		command.Env = append(command.Env, l.sandbox.RuntimeEnv(ctx)...)
 	}
 	command.Env = append(command.Env, l.browserShim...)
 	command.Env = append(command.Env, env...)

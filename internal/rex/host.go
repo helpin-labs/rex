@@ -47,10 +47,11 @@ type Host struct {
 	Skills   *SkillLibrary
 	Routines *Scheduler
 	Browser  *BrowserControl
+	Sandbox  *CommandSandbox
 
 	runtimeReady atomic.Bool
 	// writeTools is true once the runtime reports that agent commands are
-	// confined with Seatbelt; only then are file writing and shell offered.
+	// confined with Seatbelt or verified WSL; only then are file writing and shell offered.
 	writeTools   atomic.Bool
 	restart      func()
 	lastActivity atomic.Int64
@@ -85,11 +86,16 @@ func NewHost(cfg Config, store *Store, runtime *RuntimeClient, settings *Setting
 
 func (h *Host) Config() Config { return h.cfg }
 
-func (h *Host) SetRestart(fn func())       { h.restart = fn }
-func (h *Host) SetRuntimeReady(ready bool) { h.runtimeReady.Store(ready) }
-func (h *Host) RuntimeReady() bool         { return h.runtimeReady.Load() }
-func (h *Host) touch()                     { h.lastActivity.Store(time.Now().UnixNano()) }
-func (h *Host) IdleFor() time.Duration     { return time.Since(time.Unix(0, h.lastActivity.Load())) }
+func (h *Host) SetRestart(fn func()) { h.restart = fn }
+func (h *Host) SetRuntimeReady(ready bool) {
+	h.runtimeReady.Store(ready)
+	if !ready {
+		h.writeTools.Store(false)
+	}
+}
+func (h *Host) RuntimeReady() bool     { return h.runtimeReady.Load() }
+func (h *Host) touch()                 { h.lastActivity.Store(time.Now().UnixNano()) }
+func (h *Host) IdleFor() time.Duration { return time.Since(time.Unix(0, h.lastActivity.Load())) }
 func (h *Host) RequestRuntimeRestart() {
 	if h.restart != nil {
 		h.restart()
@@ -99,9 +105,10 @@ func (h *Host) RequestRuntimeRestart() {
 // Bootstrap runs once the runtime is ready: it seeds first-run bots, syncs
 // every bot definition into the runtime and resumes watching open turns.
 func (h *Host) Bootstrap(ctx context.Context) error {
+	h.writeTools.Store(false)
 	if capabilities, err := h.Runtime.GetCapabilities(ctx); err == nil {
 		isolation := capabilities.ExecutionIsolation
-		h.writeTools.Store(isolation == "seatbelt")
+		h.writeTools.Store(isolation == "seatbelt" || isolation == "wsl")
 		slog.Info("bot engine command isolation", "isolation", isolation, "write_tools", h.WriteTools())
 	}
 	bots, err := h.Store.ListBots(ctx)

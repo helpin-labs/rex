@@ -23,7 +23,7 @@ jobs:
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           repository: helpin-ai/agent-runtime
-          ref: e2385b5d93391bd9eb0f4c0a521e250088959d0a
+          ref: bfe81b6c18079c1dfdafaac5887052e58c75f3e9
           path: .ci/runtime
           persist-credentials: false
       - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
@@ -83,7 +83,7 @@ jobs:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           repository: helpin-ai/agent-runtime
-          ref: e2385b5d93391bd9eb0f4c0a521e250088959d0a
+          ref: bfe81b6c18079c1dfdafaac5887052e58c75f3e9
           path: .ci/runtime
           persist-credentials: false
       - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
@@ -136,6 +136,11 @@ jobs:
       - name: Real sidecar readiness and crash cleanup
         shell: pwsh
         run: ./scripts/windows-smoke.ps1
+      - name: Exercise owned WSL setup, repair and startup confinement
+        shell: pwsh
+        run: |
+          $env:REX_WSL_E2E_ROOTFS = "$PWD/src-tauri/resources/wsl"
+          go test ./internal/rex -run '^TestWindowsWSL' -count=1 -timeout 8m
       - name: Build unsigned development installer
         run: pnpm tauri build --config src-tauri/tauri.windows.conf.json
       - name: Save development installer

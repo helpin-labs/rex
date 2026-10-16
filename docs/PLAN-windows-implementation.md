@@ -235,3 +235,26 @@ optional architecture/OS support separately when its gates remain unverified.
   bridge passes execution scope over stdin, holds a cancellation pipe, and leaves
   artifact publishing and credentials on the native runtime side. No commands
   will be enabled until the bridge, cancellation and startup probe pass WSL CI.
+
+- Rex run 38876174569 passed the full x64 host suite and real host/runtime plus
+  CPU embedder readiness, memory readiness and host-death child cleanup. Its
+  unsigned installer build exposed a macOS-only RunEvent::Reopen match arm; the
+  arm is now platform-gated and the native installer rerun is pending.
+- The supplied Windows 11 ARM64 VM is reachable over SSH. Disposable WSL tests
+  leave its existing Rex-VM-Probe distribution untouched. ARM64 runtime-death
+  cleanup passed; the first unprivileged write probe correctly failed closed.
+  The distribution now maps Windows-drive ownership to its unprivileged UID;
+  the corrected command/Python/confinement tests are running.
+- Runtime exposes its existing WSL preflight under sandbox/wsl for host reuse.
+  Rex now stages, checksums and probes a replacement owned distribution before
+  activation. It keeps a previous installation through failed setup and checks
+  a random ownership marker before retiring only its own distributions.
+  Missing WSL or failed preflight keeps native chat/memory usable with commands off.
+- Settings includes explicit sandbox setup/repair, administrator/reboot guidance
+  when WSL is unavailable, and task-idle checks. The complete bundle builds an
+  unprivileged Python/tool rootfs from a checksum-pinned Alpine base, with
+  interop disabled. Native setup/repair tests are added but not yet verified.
+- Full Rex Go tests and vet, 68 UI tests, production UI build, Windows host test
+  cross-build and macOS Rust check pass after setup integration. One broader
+  runtime Python test still assumes Linux /proc; it fails on macOS and is not
+  counted as a passing cross-platform check.

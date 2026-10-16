@@ -50,6 +50,8 @@ func (h *Host) Handler() http.Handler {
 	api.HandleFunc("GET /api/status", h.status)
 	api.HandleFunc("GET /api/attention", h.attention)
 	api.HandleFunc("GET /api/settings", h.getSettings)
+	api.HandleFunc("GET /api/command-sandbox", h.commandSandboxStatus)
+	api.HandleFunc("POST /api/command-sandbox/setup", h.setupCommandSandbox)
 	api.HandleFunc("PUT /api/settings", h.saveSettings)
 	api.HandleFunc("POST /api/settings/test", h.testProvider)
 	api.HandleFunc("GET /api/providers/{provider}/models", h.providerModels)

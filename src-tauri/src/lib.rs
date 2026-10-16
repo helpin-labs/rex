@@ -176,11 +176,16 @@ pub fn run() {
             let browser_executable = app.path().resolve("resources/browser/chrome-win64/chrome.exe", BaseDirectory::Resource)?;
             #[cfg(not(target_os = "windows"))]
             let browser_executable = std::path::PathBuf::new();
+            #[cfg(target_os = "windows")]
+            let wsl_resources = app.path().resolve("resources/wsl", BaseDirectory::Resource)?;
+            #[cfg(not(target_os = "windows"))]
+            let wsl_resources = std::path::PathBuf::new();
             let (mut events, child) = app
                 .shell()
                 .sidecar("rex-host")?
                 .env("REX_EMBEDDING_MODEL", embedding_model)
                 .env("REX_BROWSER_EXECUTABLE", browser_executable.to_string_lossy().to_string())
+                .env("REX_WSL_RESOURCES", wsl_resources.to_string_lossy().to_string())
                 .env("REX_DATA_DIR", data_dir.to_string_lossy().to_string())
                 .env("REX_HOST_ADDR", format!("127.0.0.1:{port}"))
                 .env("REX_UI_TOKEN", connection.token.clone())
@@ -233,6 +238,7 @@ pub fn run() {
         .expect("error building Rex");
 
     app.run(|handle, event| match event {
+        #[cfg(target_os = "macos")]
         RunEvent::Reopen { .. } => reveal(handle),
         RunEvent::Exit => stop_host(handle),
         _ => {}
