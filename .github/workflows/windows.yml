@@ -19,27 +19,9 @@ jobs:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           persist-credentials: false
-      - name: Checkout matching runtime foundation
-        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
-        with:
-          repository: helpin-ai/agent-runtime
-          ref: 26f2748cde84a03b01fb538ff060b3479c872b5d
-          path: .ci/runtime
-          persist-credentials: false
       - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
         with:
           go-version-file: go.mod
-      - name: Use unreleased Windows runtime without changing dependency pins
-        shell: pwsh
-        run: |
-          @"
-          go 1.26.0
-          use (
-            .
-            ./.ci/runtime
-          )
-          "@ | Set-Content -Encoding utf8 go.windows.work
-          "GOWORK=$PWD/go.windows.work" >> $env:GITHUB_ENV
       - name: Build Windows x64 host
         run: go build -o src-tauri/binaries/rex-host-x86_64-pc-windows-msvc.exe ./cmd/rex-host
       - name: Test native host foundations
@@ -80,26 +62,9 @@ jobs:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           persist-credentials: false
-      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
-        with:
-          repository: helpin-ai/agent-runtime
-          ref: 26f2748cde84a03b01fb538ff060b3479c872b5d
-          path: .ci/runtime
-          persist-credentials: false
       - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
         with:
           go-version-file: go.mod
-      - name: Select verified runtime portability source
-        shell: pwsh
-        run: |
-          @"
-          go 1.26.0
-          use (
-            .
-            ./.ci/runtime
-          )
-          "@ | Set-Content -Encoding utf8 go.windows.work
-          "GOWORK=$PWD/go.windows.work" >> $env:GITHUB_ENV
       - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
         with:
           node-version: '24'

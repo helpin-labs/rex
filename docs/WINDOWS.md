@@ -49,9 +49,9 @@ pnpm install --frozen-lockfile
 pnpm tauri build --config src-tauri/tauri.windows.conf.json
 ```
 
-Until runtime Windows support is released, use the same pinned runtime source
-workspace as `.github/workflows/windows.yml`; the published dependency pin alone
-does not include this branch's portability work.
+`go.mod` pins the verified runtime commit as a Go pseudo-version; normal builds
+and CI consume that same code without a local workspace override. Replace the
+preview pin with the corresponding release tag after the runtime branch merges.
 
 The workflow runs native host/credential/process tests, Chrome and Edge tests,
 bundled CPU memory readiness, WSL setup/repair/removal, then builds and installs

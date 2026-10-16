@@ -9,7 +9,6 @@ $previousGOOS, $previousGOARCH, $previousCGO = $env:GOOS, $env:GOARCH, $env:CGO_
 Push-Location $repoRoot
 try {
     $env:GOOS = 'windows'; $env:GOARCH = $Architecture; $env:CGO_ENABLED = '0'
-    # In CI, GOWORK selects the pinned Windows runtime source until it is released.
     $hostFlags = '-s -w'
     if ($env:REX_GOOGLE_CLIENT_ID) {
         $hostFlags += " -X github.com/helpin-ai/rex/internal/rex.googleClientID=$env:REX_GOOGLE_CLIENT_ID -X github.com/helpin-ai/rex/internal/rex.googleClientSecret=$env:REX_GOOGLE_CLIENT_SECRET"

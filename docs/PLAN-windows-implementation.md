@@ -326,3 +326,8 @@ optional architecture/OS support separately when its gates remain unverified.
   product initialization; this does not establish a native x64 installer result.
   Actual model-driven native ARM64 chat/memory/permissions/MCP/routine gates are
   running against the existing local model server with isolated data.
+
+- The preview now pins runtime 26f2748 directly in go.mod as
+  v0.13.16-0.20261016094832-26f2748cde84. The Windows workflow's temporary
+  cross-repository checkout/workspace is removed, so ordinary local builds and
+  CI consume the same code. SDK stays at v0.9.0, with no SDK changes required.
