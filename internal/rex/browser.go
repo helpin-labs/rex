@@ -169,7 +169,7 @@ func agentBrowser(ctx context.Context, args ...string) (string, error) {
 
 // agentBrowserPath finds the agent-browser binary.
 func agentBrowserPath() string {
-	binary := firstNonEmpty(os.Getenv("AGENT_BROWSER_BINARY"), "agent-browser")
+	binary := firstNonEmpty(os.Getenv("REX_AGENT_BROWSER_EXECUTABLE"), os.Getenv("AGENT_BROWSER_BINARY"), "agent-browser")
 	if path, err := exec.LookPath(binary); err == nil {
 		return path
 	}
@@ -313,27 +313,6 @@ func (b *BrowserControl) launch(ctx context.Context, botID, session, kind, url s
 func profileLocked(err error) bool {
 	message := strings.ToLower(err.Error())
 	return strings.Contains(message, "exit code: 21") || strings.Contains(message, "devtoolsactiveport") || strings.Contains(message, "profile") && strings.Contains(message, "in use")
-}
-
-// stopProfileHolders terminates Chrome processes started with this exact
-// profile folder. Only Rex's own bot profiles are ever passed here.
-func stopProfileHolders(profile string) {
-	output, err := exec.Command("ps", "-axo", "pid=,command=").Output()
-	if err != nil {
-		return
-	}
-	marker := "--user-data-dir=" + profile
-	for _, line := range strings.Split(string(output), "\n") {
-		line = strings.TrimSpace(line)
-		if !strings.Contains(line, marker) || strings.Contains(line, "--type=") {
-			continue
-		}
-		if pid, _, ok := strings.Cut(line, " "); ok {
-			_ = exec.Command("kill", pid).Run()
-		}
-	}
-	time.Sleep(1500 * time.Millisecond)
-	_ = os.Remove(filepath.Join(profile, "SingletonLock"))
 }
 
 // closeBotSessions closes every recorded browser session of a bot except one.

@@ -177,6 +177,10 @@ pub fn run() {
             #[cfg(not(target_os = "windows"))]
             let browser_executable = std::path::PathBuf::new();
             #[cfg(target_os = "windows")]
+            let browser_cli = app.path().resolve("resources/browser/agent-browser.exe", BaseDirectory::Resource)?;
+            #[cfg(not(target_os = "windows"))]
+            let browser_cli = std::path::PathBuf::new();
+            #[cfg(target_os = "windows")]
             let wsl_resources = app.path().resolve("resources/wsl", BaseDirectory::Resource)?;
             #[cfg(not(target_os = "windows"))]
             let wsl_resources = std::path::PathBuf::new();
@@ -185,6 +189,7 @@ pub fn run() {
                 .sidecar("rex-host")?
                 .env("REX_EMBEDDING_MODEL", embedding_model)
                 .env("REX_BROWSER_EXECUTABLE", browser_executable.to_string_lossy().to_string())
+                .env("REX_AGENT_BROWSER_EXECUTABLE", browser_cli.to_string_lossy().to_string())
                 .env("REX_WSL_RESOURCES", wsl_resources.to_string_lossy().to_string())
                 .env("REX_DATA_DIR", data_dir.to_string_lossy().to_string())
                 .env("REX_HOST_ADDR", format!("127.0.0.1:{port}"))

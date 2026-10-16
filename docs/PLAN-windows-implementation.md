@@ -278,3 +278,19 @@ optional architecture/OS support separately when its gates remain unverified.
 - The ARM64 VM's next WSL instance hit a CreateInstance timeout under software
   emulation before application tests ran. The previous confinement/worker and
   runtime-death results stand; the full bridge and product setup remain pending.
+
+- Runtime a92d469 passed all native Windows, Linux regression and real WSL bridge
+  jobs: runs 38879116898 and 38879116759. Python, file persistence, timeouts,
+  cancellation, runtime-death cleanup and filesystem/interop confinement passed.
+- ARM64 native host suite completed in the supplied clean VM. Two named-timezone
+  cases failed because no Go zone database is installed; Windows builds now embed
+  standard-library tzdata. Credential Manager correctly rejects the SSH network
+  logon session; its VM verification must use an interactive Windows login.
+  Other native host cases passed, including job cleanup, ACLs and junction guards.
+- Standard browser mode now bundles the same standalone agent-browser 0.25.5 CLI
+  as the runtime image, with a pinned archive checksum and Apache license. No
+  Node/npm install is required by users. Real cookie handoff is a native CI gate.
+- Windows profile-lock cleanup now enumerates native processes, reads argv through
+  the Windows API, matches the exact profile and excludes renderer children. It
+  holds the process handle during tree termination to prevent PID reuse. Native
+  tests ensure a similarly prefixed unrelated profile remains running.

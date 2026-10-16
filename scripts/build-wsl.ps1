@@ -38,6 +38,7 @@ try {
     Invoke-WSL -d $distribution --exec /bin/cp (LinuxPath $helper) /opt/agent-runtime/sandbox
     Invoke-WSL -d $distribution --exec /bin/chmod 755 /opt/agent-runtime/sandbox
     Invoke-WSL -d $distribution --exec /bin/cp (LinuxPath (Join-Path $root 'wsl.conf')) /etc/wsl.conf
+    Invoke-WSL -d $distribution --exec /bin/chmod 644 /etc/wsl.conf
     Invoke-WSL --terminate $distribution
     Invoke-WSL --export $distribution (Join-Path $destination rootfs.tar)
     @{ SHA256 = (Get-FileHash (Join-Path $destination rootfs.tar) -Algorithm SHA256).Hash.ToLowerInvariant(); Architecture = $Architecture } | ConvertTo-Json | Set-Content -Encoding ascii (Join-Path $destination rootfs.json)
