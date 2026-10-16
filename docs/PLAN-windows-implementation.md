@@ -177,3 +177,18 @@ optional architecture/OS support separately when its gates remain unverified.
   are implemented. CI will start real sidecars, verify memory readiness and command
   disablement, kill the host and check child cleanup, then build an unsigned installer.
   These scripts and installer are not yet verified on a Windows runner.
+
+- Runtime approval fixture failures were caused by the Windows runner's inherited
+  PostgreSQL password matching ordinary fixture narrative, not a weakened guard.
+  Tests now isolate that fixture variable; production redaction stays unchanged.
+- Rex memory readers and browser history now use escaped SQLite file URIs with
+  Windows drive handling. Tests cover spaces, hashes and percent signs.
+- Windows browser discovery and PE version metadata are implemented. Plain takeover
+  now uses Chromium's inherited Windows HANDLE transport. The shared pipe handshake
+  passed against a real macOS browser; native Chrome and Edge CI checks are queued.
+- Windows notifications use Tauri's maintained WinRT toast library with activation
+  routed to the existing conversation event. Taskbar attention/overlay and a tray
+  tooltip carry attention state. Interactive notification delivery remains unverified.
+- Regression checks passed: full Rex Go tests/vet, 68 frontend tests, production UI
+  build, Rust macOS check, and workflow validation. All Windows GUI/installer/WSL
+  acceptance gates remain pending their native evidence.

@@ -41,9 +41,20 @@ fn set_attention(app: tauri::AppHandle, count: u32) {
     let shown = (count > 0).then_some(count);
     if let Some(window) = app.get_webview_window("main") {
         let _ = window.set_badge_count(shown.map(i64::from));
+        #[cfg(target_os = "windows")]
+        {
+            let attention = shown.map(|_| tauri::UserAttentionType::Informational);
+            let _ = window.request_user_attention(attention);
+            let icon = if shown.is_some() { app.default_window_icon().cloned() } else { None };
+            let _ = window.set_overlay_icon(icon);
+        }
     }
     if let Some(tray) = app.tray_by_id("rex") {
         let _ = tray.set_title(shown.map(|count| count.to_string()));
+        #[cfg(target_os = "windows")]
+        let _ = tray.set_tooltip(Some(if count > 0 {
+            format!("Rex: {count} conversations need attention")
+        } else { "Rex".to_string() }));
     }
 }
 
@@ -73,7 +84,22 @@ fn notify(app: tauri::AppHandle, title: String, body: String, conversation_id: S
             let _ = app.emit("open-conversation", conversation_id);
         }
     });
-    #[cfg(not(target_os = "macos"))]
+    #[cfg(target_os = "windows")]
+    std::thread::spawn(move || {
+        let identifier = app.config().identifier.clone();
+        let toast = tauri_winrt_notification::Toast::new(&identifier)
+            .title(&title)
+            .text1(&body)
+            .on_activated(move |_| {
+                reveal(&app);
+                let _ = app.emit("open-conversation", conversation_id.clone());
+                Ok(())
+            });
+        if let Err(error) = toast.show() {
+            eprintln!("Could not show Windows notification: {error}");
+        }
+    });
+    #[cfg(not(any(target_os = "macos", target_os = "windows")))]
     let _ = (app, title, body, conversation_id);
 }
 

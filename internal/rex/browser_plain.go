@@ -35,8 +35,10 @@ func startPlainBrowser(executable string, args []string) (*plainBrowser, error) 
 		return nil, err
 	}
 	command := exec.Command(executable, args...)
-	command.ExtraFiles = []*os.File{commandsRead, repliesWrite}
-	err = command.Start()
+	err = configureBrowserPipes(command, commandsRead, commandsWrite, repliesRead, repliesWrite)
+	if err == nil {
+		err = command.Start()
+	}
 	commandsRead.Close()
 	repliesWrite.Close()
 	if err != nil {

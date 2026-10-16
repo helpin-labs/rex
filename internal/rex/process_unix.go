@@ -63,3 +63,20 @@ func revealPath(path string, selectFile bool) error {
 
 // Unix data privacy is established by the host's existing 0700/0600 creation modes.
 func SecureDataDirectory(path string) error { return nil }
+
+func configureBrowserPipes(command *exec.Cmd, childRead, parentWrite, parentRead, childWrite *os.File) error {
+	command.ExtraFiles = []*os.File{childRead, childWrite}
+	return nil
+}
+
+func browserVersion(executable string) string {
+	index := strings.Index(executable, ".app/")
+	if index < 0 {
+		return ""
+	}
+	output, err := exec.Command("/usr/libexec/PlistBuddy", "-c", "Print CFBundleShortVersionString", filepath.Join(executable[:index+4], "Contents", "Info.plist")).Output()
+	if err != nil {
+		return ""
+	}
+	return strings.TrimSpace(string(output))
+}

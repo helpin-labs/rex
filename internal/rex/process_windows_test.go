@@ -136,3 +136,23 @@ func TestWindowsDataDirectoryACL(t *testing.T) {
 		t.Fatal("accepted drive root")
 	}
 }
+
+func TestWindowsBrowserDiscovery(t *testing.T) {
+	local, installed := t.TempDir(), t.TempDir()
+	t.Setenv("LOCALAPPDATA", local)
+	t.Setenv("ProgramFiles", installed)
+	t.Setenv("ProgramFiles(x86)", "")
+	paths := []string{filepath.Join(local, "Google", "Chrome", "Application", "chrome.exe"), filepath.Join(installed, "Microsoft", "Edge", "Application", "msedge.exe")}
+	for _, path := range paths {
+		if err := os.MkdirAll(filepath.Dir(path), 0700); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.WriteFile(path, nil, 0700); err != nil {
+			t.Fatal(err)
+		}
+	}
+	found := DetectBrowsers()
+	if len(found) != 2 || found[0].Path != paths[0] || found[1].Path != paths[1] {
+		t.Fatalf("browser discovery: %+v", found)
+	}
+}

@@ -23,7 +23,7 @@ jobs:
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           repository: helpin-ai/agent-runtime
-          ref: ff5f761ae29723f39d4914d639e1a9c86604a428
+          ref: ed341f0d365e5510cbcd78de70a81b7f972735b4
           path: .ci/runtime
           persist-credentials: false
       - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
@@ -43,7 +43,21 @@ jobs:
       - name: Build Windows x64 host
         run: go build -o rex-host-x64.exe ./cmd/rex-host
       - name: Test native host foundations
-        run: go test ./internal/rex -run 'Test(NativeExecutableNames|WindowsEnvironment|WindowsJob|WindowsCredentialManager|WindowsDataDirectory|RoutineFailureCooldown|SuccessfulManualRoutine|ExplicitlyDisabledRoutine|RuntimeSDK)' -timeout 5m
+        run: go test ./internal/rex -run 'Test(NativeExecutableNames|WindowsEnvironment|WindowsJob|WindowsCredentialManager|WindowsDataDirectory|WindowsBrowserDiscovery|RoutineFailureCooldown|SuccessfulManualRoutine|ExplicitlyDisabledRoutine|RuntimeSDK)' -timeout 5m
+      - name: Install pinned browser and exercise native pipe
+        shell: pwsh
+        run: |
+          $archive = Join-Path $env:RUNNER_TEMP chrome-win64.zip
+          Invoke-WebRequest https://storage.googleapis.com/chrome-for-testing-public/149.0.7827.115/win64/chrome-win64.zip -OutFile $archive
+          if ((Get-FileHash $archive -Algorithm SHA256).Hash.ToLowerInvariant() -ne '1553389900824037aec828effab3051337df57a571e2f8800ee71cf8ed6fa76d') { throw 'Chrome checksum mismatch' }
+          $destination = Join-Path $env:RUNNER_TEMP chrome-test
+          Expand-Archive $archive $destination
+          $env:REX_BROWSER_PIPE_E2E = "$destination/chrome-win64/chrome.exe"
+          go test ./internal/rex -run '^TestPlainBrowserNativePipe$' -count=1 -timeout 1m
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          $env:REX_BROWSER_PIPE_E2E = "${env:ProgramFiles(x86)}/Microsoft/Edge/Application/msedge.exe"
+          if (!(Test-Path $env:REX_BROWSER_PIPE_E2E)) { throw 'Edge was not found on the Windows runner' }
+          go test ./internal/rex -run '^TestPlainBrowserNativePipe$' -count=1 -timeout 1m
       - name: All host tests
         run: go test ./... -timeout 5m
       - name: Cross-build Windows ARM64 host
@@ -64,7 +78,7 @@ jobs:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           repository: helpin-ai/agent-runtime
-          ref: ff5f761ae29723f39d4914d639e1a9c86604a428
+          ref: ed341f0d365e5510cbcd78de70a81b7f972735b4
           path: .ci/runtime
           persist-credentials: false
       - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0

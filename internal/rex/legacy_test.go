@@ -10,6 +10,7 @@ import (
 func TestMigrateFromDostMovesDataAndPaths(t *testing.T) {
 	home := t.TempDir()
 	t.Setenv("HOME", home)
+	t.Setenv("USERPROFILE", home)
 	support := filepath.Join(home, "Library", "Application Support")
 	oldDir := filepath.Join(support, LegacyDataDirName)
 	newDir := filepath.Join(support, "ai.rex.desktop")

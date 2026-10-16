@@ -15,6 +15,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"runtime"
 	"strings"
 	"sync"
 	"time"
@@ -90,14 +91,29 @@ type BrowserApp struct {
 func DetectBrowsers() []BrowserApp {
 	home, _ := os.UserHomeDir()
 	var found []BrowserApp
-	for _, app := range []BrowserApp{
+	apps := []BrowserApp{
 		{"Google Chrome", "Google Chrome.app/Contents/MacOS/Google Chrome"},
 		{"Brave", "Brave Browser.app/Contents/MacOS/Brave Browser"},
 		{"Microsoft Edge", "Microsoft Edge.app/Contents/MacOS/Microsoft Edge"},
 		{"Chromium", "Chromium.app/Contents/MacOS/Chromium"},
 		{"Vivaldi", "Vivaldi.app/Contents/MacOS/Vivaldi"},
-	} {
-		for _, root := range []string{"/Applications", filepath.Join(home, "Applications")} {
+	}
+	roots := []string{"/Applications", filepath.Join(home, "Applications")}
+	if runtime.GOOS == "windows" {
+		roots = []string{os.Getenv("LOCALAPPDATA"), os.Getenv("ProgramFiles"), os.Getenv("ProgramFiles(x86)")}
+		apps = []BrowserApp{
+			{"Google Chrome", filepath.Join("Google", "Chrome", "Application", "chrome.exe")},
+			{"Brave", filepath.Join("BraveSoftware", "Brave-Browser", "Application", "brave.exe")},
+			{"Microsoft Edge", filepath.Join("Microsoft", "Edge", "Application", "msedge.exe")},
+			{"Chromium", filepath.Join("Chromium", "Application", "chrome.exe")},
+			{"Vivaldi", filepath.Join("Vivaldi", "Application", "vivaldi.exe")},
+		}
+	}
+	for _, app := range apps {
+		for _, root := range roots {
+			if root == "" {
+				continue
+			}
 			path := filepath.Join(root, app.Path)
 			if info, err := os.Stat(path); err == nil && !info.IsDir() {
 				found = append(found, BrowserApp{Name: app.Name, Path: path})
@@ -553,7 +569,17 @@ func plainBrowserArgs(profile, url string) []string {
 // which it uses when no other browser is chosen.
 func bundledChrome() string {
 	home, _ := os.UserHomeDir()
-	matches, _ := filepath.Glob(filepath.Join(home, ".agent-browser", "browsers", "chrome-*", "Google Chrome for Testing.app", "Contents", "MacOS", "Google Chrome for Testing"))
+
+	var matches []string
+	for _, layout := range [][]string{
+		{"Google Chrome for Testing.app", "Contents", "MacOS", "Google Chrome for Testing"},
+		{"chrome-win64", "chrome.exe"}, {"chrome-linux64", "chrome"},
+	} {
+		pattern := filepath.Join(append([]string{home, ".agent-browser", "browsers", "chrome-*"}, layout...)...)
+		found, _ := filepath.Glob(pattern)
+		matches = append(matches, found...)
+	}
+
 	newest := ""
 	for _, match := range matches {
 		if newest == "" || compareVersions(versionOf(match), versionOf(newest)) > 0 {
@@ -620,7 +646,7 @@ func clearChallengeCookies(profile string) {
 		if _, err := os.Stat(path); err != nil {
 			continue
 		}
-		db, err := sql.Open("sqlite", "file:"+path+"?_pragma=busy_timeout(2000)")
+		db, err := sql.Open("sqlite", sqliteFileURI(path)+"?_pragma=busy_timeout(2000)")
 		if err != nil {
 			continue
 		}
@@ -642,17 +668,7 @@ func (b *BrowserControl) userAgent(ctx context.Context) string {
 	return chromeUserAgent(firstNonEmpty(BrowserExecutable(settings), bundledChrome()))
 }
 
-func chromeUserAgent(executable string) string {
-	index := strings.Index(executable, ".app/")
-	if index < 0 {
-		return ""
-	}
-	output, err := exec.Command("/usr/libexec/PlistBuddy", "-c", "Print CFBundleShortVersionString", filepath.Join(executable[:index+4], "Contents", "Info.plist")).Output()
-	if err != nil {
-		return ""
-	}
-	return userAgentFor(strings.TrimSpace(string(output)))
-}
+func chromeUserAgent(executable string) string { return userAgentFor(browserVersion(executable)) }
 
 // userAgentFor builds Chrome's reduced user agent from a Chromium-based
 // browser's version, whose first number is Chromium's major version.
@@ -661,7 +677,11 @@ func userAgentFor(version string) string {
 	if major == "" || strings.Trim(major, "0123456789") != "" {
 		return ""
 	}
-	return "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/" + major + ".0.0.0 Safari/537.36"
+	platform := "Macintosh; Intel Mac OS X 10_15_7"
+	if runtime.GOOS == "windows" {
+		platform = "Windows NT 10.0; Win64; x64"
+	}
+	return "Mozilla/5.0 (" + platform + ") AppleWebKit/537.36 (KHTML, like Gecko) Chrome/" + major + ".0.0.0 Safari/537.36"
 }
 
 // withoutChallenge removes Cloudflare's challenge parameters from a page
@@ -688,7 +708,7 @@ func lastVisited(profile string) string {
 	if _, err := os.Stat(path); err != nil {
 		return ""
 	}
-	db, err := sql.Open("sqlite", "file:"+path+"?mode=ro&_pragma=busy_timeout(2000)")
+	db, err := sql.Open("sqlite", sqliteFileURI(path)+"?mode=ro&_pragma=busy_timeout(2000)")
 	if err != nil {
 		return ""
 	}

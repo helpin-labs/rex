@@ -7,6 +7,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"slices"
 	"strconv"
 	"syscall"
 	"time"
@@ -151,4 +152,35 @@ func revealPath(path string, selectFile bool) error {
 		args = append([]string{"/select,"}, args...)
 	}
 	return exec.Command(filepath.Join(root, "explorer.exe"), args...).Start()
+}
+
+// Chromium names inherited Windows HANDLEs instead of Unix descriptors 3 and 4.
+func configureBrowserPipes(command *exec.Cmd, childRead, parentWrite, parentRead, childWrite *os.File) error {
+	for _, file := range []*os.File{parentWrite, parentRead} {
+		if err := windows.SetHandleInformation(windows.Handle(file.Fd()), windows.HANDLE_FLAG_INHERIT, 0); err != nil {
+			return err
+		}
+	}
+	ConfigureProcess(command)
+	command.SysProcAttr.AdditionalInheritedHandles = []syscall.Handle{syscall.Handle(childRead.Fd()), syscall.Handle(childWrite.Fd())}
+	flag := "--remote-debugging-io-pipes=" + strconv.FormatUint(uint64(childRead.Fd()), 10) + "," + strconv.FormatUint(uint64(childWrite.Fd()), 10)
+	command.Args = slices.Insert(command.Args, 1, flag)
+	return nil
+}
+
+func browserVersion(executable string) string {
+	size, err := windows.GetFileVersionInfoSize(executable, nil)
+	if err != nil || size == 0 {
+		return ""
+	}
+	data := make([]byte, size)
+	if err := windows.GetFileVersionInfo(executable, 0, size, unsafe.Pointer(&data[0])); err != nil {
+		return ""
+	}
+	var version *windows.VS_FIXEDFILEINFO
+	var length uint32
+	if err := windows.VerQueryValue(unsafe.Pointer(&data[0]), `\`, unsafe.Pointer(&version), &length); err != nil || version == nil || length < uint32(unsafe.Sizeof(*version)) {
+		return ""
+	}
+	return fmt.Sprintf("%d.%d.%d.%d", version.FileVersionMS>>16, version.FileVersionMS&65535, version.FileVersionLS>>16, version.FileVersionLS&65535)
 }

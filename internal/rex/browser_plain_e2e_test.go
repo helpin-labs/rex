@@ -58,3 +58,32 @@ func TestPlainBrowserHandsCookiesToTheBot(t *testing.T) {
 		t.Fatalf("bot browser saw %s", output)
 	}
 }
+
+// Verify the native pipe handshake without requiring the agent-browser CLI.
+func TestPlainBrowserNativePipe(t *testing.T) {
+	executable := os.Getenv("REX_BROWSER_PIPE_E2E")
+	if executable == "" {
+		t.Skip("set REX_BROWSER_PIPE_E2E to a Chromium executable")
+	}
+	fixture := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) { fmt.Fprint(w, "<title>Rex pipe fixture</title>") }))
+	defer fixture.Close()
+	browser, err := startPlainBrowser(executable, plainBrowserArgs(t.TempDir(), fixture.URL))
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { browser.close(5 * time.Second) })
+	if _, err := browser.call("Browser.getVersion", map[string]any{}, time.Now().Add(15*time.Second)); err != nil {
+		t.Fatal(err)
+	}
+	deadline := time.Now().Add(15 * time.Second)
+	for browser.currentURL(deadline) != fixture.URL+"/" {
+		if time.Now().After(deadline) {
+			t.Fatal("native pipe did not return the open page")
+		}
+		time.Sleep(100 * time.Millisecond)
+	}
+	browser.close(5 * time.Second)
+	if !browser.waitExit(0) {
+		t.Fatal("native browser survived close")
+	}
+}
