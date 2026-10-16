@@ -1,7 +1,7 @@
 [package]
 name = "rex-desktop"
 version = "0.1.0"
-description = "Rex: personal bots on your Mac"
+description = "Rex: personal bots on your computer"
 license = "Apache-2.0"
 authors = ["Helpin"]
 edition = "2021"

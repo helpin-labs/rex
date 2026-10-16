@@ -1,6 +1,7 @@
 # Native Windows CPU embedder. Keep model identity/checksum in sync with build-embedder.sh.
 param([ValidateSet('amd64','arm64')][string]$Architecture = 'amd64')
 $ErrorActionPreference = 'Stop'
+$ProgressPreference = 'SilentlyContinue'
 $PSNativeCommandUseErrorActionPreference = $true
 $repoRoot = Split-Path -Parent $PSScriptRoot
 $llamaTag = 'b11430'
@@ -15,7 +16,7 @@ $cache = Join-Path $repoRoot '.cache'
 New-Item -ItemType Directory -Force $binDir, $modelDir, $cache | Out-Null
 $model = Join-Path $modelDir $modelFile
 if (!(Test-Path $model) -or (Get-FileHash $model -Algorithm SHA256).Hash.ToLowerInvariant() -ne $modelHash) {
-    Invoke-WebRequest -Uri $modelUrl -OutFile "$model.part"
+    Invoke-WebRequest -Uri $modelUrl -OutFile "$model.part" -TimeoutSec 300
     if ((Get-FileHash "$model.part" -Algorithm SHA256).Hash.ToLowerInvariant() -ne $modelHash) {
         Remove-Item "$model.part"
         throw 'Embedding model checksum mismatch'

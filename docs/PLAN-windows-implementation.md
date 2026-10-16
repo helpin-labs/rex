@@ -133,8 +133,8 @@ Do not duplicate these responsibilities in Rex or change other apps' defaults.
 | Runtime Windows arm64 build | cross-build passed on Windows runner | run 38870509025 |
 | Rex Windows amd64 build | cross-build passed | isolated workspace against runtime feature branch; native CI pending |
 | Rex Windows arm64 build | cross-build passed | isolated workspace against runtime feature branch |
-| Windows native core/memory/credentials | runtime memory tests passed; Rex pending | Runtime run 38870509025; private Rex CI access requested |
-| Windows browser integration | pending | |
+| Windows native core/memory/credentials | core tests passed; bundled service startup pending | Runtime run 38873202939; Rex run 38872456628 credential/ACL/job checks |
+| Windows browser integration | native Chrome E2E and Chrome/Edge pipes passed; installer/browser cleanup gates remain | Runtime run 38872748373; Rex run 38872456628 |
 | WSL confinement proof | pending, requires Windows | |
 | WSL setup/commands/cancel/restart | pending | |
 | Installer/signing/upgrade/uninstall | pending | |
@@ -206,3 +206,15 @@ optional architecture/OS support separately when its gates remain unverified.
   symlink escapes and Windows executable denial. It never enables app commands.
 - Private Rex workflow reads now work via Git's existing noninteractive GitHub
   authentication; connector permission is no longer blocking native CI review.
+
+- Runtime Windows run 38873202939 is green for the expanded suite, including
+  native API/model-loop regressions, memory jobs/banks, ACLs, command descendant
+  cancellation, Chrome extension E2E, and x64/ARM64 builds.
+- The disposable WSL2 import succeeded on a hosted Windows runner. Its first
+  test invocation failed on PowerShell argument parsing, before confinement ran;
+  quoted test flags fix that harness issue. The confinement rerun is pending.
+- The Windows installer now includes checksum-pinned Chrome for Testing, passed
+  to the runtime by the desktop shell. Extension mode needs no external Node or
+  agent-browser install. Legacy CDP mode's separate CLI dependency remains a gate.
+- Windows-facing copy and bot instructions now use platform-neutral wording.
+  Commands continue to fail closed with a verified-sandbox message.

@@ -163,7 +163,7 @@ export function AppsView({ bots, onBotsChanged, focusApp }: { bots: Bot[]; onBot
       </nav>
     </SideList>
     <section className="page-content gallery-page">
-      <PageHeader title={title} description="Give your bots tools from the apps you use. Rex signs in on the app's site and keeps the sign-in in your macOS Keychain. Then choose which bots can use each app."
+      <PageHeader title={title} description="Give your bots tools from the apps you use. Rex signs in on the app's site and keeps the sign-in in your system credential store. Then choose which bots can use each app."
         actions={filter !== "connected" && <SearchBox value={query} onChange={setQuery} placeholder="Search apps" />} />
       {error && <div className="inline-error">{error}</div>}
       {!loaded ? <LoaderCircle className="spin" />
@@ -285,7 +285,7 @@ export function ConnectionEditor({ initial, app, justConnected, bots, onClose, o
           <button type="button" className="button secondary small" disabled={busy || !google?.configured} onClick={signIn}>{connection.signed_in ? "Sign in again" : "Sign in with Google"}</button>
         </div>
       </Field>}
-      {connection.auth === "oauth" && <Field label="Account" hint="You sign in on the app's page in your browser. Rex keeps the sign-in in your macOS Keychain and renews it automatically.">
+      {connection.auth === "oauth" && <Field label="Account" hint="You sign in on the app's page in your browser. Rex keeps the sign-in in your system credential store and renews it automatically.">
         <div className="row">
           {connection.signed_in ? <span className="badge ok-badge">Signed in</span> : <span className="muted small">Not signed in</span>}
           <span className="spacer" />
@@ -293,7 +293,7 @@ export function ConnectionEditor({ initial, app, justConnected, bots, onClose, o
           <button type="button" className="button secondary small" disabled={busy || !connection.url || !connection.name} onClick={signIn}>{connection.signed_in ? "Sign in again" : "Sign in"}</button>
         </div>
       </Field>}
-      {connection.auth === "bearer" && <Field label="Access token" hint={connection.has_token ? "A token is stored in your Keychain. Enter a new one to replace it." : app?.tokenHint || "Stored in your macOS Keychain"}>
+      {connection.auth === "bearer" && <Field label="Access token" hint={connection.has_token ? "A token is stored in your system credential store. Enter a new one to replace it." : app?.tokenHint || "Stored in your system credential store"}>
         <input type="password" value={connection.token || ""} onChange={event => setConnection({ ...connection, token: event.target.value })} placeholder={connection.has_token ? "••••••••" : "token"} />
       </Field>}
     </div>
@@ -348,7 +348,7 @@ function GoogleClientSetup({ status, onSaved, onCancel }: { status: GoogleStatus
     {error && <div className="inline-error">{error}</div>}
     <div className="two-col">
       <Field label="Client ID"><input value={clientId} onChange={event => setClientId(event.target.value)} placeholder="1234-abc.apps.googleusercontent.com" spellCheck={false} /></Field>
-      <Field label="Client secret" hint="Stored in your macOS Keychain"><input type="password" value={secret} onChange={event => setSecret(event.target.value)} placeholder="GOCSPX-…" /></Field>
+      <Field label="Client secret" hint="Stored in your system credential store"><input type="password" value={secret} onChange={event => setSecret(event.target.value)} placeholder="GOCSPX-…" /></Field>
     </div>
     <p className="muted small">When Google says the app isn't verified, choose Continue: it's your own client. {status.configured && "Changing the client signs Google apps out."}</p>
     <div className="row">

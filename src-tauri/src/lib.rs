@@ -172,10 +172,15 @@ pub fn run() {
                 .resolve("resources/models/bekko-embedding-v1-a8m-Q8_0.gguf", BaseDirectory::Resource)
                 .map(|path| path.to_string_lossy().to_string())
                 .unwrap_or_default();
+            #[cfg(target_os = "windows")]
+            let browser_executable = app.path().resolve("resources/browser/chrome-win64/chrome.exe", BaseDirectory::Resource)?;
+            #[cfg(not(target_os = "windows"))]
+            let browser_executable = std::path::PathBuf::new();
             let (mut events, child) = app
                 .shell()
                 .sidecar("rex-host")?
                 .env("REX_EMBEDDING_MODEL", embedding_model)
+                .env("REX_BROWSER_EXECUTABLE", browser_executable.to_string_lossy().to_string())
                 .env("REX_DATA_DIR", data_dir.to_string_lossy().to_string())
                 .env("REX_HOST_ADDR", format!("127.0.0.1:{port}"))
                 .env("REX_UI_TOKEN", connection.token.clone())

@@ -14,6 +14,7 @@ $processInfo.Environment['REX_HOST_ADDR'] = '127.0.0.1:0'
 $processInfo.Environment['REX_SECRETS'] = 'memory'
 $processInfo.Environment['AGENT_RUNTIME_BINARY'] = Join-Path $binDir "agent-runtime-$triple.exe"
 $processInfo.Environment['REX_EMBEDDER_BINARY'] = Join-Path $binDir "llama-server-$triple.exe"
+$processInfo.Environment['REX_BROWSER_EXECUTABLE'] = Join-Path $repoRoot 'src-tauri/resources/browser/chrome-win64/chrome.exe'
 $processInfo.Environment['REX_EMBEDDING_MODEL'] = Join-Path $repoRoot 'src-tauri/resources/models/bekko-embedding-v1-a8m-Q8_0.gguf'
 $hostProcess = [Diagnostics.Process]::Start($processInfo)
 $children = @()

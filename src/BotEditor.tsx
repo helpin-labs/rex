@@ -126,8 +126,8 @@ export function BotEditor({ initial, settings, status, onClose, onSaved, onDelet
     { key: "browser" as const, icon: <AppWindow size={17} />, label: "Use a browser", description: "Its own browser with a profile that keeps logins. You can take over for sign-ins.",
       disabled: settings ? !settings.browser_enabled : false, note: settings && !settings.browser_enabled ? "Browsers are off in Settings → Tools." : undefined },
     { key: "files_read" as const, icon: <FileText size={17} />, label: "Read files", description: "Files in its own workspace folder only" },
-    { key: "files_write" as const, icon: <PenLine size={17} />, label: "Create and edit files", description: "Inside its workspace folder", disabled: !writeTools, note: writeTools ? undefined : "Needs the macOS sandbox, which is not active in the bot engine." },
-    { key: "shell" as const, icon: <SquareTerminal size={17} />, label: "Run shell commands", description: "In a macOS sandbox limited to its folder. Asks first unless TypeSafe clears it.", disabled: !writeTools },
+    { key: "files_write" as const, icon: <PenLine size={17} />, label: "Create and edit files", description: "Inside its workspace folder", disabled: !writeTools, note: writeTools ? undefined : "Needs the command sandbox, which is not active in the bot engine." },
+    { key: "shell" as const, icon: <SquareTerminal size={17} />, label: "Run shell commands", description: "In a command sandbox limited to its folder. Asks first unless TypeSafe clears it.", disabled: !writeTools },
   ];
   const on = abilities.filter(item => bot.capabilities[item.key]).length;
   const setupExtension = async () => {

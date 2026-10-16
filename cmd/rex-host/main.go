@@ -374,6 +374,9 @@ func (l runtimeLaunch) start(ctx context.Context) (*exec.Cmd, <-chan error, erro
 		"AGENT_RUNTIME_BROWSER_PROFILE_ROOT="+filepath.Join(l.dataDir, "browser-profiles"),
 		"AGENT_RUNTIME_BROWSER_PROFILE_APP_ID="+rex.AppID,
 	)
+	if executable := os.Getenv("REX_BROWSER_EXECUTABLE"); executable != "" {
+		command.Env = append(command.Env, "AGENT_RUNTIME_BROWSER_EXTENSION_EXECUTABLE="+executable)
+	}
 	command.Env = append(command.Env, l.browserShim...)
 	command.Env = append(command.Env, env...)
 	// The bot's browser (installed Chrome/Brave/Edge, visible, with the bot's

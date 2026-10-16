@@ -36,7 +36,7 @@ type Config struct {
 }
 
 // ErrWriteToolsUnavailable explains why write and shell access are off.
-var ErrWriteToolsUnavailable = errors.New("writing files and running commands need the macOS sandbox (Seatbelt), which is not active in the bot engine. This bot can read files in its folder")
+var ErrWriteToolsUnavailable = errors.New("writing files and running commands need a verified command sandbox, which is not active in the bot engine. This bot can read files in its folder")
 
 // Host coordinates bots, conversations, the runtime, memory and routines.
 type Host struct {

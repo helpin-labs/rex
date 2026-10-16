@@ -21,3 +21,4 @@ go.work.sum
 .ci/
 go.windows.work
 go.windows.work.sum
+src-tauri/resources/browser/
