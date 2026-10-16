@@ -1,0 +1,152 @@
+# Windows implementation and verification plan
+
+Status: in progress. Created 2026-10-16. No Windows release is verified yet.
+
+## Goal and boundaries
+
+Ship a native Windows Rex desktop app with chat, credentials, memory, web,
+browsers, files, routines, MCP, and restart recovery. Commands run only through
+an isolated Rex-owned WSL2 distribution after a confinement probe succeeds.
+Without WSL, the app remains usable and command execution stays unavailable.
+Keep macOS and Linux behavior working. Target Windows x64 first; ARM64 is a
+separate gate, not implied by an x64 build. Windows 10 support remains contingent
+on passing the same WebView2 and WSL checks as Windows 11.
+
+agent-runtime owns portable locking/file access, command dispatch and isolation,
+browser execution, durable memory jobs, and capability reporting. Rex owns
+Windows service supervision, local credentials/storage, WSL installation and
+repair policy, UI, native notifications, and packaging. The Go SDK owns typed
+shared API contracts; extend it only when the runtime API requires a new contract.
+Do not duplicate these responsibilities in Rex or change other apps' defaults.
+
+## Baseline evidence
+
+- Windows PRD: docs/PRD-windows-wsl2.md, draft dated 2026-10-06.
+- Rex host Windows amd64 cross-build fails on Unix process groups/signals.
+- Published runtime v0.13.14 Windows amd64 cross-build fails on repository-cache
+  Unix open/locking and memory job flock calls.
+- Browser discovery, reveal actions, executable names and environments assume macOS.
+- Embedding build enables Metal and has no Windows artifact path.
+- Notifications are intentionally a no-op outside macOS.
+- Installer targets are app/dmg; no Windows build/test workflow exists in Rex.
+- The existing keyring dependency supports Windows but limits a secret to 2,560 bytes.
+
+## Work sequence and acceptance gates
+
+### 1. Platform-neutral runtime build
+
+- Extract existing Unix file locking and safe lock-file opening behind platform
+  files. Implement Windows shared/exclusive locks and reparse-point protection.
+- Reuse that implementation for repository-cache and memory-worker ownership.
+- Inventory remaining unguarded Unix calls and split process, filesystem, and
+  command-specific code by platform. Do not weaken containment or ownership checks.
+- Gate: runtime builds for Windows amd64/arm64; lock contention and process-exit
+  release, shared-reader/exclusive-writer behavior, symlink/reparse rejection,
+  memory queue durability, and all touched Unix tests pass.
+
+### 2. Native Rex startup and shutdown
+
+- Centralize platform-dependent sidecar filenames, target triples, environment
+  construction, and application-data locations. Use .exe and Windows path rules.
+- Keep Unix process groups on macOS/Linux. Use Windows Job objects to own the
+  runtime and embedder process trees, including cancellation and parent death.
+- Identify an orphan by executable identity before terminating it; never kill an
+  unrelated reused PID. Remove syscall.Exec assumptions from browser forwarding.
+- Gate: host cross-builds for amd64/arm64; macOS tests remain green. On Windows,
+  start/quit/crash/restart leave no orphan runtime/embedder and recover checkpoints.
+
+### 3. Windows core app without WSL
+
+- Configure native per-user data/workspace directories and Explorer reveal.
+- Keep the Secrets interface. Support large OAuth payloads securely using the
+  Windows credential store with atomic replacement and deletion; handle legacy
+  small records. Avoid plaintext files or secrets in the UI/logs.
+- Build/package a Windows llama-server using CPU as the verified baseline and
+  the same pinned embedding model/checksum. GPU acceleration is not required.
+- Gate: hosted/local chat, streaming, cancellation, credential refresh/restart,
+  large-token storage/deletion, memory extract/recall/consolidate/forget, schedules,
+  and MCP work without WSL. Command/editing capabilities fail closed.
+
+### 4. Native Windows browsers
+
+- Add Chrome/Edge/Brave/Vivaldi discovery and executable selection on Windows.
+- Add runtime Chrome for Testing discovery and Windows process cleanup. Keep
+  browser lifecycle execution in runtime; Rex supplies product policy/settings.
+- Verify per-bot profiles, takeover/handback, screenshots/live view, idle release,
+  locked-profile recovery, extension connectivity, and restart.
+- Gate: real Edge and Chrome tests; unrelated user browsers remain untouched.
+
+### 5. WSL/Landlock proof before enabling commands
+
+- On Windows 11, verify the actual WSL kernel exposes supported Landlock and
+  confinement applies to the chosen workspace filesystem. Do not assume drvfs
+  or /mnt/c is safe. If necessary use ext4 workspaces exposed through Explorer.
+- Build a minimal dedicated rootfs with pinned inputs and a Linux helper.
+  Disable Windows interop and appended Windows PATH in that distribution.
+- Gate: allowed workspace read/write succeeds; outside writes, credential reads,
+  reparse/symlink escapes and launching Windows executables are denied. Missing
+  WSL, unsupported kernel, or failed probes leave commands disabled.
+- Record the tested kernel, filesystem, architecture, and commands in this file.
+
+### 6. Runtime WSL command execution and Rex setup
+
+- Add opt-in wsl isolation configuration, startup probe and capability reporting.
+- Translate Windows/WSL workspace/cache paths without shell interpolation. Route
+  commands/Python through the Rex distribution, preserving stdin/output/status.
+- Cancellation/timeout must terminate the Linux command tree, not just wsl.exe.
+- Rex detects WSL availability/policy, offers setup/import/repair, and never
+  changes a user's default or unrelated distribution. Handle admin/reboot needs
+  explicitly. Keep caches/venvs inside the distribution where appropriate.
+- Extend SDK contracts if needed, then consume them from Rex.
+- Gate: real Python/venv/file tasks, approvals, auto-review, cancellation, timeout,
+  crash/restart, and unavailable/disabled WSL cases pass on Windows.
+
+### 7. Windows desktop integration and installation
+
+- Add Windows notifications with click-through and taskbar/tray attention states.
+- Configure NSIS per-user installer, WebView2 bootstrap, icons, sidecar/resources,
+  app-data permissions, signing support, and install/upgrade/uninstall behavior.
+- Keep the existing macOS bundle and notification code intact.
+- Gate: installer works on a clean machine; large-token authentication and bundled
+  memory work without developer tools; upgrade preserves data; uninstall leaves
+  no owned processes and asks before deleting user data or the Rex distribution.
+
+### 8. CI, release and verification evidence
+
+- Add Windows-hosted build/test jobs for both repositories and cross-platform
+  compilation to catch regressions early. Private Go modules need a read-only
+  repository credential; do not print it or put it in artifacts.
+- Run Go tests/vet and applicable race tests, React tests/typecheck, Rust checks,
+  sidecar builds, installer build and smoke checks. Distinguish tests skipped by
+  platform from tests that actually ran. Record failures rather than suppressing.
+- Verify WSL and GUI behavior on a Windows machine/VM capable of those features;
+  GitHub-hosted compilation alone does not satisfy those gates.
+- Keep changes on feature branches, version the shared runtime/SDK first when
+  required, then pin released versions in Rex. Test before publishing installers.
+
+## Completion evidence ledger
+
+| Gate | Status | Evidence |
+| --- | --- | --- |
+| Plan saved before implementation | complete | This file, initial plan commit |
+| Runtime Windows amd64 build | failing baseline | Unix workspace/memory-worker locks |
+| Runtime Windows arm64 build | pending | |
+| Rex Windows amd64 build | failing baseline | embedder Setpgid/syscall.Kill |
+| Rex Windows arm64 build | pending | |
+| Windows native core/memory/credentials | pending | |
+| Windows browser integration | pending | |
+| WSL confinement proof | pending, requires Windows | |
+| WSL setup/commands/cancel/restart | pending | |
+| Installer/signing/upgrade/uninstall | pending | |
+| Windows notifications and attention | pending | |
+| macOS regression checks | pending | |
+| Linux regression checks | pending | |
+
+## Stop conditions and verification rules
+
+Do not enable unconfined commands as a fallback. Do not call a cross-build a
+Windows runtime test, and do not mark a platform verified from mocked tests alone.
+If a Windows runner, VM, signing credential, or private-module credential is
+missing, record the exact blocked gate and continue independent implementation.
+A release is complete only when all mandatory gates have evidence; document
+optional architecture/OS support separately when its gates remain unverified.
