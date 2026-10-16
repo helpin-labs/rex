@@ -122,7 +122,7 @@ func DetectBrowsers() []BrowserApp {
 				break
 			}
 		}
-		if !matched {
+		if !matched && app.Name != "Chromium" {
 			if path := registeredBrowserExecutable(filepath.Base(app.Path)); path != "" {
 				found = append(found, BrowserApp{Name: app.Name, Path: path})
 			}
