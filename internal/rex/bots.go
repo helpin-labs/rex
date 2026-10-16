@@ -252,7 +252,7 @@ func (b Bot) RuntimeProvider() string {
 }
 
 func (b Bot) executionConfig() json.RawMessage {
-	config := map[string]any{}
+	config := map[string]any{"max_tool_steps": 2000}
 	if b.ContextWindow > 0 {
 		config["native_context"] = contextPolicy(b.ContextWindow, 0)
 	}
