@@ -1,6 +1,6 @@
 # Windows implementation and verification plan
 
-Status: in progress. Created 2026-10-16. No Windows release is verified yet.
+Status: implementation and bounded local VM verification completed. Created 2026-10-16. Hosted CI GUI verification remains unresolved; no signed Windows release is verified.
 
 ## Goal and boundaries
 
@@ -387,3 +387,29 @@ optional architecture/OS support separately when its gates remain unverified.
   The Windows tray now omits the unsupported shortcut hint. Native tray Quit
   remains the verified shutdown action; no global hotkey or frontend workaround
   was added. This final Rust change requires another native installer build.
+
+## Final bounded verification checkpoint — 2026-10-16
+
+- Runtime application source: `26f2748cde84a03b01fb538ff060b3479c872b5d`,
+  feature branch `feat/windows-support`; native Windows/Linux CI passed.
+- Rex application source: `914e3e6718417b6a0b05660180a26519d9709a42`,
+  feature branch `feat/windows-support`; SDK remains v0.9.0 unchanged.
+- Local VM gates completed: native ARM64 host/credentials/WSL confinement and
+  cleanup; real chat/stream/cancel/restart, approvals, MCP and routines; installed
+  x64 desktop under ARM64 hardware emulation, bundled CPU memory lifecycle,
+  notification/badge/click-through, tray shutdown, and installer lifecycle.
+- Hosted CI run 38899795851 failed the installed GUI gate because WebView2 did
+  not expose a debugging page. Preserved app/host logs confirm runtime and CPU
+  memory became ready. This is not a passing hosted GUI result, and the root
+  cause is not established. Local interactive GUI evidence remains separate.
+- Run 38902598676 tests the final application source; its native host suite passed
+  and its desktop installer build was still running at this checkpoint. No
+  further rebuild or diagnostic loop was started. Review its eventual result:
+  https://github.com/helpin-labs/rex/actions/runs/38902598676
+- The fast VM retains the verified development installer (4b98dc7), not a claim
+  that the final 914e3e6 installer has been verified. Test tasks were removed and
+  the fake GUI profile archived after clock correction; original test evidence
+  and both original VM disks were preserved. The Mac Rex instance was untouched.
+- Remaining release gates: hosted CI GUI result, final-source installed-package
+  verification, signing, fresh provider OAuth, Windows 10 and native ARM64
+  desktop packaging. These are explicitly unverified, not waived.

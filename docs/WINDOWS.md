@@ -1,7 +1,9 @@
 # Windows development preview
 
 Windows 11 x64 is the initial desktop target. The branch builds an unsigned,
-per-user NSIS installer. It is not yet a signed public Windows release.
+per-user NSIS installer. It is not yet a signed public Windows release. Local VM acceptance checks passed;
+the hosted CI WebView2 GUI gate remains unresolved. See the verification ledger
+before treating any installer as release-ready.
 ARM64 native host and WSL tests also run in the supplied VM; an ARM64 desktop
 installer and Windows 10 remain separate verification gates.
 
