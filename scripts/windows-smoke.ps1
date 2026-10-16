@@ -8,6 +8,8 @@ New-Item -ItemType Directory $testRoot | Out-Null
 $processInfo = [Diagnostics.ProcessStartInfo]::new((Join-Path $binDir "rex-host-$triple.exe"))
 $processInfo.UseShellExecute = $false
 $processInfo.CreateNoWindow = $true
+$processInfo.RedirectStandardOutput = $true
+$processInfo.RedirectStandardError = $true
 $processInfo.Environment['REX_DATA_DIR'] = Join-Path $testRoot 'data'
 $processInfo.Environment['REX_WORKSPACE_ROOT'] = Join-Path $testRoot 'workspace'
 $processInfo.Environment['REX_HOST_ADDR'] = '127.0.0.1:0'
@@ -17,6 +19,8 @@ $processInfo.Environment['REX_EMBEDDER_BINARY'] = Join-Path $binDir "llama-serve
 $processInfo.Environment['REX_BROWSER_EXECUTABLE'] = Join-Path $repoRoot 'src-tauri/resources/browser/chrome-win64/chrome.exe'
 $processInfo.Environment['REX_EMBEDDING_MODEL'] = Join-Path $repoRoot 'src-tauri/resources/models/bekko-embedding-v1-a8m-Q8_0.gguf'
 $hostProcess = [Diagnostics.Process]::Start($processInfo)
+$stdout = $hostProcess.StandardOutput.ReadToEndAsync()
+$stderr = $hostProcess.StandardError.ReadToEndAsync()
 $children = @()
 try {
     $deadline = [DateTime]::UtcNow.AddMinutes(3)
@@ -44,6 +48,12 @@ try {
     Write-Host 'Native Windows runtime and bundled memory are ready; commands remain disabled.'
 } finally {
     if (!$hostProcess.HasExited) { $hostProcess.Kill(); $hostProcess.WaitForExit(10000) | Out-Null }
+    Write-Host ($stdout.GetAwaiter().GetResult())
+    Write-Host ($stderr.GetAwaiter().GetResult())
+    foreach ($log in @('rex.log', 'runtime.log', 'embedder.log')) {
+        $logPath = Join-Path $testRoot "data/$log"
+        if (Test-Path $logPath) { Get-Content -Tail 40 $logPath | Write-Host }
+    }
     Start-Sleep -Seconds 2
     foreach ($child in $children) {
         $remaining = Get-Process -Id $child.ID -ErrorAction SilentlyContinue

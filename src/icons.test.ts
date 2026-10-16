@@ -27,7 +27,7 @@ describe("bot icons", () => {
 describe("icon ids shared with the host", () => {
   it("match the list new bots choose from", async () => {
     const { readFileSync } = await import("node:fs");
-    const shared = readFileSync(new URL("../internal/rex/bot_icons.txt", import.meta.url), "utf8").trim().split("\n");
+    const shared = readFileSync(new URL("../internal/rex/bot_icons.txt", import.meta.url), "utf8").trim().split(/\r?\n/);
     const { allIcons } = await import("./icons");
     expect(shared).toEqual(allIcons.map(entry => entry.id));
   });

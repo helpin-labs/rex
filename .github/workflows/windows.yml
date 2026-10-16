@@ -103,12 +103,13 @@ jobs:
         run: |
           npm install --global pnpm@11.5.2
           pnpm install --frozen-lockfile
-      - name: UI tests and production build
-        run: |
-          pnpm test
-          pnpm build
+      - name: UI tests
+        run: pnpm test
+      - name: Production UI build
+        run: pnpm build
       - name: Restore pinned CPU embedder and model
-        uses: actions/cache@caa296126883cff596d87d8935842f9db880ef25 # v5
+        id: embedder-cache
+        uses: actions/cache/restore@caa296126883cff596d87d8935842f9db880ef25 # v5
         with:
           path: |
             src-tauri/binaries/llama-server-x86_64-pc-windows-msvc.exe
@@ -118,6 +119,15 @@ jobs:
       - name: Build native Windows services and pinned CPU embedding model
         shell: pwsh
         run: ./scripts/build-sidecars.ps1
+      - name: Save verified embedder build before integration checks
+        if: steps.embedder-cache.outputs.cache-hit != 'true'
+        uses: actions/cache/save@caa296126883cff596d87d8935842f9db880ef25 # v5
+        with:
+          path: |
+            src-tauri/binaries/llama-server-x86_64-pc-windows-msvc.exe
+            src-tauri/resources/models/
+            .cache/llama-server-b11430-x86_64-pc-windows-msvc-cpu
+          key: windows-cpu-embedder-b11430-${{ hashFiles('scripts/build-embedder.ps1') }}
       - name: Real sidecar readiness and crash cleanup
         shell: pwsh
         run: ./scripts/windows-smoke.ps1
