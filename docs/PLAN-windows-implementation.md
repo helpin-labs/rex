@@ -258,3 +258,15 @@ optional architecture/OS support separately when its gates remain unverified.
   cross-build and macOS Rust check pass after setup integration. One broader
   runtime Python test still assumes Linux /proc; it fails on macOS and is not
   counted as a passing cross-platform check.
+
+- Full runtime native Windows suite passed at bfe81b6 (run 38877984848).
+  ARM64 Linux worker Landlock dispatch also passed in the supplied VM.
+- The WSL probe now launches from the same directory as real commands. The
+  ARM64 startup probe passes with allowed writes and outside/interop denials.
+  Literal shell metacharacters were preserved; its test now decodes JSON before
+  comparing output. Full Python and cancellation checks are rerunning.
+- Existing bots retain their saved command preferences when a sandbox is
+  unavailable, but runtime registration, run configuration and fingerprints
+  remove the unavailable tools. Unrelated bot edits remain possible; new command
+  permissions still require a verified sandbox. Windows command permission also
+  admits the bundled run_python handler and its private venv.

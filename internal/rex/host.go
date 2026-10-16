@@ -170,6 +170,7 @@ func (h *Host) PrepareInterruptedRuns(ctx context.Context) {
 // botFingerprint summarises everything a run fixes when it starts: the
 // system prompt (instructions, rules, skills), tools, model and MCP servers.
 func (h *Host) botFingerprint(ctx context.Context, bot Bot) string {
+	bot = h.botForRuntime(bot)
 	hash := sha256.New()
 	settings, _ := h.Settings.Get(ctx)
 	bot.BrowserBackend = bot.browserMode(settings)
@@ -191,6 +192,7 @@ func (h *Host) botFingerprint(ctx context.Context, bot Bot) string {
 }
 
 func (h *Host) SyncBot(ctx context.Context, bot Bot) error {
+	bot = h.botForRuntime(bot)
 	settings, err := h.Settings.Get(ctx)
 	if err != nil {
 		return err
@@ -201,15 +203,26 @@ func (h *Host) SyncBot(ctx context.Context, bot Bot) error {
 	return err
 }
 
+// Saved preferences survive a temporarily unavailable sandbox.
+func (h *Host) botForRuntime(bot Bot) Bot {
+	if !h.WriteTools() {
+		bot.Capabilities.FilesWrite, bot.Capabilities.Shell = false, false
+	}
+	return bot
+}
+
 // SaveBot validates, persists and syncs a bot, creating its workspace.
 func (h *Host) SaveBot(ctx context.Context, bot *Bot) error {
 	if err := bot.Normalize(h.cfg.WorkspaceRoot); err != nil {
 		return err
 	}
-	if !h.WriteTools() && (bot.Capabilities.FilesWrite || bot.Capabilities.Shell) {
+	existing, existingErr := h.Store.GetBot(ctx, bot.ID)
+	addsWrite := bot.Capabilities.FilesWrite && (existingErr != nil || !existing.Capabilities.FilesWrite)
+	addsShell := bot.Capabilities.Shell && (existingErr != nil || !existing.Capabilities.Shell)
+	if !h.WriteTools() && (addsWrite || addsShell) {
 		return ErrWriteToolsUnavailable
 	}
-	if existing, err := h.Store.GetBot(ctx, bot.ID); err == nil {
+	if existingErr == nil {
 		if bot.BrowserBackend != existing.BrowserBackend || (existing.Capabilities.Browser && !bot.Capabilities.Browser) {
 			if h.Browser.Held(bot.ID) {
 				return errors.New("hand back the browser before changing its mode")

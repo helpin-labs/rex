@@ -218,6 +218,9 @@ func (b Bot) AllowedTools() []string {
 	}
 	if b.Capabilities.Shell {
 		tools = append(tools, "run_command")
+		if runtime.GOOS == "windows" {
+			tools = append(tools, "run_python")
+		}
 	}
 	if b.Capabilities.Web {
 		// web_search exists only when a search key is set in Settings.
