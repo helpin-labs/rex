@@ -1,4 +1,5 @@
 # Exercise real Windows sidecars in an isolated profile. No real account/model keys.
+param([switch]$RuntimeOnly)
 $ErrorActionPreference = 'Stop'
 $repoRoot = Split-Path -Parent $PSScriptRoot
 $binDir = Join-Path $repoRoot 'src-tauri/binaries'
@@ -32,20 +33,22 @@ try {
             $connection = Get-Content -Raw $connectionPath | ConvertFrom-Json
             try {
                 $status = Invoke-RestMethod -Uri ($connection.url + '/api/status') -Headers @{ Authorization = 'Bearer ' + $connection.token }
-                if ($status.runtime_ready -and $status.memory.available -and $status.memory.status -eq 'ready') { $ready = $true; break }
+                if ($status.runtime_ready -and ($RuntimeOnly -or ($status.memory.available -and $status.memory.status -eq 'ready'))) { $ready = $true; break }
             } catch { Write-Verbose 'Host services are still starting' }
         }
         Start-Sleep -Milliseconds 500
     }
     if (!$ready) { throw 'Runtime and bundled memory did not become ready' }
     if ($status.write_tools) { throw 'Unverified Windows command/editing capability was enabled' }
-    foreach ($file in @('runtime.pid', 'embedder.pid')) {
+    $pidFiles = if ($RuntimeOnly) { @('runtime.pid') } else { @('runtime.pid', 'embedder.pid') }
+    foreach ($file in $pidFiles) {
         $idFile = Join-Path $testRoot "data/$file"
         if (!(Test-Path $idFile)) { throw "Missing sidecar PID: $file" }
         $child = Get-Process -Id ([int](Get-Content -Raw $idFile)) -ErrorAction Stop
         $children += @{ ID = $child.Id; Started = $child.StartTime }
     }
-    Write-Host 'Native Windows runtime and bundled memory are ready; commands remain disabled.'
+    if ($RuntimeOnly) { Write-Host 'Native Windows runtime is ready; commands remain disabled.' }
+    else { Write-Host 'Native Windows runtime and bundled memory are ready; commands remain disabled.' }
 } finally {
     if (!$hostProcess.HasExited) { $hostProcess.Kill(); $hostProcess.WaitForExit(10000) | Out-Null }
     Write-Host ($stdout.GetAwaiter().GetResult())

@@ -41,9 +41,14 @@ jobs:
           "@ | Set-Content -Encoding utf8 go.windows.work
           "GOWORK=$PWD/go.windows.work" >> $env:GITHUB_ENV
       - name: Build Windows x64 host
-        run: go build -o rex-host-x64.exe ./cmd/rex-host
+        run: go build -o src-tauri/binaries/rex-host-x86_64-pc-windows-msvc.exe ./cmd/rex-host
       - name: Test native host foundations
         run: go test ./internal/rex -run 'Test(NativeExecutableNames|WindowsEnvironment|WindowsJob|WindowsCredentialManager|WindowsDataDirectory|WindowsBrowserDiscovery|RoutineFailureCooldown|SuccessfulManualRoutine|ExplicitlyDisabledRoutine|RuntimeSDK)' -timeout 5m
+      - name: Build matching native runtime
+        run: go build -o src-tauri/binaries/agent-runtime-x86_64-pc-windows-msvc.exe github.com/helpin-ai/agent-runtime/cmd/agent-runtime
+      - name: Exercise real host and runtime before the embedding build
+        shell: pwsh
+        run: ./scripts/windows-smoke.ps1 -RuntimeOnly
       - name: Install pinned browser and exercise native pipe
         shell: pwsh
         run: |
