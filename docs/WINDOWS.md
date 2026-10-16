@@ -1,7 +1,8 @@
 # Windows development preview
 
-Windows 11 x64 is the initial desktop target. The branch builds an unsigned,
-per-user NSIS installer. It is not yet a signed public Windows release. Local VM acceptance checks passed;
+Windows 11 x64 is the initial desktop target. Development CI builds an unsigned,
+per-user NSIS installer; the release workflow builds a self-signed preview.
+Neither establishes a trusted public publisher identity. Local VM acceptance checks passed;
 the hosted CI WebView2 GUI gate remains unresolved. See the verification ledger
 before treating any installer as release-ready.
 ARM64 native host and WSL tests also run in the supplied VM; an ARM64 desktop
@@ -68,9 +69,13 @@ Credential Manager. Backend fixtures use their own test data and secrets.
 
 ## Release signing
 
-Tauri's Windows bundle supports `certificateThumbprint`, `digestAlgorithm`,
-`timestampUrl` and `tsp` (or a CI-specific `signCommand`) under `bundle.windows`.
-Supply the release certificate through the release runner's protected certificate
-store and an additional private Tauri config. Do not commit certificate material
-or passwords. The development workflow intentionally does not claim a signed
-artifact. Verify Authenticode and a clean-machine install before publishing.
+The [desktop release workflow](RELEASING.md) creates an ephemeral, non-exportable
+code-signing key and signs Rex's owned services, desktop executable and installer.
+Only its public certificate is uploaded; the key and temporary runner trust are
+removed after the job. Normal development builds remain unsigned. Self-signed
+releases still show trust/SmartScreen warnings on other computers.
+
+The Windows workflow's optional `release_version` manual input exercises the
+same signing and installer checks without publishing. A trusted public release
+later needs a protected signing identity and timestamp service. Never commit
+certificate private keys or passwords.

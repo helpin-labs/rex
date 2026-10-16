@@ -413,3 +413,29 @@ optional architecture/OS support separately when its gates remain unverified.
 - Remaining release gates: hosted CI GUI result, final-source installed-package
   verification, signing, fresh provider OAuth, Windows 10 and native ARM64
   desktop packaging. These are explicitly unverified, not waived.
+
+
+## Preview release automation — 2026-10-16
+
+- Added semantic version planning on main, reusable macOS/Windows packaging and
+  draft-first publication only after both platforms pass. Artifacts must have
+  matching versions, source commits and checksums. No real release was published
+  during local verification. See [desktop releases](RELEASING.md).
+- Windows self-signing passed in the supplied VM using copies of the three owned
+  services and existing NSIS installer. The actual configured PowerShell hook
+  handled paths with spaces, signatures verified, tampering was rejected, and
+  only the public certificate was exported. Temporary key/trust cleanup passed.
+  The test also caught an interactive current-user trust prompt; CI now uses its
+  elevated disposable machine store for verification and removes trust afterward.
+- An isolated macOS preview build stamped version 0.1.1 in all application
+  manifests and produced the app and DMG. Signature verification, real bundled
+  runtime/memory readiness and graceful service cleanup passed. The running Mac
+  app and its data were not changed.
+- Release-planning/asset checks and all 68 UI tests passed locally. Workflow
+  validation passed. Final existing Windows CI run 38902598676 also failed the
+  installed WebView2 page gate; native host tests passed. This check remains
+  mandatory and blocks release publication until it passes. The new complete
+  signed Windows packaging workflow and public publication remain unverified.
+- Self-signed/ad-hoc previews do not establish trusted publisher identities.
+  Trusted signing/notarization, fresh OAuth, Windows 10 and native ARM64 Windows
+  desktop packaging remain separate gates.

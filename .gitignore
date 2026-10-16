@@ -23,3 +23,9 @@ go.windows.work
 go.windows.work.sum
 src-tauri/resources/browser/
 src-tauri/resources/wsl/
+
+# Generated release metadata and public signing artifacts.
+release-assets/
+release-plan.json
+release-notes.md
+signing-config.json

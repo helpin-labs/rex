@@ -5,6 +5,16 @@ on:
   push:
     branches: [feat/windows-support]
   workflow_dispatch:
+    inputs:
+      release_version:
+        description: Optional preview version to sign and validate without publishing
+        type: string
+        default: ''
+  workflow_call:
+    inputs:
+      release_version:
+        type: string
+        default: ''
 
 permissions:
   contents: read
@@ -55,9 +65,11 @@ jobs:
   desktop:
     name: Build Windows desktop and exercise sidecars
     runs-on: windows-latest
-    timeout-minutes: 45
+    timeout-minutes: 60
     env:
       CGO_ENABLED: "0"
+      GOWORK: 'off'
+      RELEASE_VERSION: ${{ inputs.release_version || '' }}
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
@@ -73,8 +85,13 @@ jobs:
         run: |
           npm install --global pnpm@11.5.2
           pnpm install --frozen-lockfile
-      - name: UI tests
-        run: pnpm test
+      - name: UI and release-tool tests
+        run: |
+          pnpm test
+          pnpm test:release
+      - name: Stamp the planned release version
+        if: env.RELEASE_VERSION != ''
+        run: node scripts/release.mjs stamp $env:RELEASE_VERSION
       - name: Production UI build
         run: pnpm build
       - name: Restore pinned CPU embedder and model
@@ -106,11 +123,69 @@ jobs:
         run: |
           $env:REX_WSL_E2E_ROOTFS = "$PWD/src-tauri/resources/wsl"
           go test ./internal/rex -run '^TestWindowsWSL' -count=1 -timeout 8m
-      - name: Build unsigned development installer
-        run: pnpm tauri build --config src-tauri/tauri.windows.conf.json
+      - name: Create preview certificate and sign owned sidecars
+        if: env.RELEASE_VERSION != ''
+        shell: pwsh
+        run: |
+          ./scripts/windows-preview-signing.ps1
+          foreach ($name in @('rex-host', 'agent-runtime', 'llama-server')) {
+            ./scripts/windows-sign.ps1 -Path "src-tauri/binaries/$name-x86_64-pc-windows-msvc.exe"
+          }
+      - name: Identify Rust toolchain
+        id: rust
+        shell: bash
+        run: echo "version=$(rustc --version | cut -d' ' -f2)" >> "$GITHUB_OUTPUT"
+      - name: Restore Rust dependencies
+        id: rust-cache
+        uses: actions/cache/restore@caa296126883cff596d87d8935842f9db880ef25 # v5
+        with:
+          path: |
+            src-tauri/target/release/deps
+            src-tauri/target/release/build
+            src-tauri/target/release/.fingerprint
+          key: windows-x64-rust-${{ steps.rust.outputs.version }}-${{ hashFiles('src-tauri/Cargo.lock') }}
+          restore-keys: windows-x64-rust-${{ steps.rust.outputs.version }}-
+      - name: Build the desktop installer
+        shell: pwsh
+        run: |
+          $config = @('--config', 'src-tauri/tauri.windows.conf.json')
+          if ($env:RELEASE_VERSION) { $config += @('--config', 'signing-config.json') }
+          pnpm tauri build @config
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+      - name: Save Rust dependencies before integration checks
+        if: steps.rust-cache.outputs.cache-hit != 'true'
+        uses: actions/cache/save@caa296126883cff596d87d8935842f9db880ef25 # v5
+        with:
+          path: |
+            src-tauri/target/release/deps
+            src-tauri/target/release/build
+            src-tauri/target/release/.fingerprint
+          key: windows-x64-rust-${{ steps.rust.outputs.version }}-${{ hashFiles('src-tauri/Cargo.lock') }}
       - name: Install, reinstall and uninstall the built package
         shell: pwsh
         run: ./scripts/windows-installer-smoke.ps1
+      - name: Verify and collect the signed release installer
+        if: env.RELEASE_VERSION != ''
+        shell: pwsh
+        run: |
+          $installers = @(Get-ChildItem src-tauri/target/release/bundle/nsis/*.exe)
+          if ($installers.Count -ne 1) { throw 'Expected one installer' }
+          $signature = Get-AuthenticodeSignature -LiteralPath $installers[0].FullName
+          if ($signature.Status -ne 'Valid' -or $signature.SignerCertificate.Thumbprint -ne $env:REX_WINDOWS_SIGNING_THUMBPRINT) { throw 'Installer signature verification failed' }
+          Copy-Item $installers[0].FullName "release-assets/Rex-$env:RELEASE_VERSION-windows-x64-setup.exe"
+          Move-Item release-assets/preview.cer "release-assets/Rex-$env:RELEASE_VERSION-windows-x64-preview.cer"
+          node scripts/release.mjs manifest windows-x64 $env:RELEASE_VERSION
+      - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        if: env.RELEASE_VERSION != ''
+        with:
+          name: rex-release-installer-windows-x64
+          path: release-assets/
+          if-no-files-found: error
+          retention-days: 7
+      - name: Remove the temporary private signing key and runner trust
+        if: always() && env.RELEASE_VERSION != ''
+        shell: pwsh
+        run: ./scripts/windows-preview-signing.ps1 -Remove
       - name: Save desktop verification evidence
         if: always()
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
@@ -120,7 +195,7 @@ jobs:
           if-no-files-found: ignore
           retention-days: 7
       - name: Save development installer
-        if: always()
+        if: always() && env.RELEASE_VERSION == ''
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         with:
           name: rex-windows-x64-unsigned-development
