@@ -7,6 +7,7 @@ import (
 	"os"
 	"path/filepath"
 	"regexp"
+	"runtime"
 	"sort"
 	"strings"
 	"time"
@@ -177,8 +178,15 @@ func (b *Bot) Normalize(workspaceRoot string) error {
 		return errors.New("workspace folder must be an absolute path")
 	}
 	b.WorkspaceDir = filepath.Clean(b.WorkspaceDir)
-	if b.WorkspaceDir == "/" || b.WorkspaceDir == filepath.Clean(homeDir()) {
-		return errors.New("choose a dedicated workspace folder, not / or your home folder")
+	workspace, home := b.WorkspaceDir, filepath.Clean(homeDir())
+	if resolved, err := filepath.EvalSymlinks(workspace); err == nil {
+		workspace = resolved
+	}
+	if resolved, err := filepath.EvalSymlinks(home); err == nil {
+		home = resolved
+	}
+	if filepath.Dir(workspace) == workspace || workspace == home || runtime.GOOS == "windows" && strings.EqualFold(workspace, home) {
+		return errors.New("choose a dedicated workspace folder, not a drive root or your home folder")
 	}
 	if b.Emoji == "" {
 		b.Emoji = "bot"

@@ -24,7 +24,7 @@ func openTestStore(t *testing.T) *Store {
 
 func TestCapabilitiesMapToRuntimeTools(t *testing.T) {
 	bot := Bot{Name: "Reader", Capabilities: Capabilities{FilesRead: true, Web: true}, MemoryMode: MemoryOff}
-	if err := bot.Normalize("/tmp/rex"); err != nil {
+	if err := bot.Normalize(t.TempDir()); err != nil {
 		t.Fatal(err)
 	}
 	tools := bot.AllowedTools()
@@ -45,7 +45,7 @@ func TestCapabilitiesMapToRuntimeTools(t *testing.T) {
 
 func TestShellForcesApprovalAndFileAccess(t *testing.T) {
 	bot := Bot{Name: "Ops", Capabilities: Capabilities{Shell: true}, ApprovalMode: ApprovalAuto}
-	if err := bot.Normalize("/tmp/rex"); err != nil {
+	if err := bot.Normalize(t.TempDir()); err != nil {
 		t.Fatal(err)
 	}
 	if bot.ApprovalMode != ApprovalAsk || !bot.Capabilities.FilesRead {
@@ -59,7 +59,7 @@ func TestShellForcesApprovalAndFileAccess(t *testing.T) {
 func TestWorkspaceMustBeDedicated(t *testing.T) {
 	for _, dir := range []string{"/", homeDir(), "relative/path"} {
 		bot := Bot{Name: "X", WorkspaceDir: dir}
-		if err := bot.Normalize("/tmp/rex"); err == nil {
+		if err := bot.Normalize(t.TempDir()); err == nil {
 			t.Errorf("workspace %q should be rejected", dir)
 		}
 	}

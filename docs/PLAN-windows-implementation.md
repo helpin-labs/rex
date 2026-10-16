@@ -192,3 +192,17 @@ optional architecture/OS support separately when its gates remain unverified.
 - Regression checks passed: full Rex Go tests/vet, 68 frontend tests, production UI
   build, Rust macOS check, and workflow validation. All Windows GUI/installer/WSL
   acceptance gates remain pending their native evidence.
+
+- Native Rex CI run 38872456628 passed job ownership, owner-only directory ACLs,
+  real large-token Credential Manager roundtrips, and pipe control against both
+  Chrome for Testing and installed Edge. Remaining host failures were Unix path
+  fixtures and the legacy migration LIKE prefix, whose Windows separator was
+  incorrectly treated as an escape; fixed without disabling the migration test.
+- Runtime native Chrome extension E2E passed in run 38872748373, covering page
+  actions, screenshots, takeover/handback, stale references, persisted cookies and
+  runtime browser restart. This verifies Chrome, not all Chromium-family browsers.
+- A separate disposable WSL2 proof imports a checksum-pinned minimal rootfs, turns
+  interop off, and tests ABI >= 3, ext4/drvfs writes, outside credential reads/writes,
+  symlink escapes and Windows executable denial. It never enables app commands.
+- Private Rex workflow reads now work via Git's existing noninteractive GitHub
+  authentication; connector permission is no longer blocking native CI review.

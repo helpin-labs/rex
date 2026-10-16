@@ -156,3 +156,14 @@ func TestWindowsBrowserDiscovery(t *testing.T) {
 		t.Fatalf("browser discovery: %+v", found)
 	}
 }
+
+func TestWindowsWorkspaceRejectsDriveAndHomeAliases(t *testing.T) {
+	home := t.TempDir()
+	t.Setenv("USERPROFILE", home)
+	for _, path := range []string{filepath.VolumeName(home) + `\`, strings.ToUpper(home), strings.ToLower(home)} {
+		bot := Bot{Name: "Test", WorkspaceDir: path}
+		if err := bot.Normalize(t.TempDir()); err == nil {
+			t.Fatalf("accepted unsafe Windows workspace %s", path)
+		}
+	}
+}
