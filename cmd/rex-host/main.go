@@ -53,6 +53,9 @@ func run() error {
 	if err := os.MkdirAll(dataDir, 0o700); err != nil {
 		return fmt.Errorf("create data directory: %w", err)
 	}
+	if err := rex.SecureDataDirectory(dataDir); err != nil {
+		return fmt.Errorf("secure data directory: %w", err)
+	}
 	logFile, err := os.OpenFile(filepath.Join(dataDir, "rex.log"), os.O_CREATE|os.O_APPEND|os.O_WRONLY, 0o600)
 	if err != nil {
 		return fmt.Errorf("open log: %w", err)
@@ -510,6 +513,13 @@ func runtimeTriple() string { return rex.RuntimeTriple() }
 func resolveDataDir() (string, error) {
 	if value := strings.TrimSpace(os.Getenv("REX_DATA_DIR")); value != "" {
 		return value, nil
+	}
+	if runtime.GOOS == "windows" {
+		base := os.Getenv("LOCALAPPDATA")
+		if base == "" {
+			return "", errors.New("Windows local application data directory is unavailable")
+		}
+		return filepath.Join(base, "ai.rex.desktop"), nil
 	}
 	base, err := os.UserConfigDir()
 	if err != nil {

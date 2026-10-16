@@ -9,7 +9,6 @@ import (
 	"log/slog"
 	"net/http"
 	"os"
-	"os/exec"
 	"os/user"
 	"path/filepath"
 	"sort"
@@ -486,11 +485,7 @@ func (h *Host) revealFile(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusInternalServerError, err)
 		return
 	}
-	args := []string{path}
-	if path != bot.WorkspaceDir {
-		args = []string{"-R", path}
-	}
-	if err := exec.Command("open", args...).Start(); err != nil {
+	if err := revealPath(path, path != bot.WorkspaceDir); err != nil {
 		writeError(w, http.StatusInternalServerError, err)
 		return
 	}
@@ -498,7 +493,7 @@ func (h *Host) revealFile(w http.ResponseWriter, r *http.Request) {
 }
 
 func (h *Host) revealLogs(w http.ResponseWriter, r *http.Request) {
-	_ = exec.Command("open", "-R", filepath.Join(h.cfg.DataDir, "rex.log")).Start()
+	_ = revealPath(filepath.Join(h.cfg.DataDir, "rex.log"), true)
 	w.WriteHeader(http.StatusNoContent)
 }
 
@@ -873,7 +868,7 @@ func (h *Host) importSkill(w http.ResponseWriter, r *http.Request) {
 
 // revealSkills opens the skills folder in Finder.
 func (h *Host) revealSkills(w http.ResponseWriter, r *http.Request) {
-	if err := exec.Command("open", h.Skills.Dir).Start(); err != nil {
+	if err := revealPath(h.Skills.Dir, false); err != nil {
 		writeError(w, http.StatusInternalServerError, err)
 		return
 	}

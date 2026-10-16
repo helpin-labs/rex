@@ -6,8 +6,10 @@ import (
 	"os/exec"
 	"path/filepath"
 	"strconv"
+	"strings"
 	"testing"
 	"time"
+	"unsafe"
 
 	"golang.org/x/sys/windows"
 )
@@ -77,4 +79,60 @@ func TestWindowsJobHelper(t *testing.T) {
 	}
 	time.Sleep(time.Minute)
 	os.Exit(0)
+}
+
+func TestWindowsCredentialManagerLargeToken(t *testing.T) {
+	store := KeychainSecrets{Service: "ai.rex.desktop.windows-test." + strconv.FormatInt(time.Now().UnixNano(), 10)}
+	t.Cleanup(func() { store.Delete("chatgpt") })
+	for _, value := range []string{strings.Repeat("access-token-界", 1000), strings.Repeat("refreshed-token", 2000)} {
+		if err := store.Set("chatgpt", value); err != nil {
+			t.Fatal(err)
+		}
+		got, err := store.Get("chatgpt")
+		if err != nil || got != value {
+			t.Fatal("Windows Credential Manager did not preserve large token", err)
+		}
+	}
+	if err := store.Delete("chatgpt"); err != nil {
+		t.Fatal(err)
+	}
+	if got, err := store.Get("chatgpt"); err != nil || got != "" {
+		t.Fatal("Windows credential was not deleted", err)
+	}
+}
+
+func TestWindowsDataDirectoryACL(t *testing.T) {
+	directory := t.TempDir()
+	if err := SecureDataDirectory(directory); err != nil {
+		t.Fatal(err)
+	}
+	child := filepath.Join(directory, "connection.json")
+	if err := os.WriteFile(child, []byte("not-a-real-token"), 0600); err != nil {
+		t.Fatal(err)
+	}
+	user, err := windows.GetCurrentProcessToken().GetTokenUser()
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, path := range []string{directory, child} {
+		descriptor, err := windows.GetNamedSecurityInfo(path, windows.SE_FILE_OBJECT, windows.DACL_SECURITY_INFORMATION)
+		if err != nil {
+			t.Fatal(err)
+		}
+		acl, _, err := descriptor.DACL()
+		if err != nil || acl == nil || acl.AceCount != 1 {
+			t.Fatalf("expected owner-only ACL for %s: %v", path, err)
+		}
+		var ace *windows.ACCESS_ALLOWED_ACE
+		if err := windows.GetAce(acl, 0, &ace); err != nil {
+			t.Fatal(err)
+		}
+		sid := (*windows.SID)(unsafe.Pointer(&ace.SidStart))
+		if ace.Header.AceType != windows.ACCESS_ALLOWED_ACE_TYPE || !sid.Equals(user.User.Sid) {
+			t.Fatal("data directory grants another principal access")
+		}
+	}
+	if err := SecureDataDirectory(filepath.VolumeName(directory) + string(filepath.Separator)); err == nil {
+		t.Fatal("accepted drive root")
+	}
 }

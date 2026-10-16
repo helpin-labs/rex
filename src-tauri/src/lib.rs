@@ -133,6 +133,9 @@ pub fn run() {
             }
         })
         .setup(|app| {
+            #[cfg(target_os = "windows")]
+            let data_dir = app.path().app_local_data_dir()?;
+            #[cfg(not(target_os = "windows"))]
             let data_dir = app.path().app_data_dir()?;
             std::fs::create_dir_all(&data_dir)?;
             let port = host_port(&data_dir);

@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"net/url"
 	"os"
+	"runtime"
 	"strings"
 	"sync"
 
@@ -22,8 +23,20 @@ type Secrets interface {
 }
 
 type KeychainSecrets struct{ Service string }
+type rawKeychainSecrets struct{ Service string }
 
-func (k KeychainSecrets) Get(key string) (string, error) {
+func (k KeychainSecrets) backend() Secrets {
+	raw := rawKeychainSecrets{Service: k.Service}
+	if runtime.GOOS == "windows" {
+		return chunkedSecrets{backend: raw}
+	}
+	return raw
+}
+func (k KeychainSecrets) Get(key string) (string, error) { return k.backend().Get(key) }
+func (k KeychainSecrets) Set(key, value string) error    { return k.backend().Set(key, value) }
+func (k KeychainSecrets) Delete(key string) error        { return k.backend().Delete(key) }
+
+func (k rawKeychainSecrets) Get(key string) (string, error) {
 	value, err := keyring.Get(k.Service, key)
 	if errors.Is(err, keyring.ErrNotFound) {
 		return "", nil
@@ -31,9 +44,9 @@ func (k KeychainSecrets) Get(key string) (string, error) {
 	return value, err
 }
 
-func (k KeychainSecrets) Set(key, value string) error { return keyring.Set(k.Service, key, value) }
+func (k rawKeychainSecrets) Set(key, value string) error { return keyring.Set(k.Service, key, value) }
 
-func (k KeychainSecrets) Delete(key string) error {
+func (k rawKeychainSecrets) Delete(key string) error {
 	err := keyring.Delete(k.Service, key)
 	if errors.Is(err, keyring.ErrNotFound) {
 		return nil

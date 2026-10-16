@@ -16,3 +16,8 @@ __pycache__/
 *.pyc
 go.work
 go.work.sum
+
+# Windows CI uses an isolated runtime checkout/workspace before release.
+.ci/
+go.windows.work
+go.windows.work.sum

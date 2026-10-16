@@ -52,3 +52,14 @@ func ReapOrphan(pidFile, name string) {
 	_ = syscall.Kill(-pid, syscall.SIGKILL)
 	_ = syscall.Kill(pid, syscall.SIGKILL)
 }
+
+func revealPath(path string, selectFile bool) error {
+	args := []string{path}
+	if selectFile {
+		args = []string{"-R", path}
+	}
+	return exec.Command("open", args...).Start()
+}
+
+// Unix data privacy is established by the host's existing 0700/0600 creation modes.
+func SecureDataDirectory(path string) error { return nil }

@@ -23,7 +23,7 @@ jobs:
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           repository: helpin-ai/agent-runtime
-          ref: 684ae523dc24a6e10a351c8097e5b3f1c36ecb70
+          ref: ff5f761ae29723f39d4914d639e1a9c86604a428
           path: .ci/runtime
           persist-credentials: false
       - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
@@ -43,10 +43,68 @@ jobs:
       - name: Build Windows x64 host
         run: go build -o rex-host-x64.exe ./cmd/rex-host
       - name: Test native host foundations
-        run: go test ./internal/rex -run 'Test(NativeExecutableNames|WindowsEnvironment|WindowsJob|RoutineFailureCooldown|SuccessfulManualRoutine|ExplicitlyDisabledRoutine|RuntimeSDK)' -timeout 5m
+        run: go test ./internal/rex -run 'Test(NativeExecutableNames|WindowsEnvironment|WindowsJob|WindowsCredentialManager|WindowsDataDirectory|RoutineFailureCooldown|SuccessfulManualRoutine|ExplicitlyDisabledRoutine|RuntimeSDK)' -timeout 5m
       - name: All host tests
         run: go test ./... -timeout 5m
       - name: Cross-build Windows ARM64 host
         env:
           GOARCH: arm64
         run: go build -o rex-host-arm64.exe ./cmd/rex-host
+
+  desktop:
+    name: Build Windows desktop and exercise sidecars
+    runs-on: windows-latest
+    timeout-minutes: 45
+    env:
+      CGO_ENABLED: "0"
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          repository: helpin-ai/agent-runtime
+          ref: ff5f761ae29723f39d4914d639e1a9c86604a428
+          path: .ci/runtime
+          persist-credentials: false
+      - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
+        with:
+          go-version-file: go.mod
+      - name: Select verified runtime portability source
+        shell: pwsh
+        run: |
+          @"
+          go 1.26.0
+          use (
+            .
+            ./.ci/runtime
+          )
+          "@ | Set-Content -Encoding utf8 go.windows.work
+          "GOWORK=$PWD/go.windows.work" >> $env:GITHUB_ENV
+      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        with:
+          node-version: '24'
+          package-manager-cache: false
+      - name: Install UI dependencies
+        run: |
+          npm install --global pnpm@11.5.2
+          pnpm install --frozen-lockfile
+      - name: UI tests and production build
+        run: |
+          pnpm test
+          pnpm build
+      - name: Build native Windows services and pinned CPU embedding model
+        shell: pwsh
+        run: ./scripts/build-sidecars.ps1
+      - name: Real sidecar readiness and crash cleanup
+        shell: pwsh
+        run: ./scripts/windows-smoke.ps1
+      - name: Build unsigned development installer
+        run: pnpm tauri build --config src-tauri/tauri.windows.conf.json
+      - name: Save development installer
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: rex-windows-x64-unsigned-development
+          path: src-tauri/target/release/bundle/nsis/*.exe
+          if-no-files-found: error
+          retention-days: 7

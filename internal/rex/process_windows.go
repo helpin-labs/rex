@@ -98,3 +98,57 @@ func linkBrowserShim(self, link string) error {
 	}
 	return os.Rename(output.Name(), link)
 }
+
+// Keep databases, callback tokens, and browser profiles private on NTFS.
+func SecureDataDirectory(path string) error {
+	absolute, err := filepath.Abs(path)
+	if err != nil {
+		return err
+	}
+	if filepath.Dir(absolute) == absolute {
+		return fmt.Errorf("Rex data needs a dedicated directory")
+	}
+	name, err := windows.UTF16PtrFromString(absolute)
+	if err != nil {
+		return err
+	}
+	handle, err := windows.CreateFile(name, windows.READ_CONTROL|windows.WRITE_DAC,
+		windows.FILE_SHARE_READ|windows.FILE_SHARE_WRITE|windows.FILE_SHARE_DELETE, nil, windows.OPEN_EXISTING,
+		windows.FILE_FLAG_BACKUP_SEMANTICS|windows.FILE_FLAG_OPEN_REPARSE_POINT, 0)
+	if err != nil {
+		return err
+	}
+	defer windows.CloseHandle(handle)
+	var info windows.ByHandleFileInformation
+	if err := windows.GetFileInformationByHandle(handle, &info); err != nil {
+		return err
+	}
+	if info.FileAttributes&windows.FILE_ATTRIBUTE_DIRECTORY == 0 || info.FileAttributes&windows.FILE_ATTRIBUTE_REPARSE_POINT != 0 {
+		return fmt.Errorf("Rex data directory must not be a reparse point")
+	}
+	user, err := windows.GetCurrentProcessToken().GetTokenUser()
+	if err != nil {
+		return err
+	}
+	descriptor, err := windows.SecurityDescriptorFromString("D:P(A;OICI;FA;;;" + user.User.Sid.String() + ")")
+	if err != nil {
+		return err
+	}
+	acl, _, err := descriptor.DACL()
+	if err != nil {
+		return err
+	}
+	return windows.SetSecurityInfo(handle, windows.SE_FILE_OBJECT, windows.DACL_SECURITY_INFORMATION|windows.PROTECTED_DACL_SECURITY_INFORMATION, nil, nil, acl, nil)
+}
+
+func revealPath(path string, selectFile bool) error {
+	root, err := windows.GetWindowsDirectory()
+	if err != nil {
+		return err
+	}
+	args := []string{filepath.Clean(path)}
+	if selectFile {
+		args = append([]string{"/select,"}, args...)
+	}
+	return exec.Command(filepath.Join(root, "explorer.exe"), args...).Start()
+}

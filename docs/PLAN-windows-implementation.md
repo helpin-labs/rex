@@ -129,11 +129,11 @@ Do not duplicate these responsibilities in Rex or change other apps' defaults.
 | Gate | Status | Evidence |
 | --- | --- | --- |
 | Plan saved before implementation | complete | This file, initial plan commit |
-| Runtime Windows amd64 build | cross-build passed; native CI in progress | runtime feature branch, native CI run 38869790255 exposed SQLite URI bug; fixed in 684ae52 |
-| Runtime Windows arm64 build | cross-build passed | runtime feature branch |
+| Runtime Windows amd64 build | native build passed | [Windows run 38870509025](https://github.com/helpin-ai/agent-runtime/actions/runs/38870509025): locks, snapshot ACLs, SQLite URIs, memory jobs and banks |
+| Runtime Windows arm64 build | cross-build passed on Windows runner | run 38870509025 |
 | Rex Windows amd64 build | cross-build passed | isolated workspace against runtime feature branch; native CI pending |
 | Rex Windows arm64 build | cross-build passed | isolated workspace against runtime feature branch |
-| Windows native core/memory/credentials | pending | |
+| Windows native core/memory/credentials | runtime memory tests passed; Rex pending | Runtime run 38870509025; private Rex CI access requested |
 | Windows browser integration | pending | |
 | WSL confinement proof | pending, requires Windows | |
 | WSL setup/commands/cancel/restart | pending | |
@@ -165,3 +165,15 @@ optional architecture/OS support separately when its gates remain unverified.
   CDP pipes; Windows needs a verified transport before that mode can be enabled.
 - GitHub connector can read workflow results but rejected draft PR creation with
   HTTP 403. Git pushes and branch-triggered Windows CI work.
+
+- Runtime native CI caught and fixed Windows SQLite URI formatting and snapshot
+  confidentiality. Snapshot files now use an owner-only protected Windows ACL.
+- The first full Windows runtime/API test run (38871162496) exposed approval
+  evidence path formatting and credential-redaction fixture issues; under investigation.
+- Rex now uses LocalAppData and an owner-only inheritable NTFS ACL. Large Windows
+  credentials use checksummed, generation-based Credential Manager parts, published
+  atomically; failure and deletion tests pass locally. Native ACL/keyring tests added.
+- Windows CPU embedding/sidecar build scripts and a development NSIS configuration
+  are implemented. CI will start real sidecars, verify memory readiness and command
+  disablement, kill the host and check child cleanup, then build an unsigned installer.
+  These scripts and installer are not yet verified on a Windows runner.
