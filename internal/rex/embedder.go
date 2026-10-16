@@ -11,9 +11,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
-	"strings"
 	"sync"
-	"syscall"
 	"time"
 )
 
@@ -93,7 +91,7 @@ func (e *Embedder) launch(ctx context.Context) error {
 		"--host", "127.0.0.1", "--port", fmt.Sprint(port),
 		"-c", "8192", "-ub", "8192", "-ngl", "99", "--threads", "4", "--no-webui", "--alias", BundledEmbeddingModel)
 	cmd.Stdout, cmd.Stderr = e.Log, e.Log
-	cmd.SysProcAttr = &syscall.SysProcAttr{Setpgid: true}
+	ConfigureProcess(cmd)
 	if err := cmd.Start(); err != nil {
 		return fmt.Errorf("start the embedding model: %w", err)
 	}
@@ -172,33 +170,11 @@ func (e *Embedder) Stop() {
 	if cmd == nil || cmd.Process == nil {
 		return
 	}
-	_ = syscall.Kill(-cmd.Process.Pid, syscall.SIGTERM)
+	_ = SignalProcessTree(cmd, false)
 	select {
 	case <-exited:
 	case <-time.After(3 * time.Second):
-		_ = syscall.Kill(-cmd.Process.Pid, syscall.SIGKILL)
+		_ = SignalProcessTree(cmd, true)
 	}
 	_ = os.Remove(filepath.Join(e.DataDir, "embedder.pid"))
-}
-
-// reapOrphan stops a process recorded in a pid file by a previous run that
-// was killed before it could clean up, if it is still the expected program.
-func reapOrphan(pidFile, name string) {
-	raw, err := os.ReadFile(pidFile)
-	if err != nil {
-		return
-	}
-	_ = os.Remove(pidFile)
-	var pid int
-	if _, err := fmt.Sscan(string(raw), &pid); err != nil || pid <= 1 {
-		return
-	}
-	output, err := exec.Command("ps", "-o", "comm=", "-p", fmt.Sprint(pid)).Output()
-	if err != nil || !strings.Contains(strings.ToLower(string(output)), strings.ToLower(name)) {
-		return
-	}
-	slog.Warn("stopping a process left behind by a previous run", "pid", pid, "name", name)
-	_ = syscall.Kill(pid, syscall.SIGTERM)
-	time.Sleep(time.Second)
-	_ = syscall.Kill(pid, syscall.SIGKILL)
 }

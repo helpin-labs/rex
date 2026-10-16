@@ -29,7 +29,7 @@ import (
 func main() {
 	// Linked as agent-browser, rex-host opens a bot's browser on first use
 	// and hands the command to the real agent-browser.
-	if filepath.Base(os.Args[0]) == rex.BrowserShimName {
+	if strings.TrimSuffix(filepath.Base(os.Args[0]), ".exe") == rex.BrowserShimName {
 		if err := rex.RunBrowserShim(os.Args[1:]); err != nil {
 			fmt.Fprintln(os.Stderr, "agent-browser:", err)
 			os.Exit(1)
@@ -43,6 +43,9 @@ func main() {
 }
 
 func run() error {
+	if err := rex.OwnProcessTree(); err != nil {
+		return err
+	}
 	dataDir, err := resolveDataDir()
 	if err != nil {
 		return err
@@ -358,7 +361,7 @@ func (l runtimeLaunch) start(ctx context.Context) (*exec.Cmd, <-chan error, erro
 		"AGENT_RUNTIME_BROWSER_SESSION_TIMEOUT_SECONDS=1800",
 		// Confine agent commands with macOS Seatbelt: writes only inside the
 		// bot's workspace, no reads of credentials or Rex's own data.
-		"AGENT_RUNTIME_EXECUTION_ISOLATION=seatbelt",
+		"AGENT_RUNTIME_EXECUTION_ISOLATION="+rex.ExecutionIsolation(),
 		"AGENT_RUNTIME_SEATBELT_DENY_READ="+l.dataDir,
 		// Rex owns this runtime alone, so runs cut off by a quit, crash or
 		// settings restart are continued from their checkpoints.
@@ -375,7 +378,7 @@ func (l runtimeLaunch) start(ctx context.Context) (*exec.Cmd, <-chan error, erro
 	// plain agent-browser commands: any launch option of its own, such as an
 	// executable path, makes agent-browser relaunch the browser without the
 	// bot's profile.
-	command.SysProcAttr = &syscall.SysProcAttr{Setpgid: true}
+	rex.ConfigureProcess(command)
 	if err := command.Start(); err != nil {
 		return nil, nil, fmt.Errorf("start agent runtime: %w", err)
 	}
@@ -395,6 +398,9 @@ func (l runtimeLaunch) start(ctx context.Context) (*exec.Cmd, <-chan error, erro
 // baseEnvironment passes a minimal environment to the runtime so the user's
 // shell secrets are not inherited by tools.
 func baseEnvironment() []string {
+	if runtime.GOOS == "windows" {
+		return rex.WindowsEnvironment()
+	}
 	var env []string
 	for _, key := range []string{"HOME", "USER", "LOGNAME", "TMPDIR", "LANG", "LC_ALL", "SHELL"} {
 		if value, ok := os.LookupEnv(key); ok {
@@ -414,13 +420,13 @@ func stopProcess(command *exec.Cmd, done <-chan error, timeout time.Duration) {
 	if command == nil || command.Process == nil {
 		return
 	}
-	_ = syscall.Kill(-command.Process.Pid, syscall.SIGINT)
+	_ = rex.SignalProcessTree(command, false)
 	select {
 	case <-done:
 		return
 	case <-time.After(timeout):
 	}
-	_ = syscall.Kill(-command.Process.Pid, syscall.SIGKILL)
+	_ = rex.SignalProcessTree(command, true)
 	select {
 	case <-done:
 	case <-time.After(2 * time.Second):
@@ -430,25 +436,7 @@ func stopProcess(command *exec.Cmd, done <-chan error, timeout time.Duration) {
 // reapOrphanedRuntime stops a runtime left behind when a previous host was
 // killed without a chance to clean up (for example a forced quit).
 func reapOrphanedRuntime(dataDir string) {
-	path := filepath.Join(dataDir, "runtime.pid")
-	raw, err := os.ReadFile(path)
-	if err != nil {
-		return
-	}
-	_ = os.Remove(path)
-	var pid int
-	if _, err := fmt.Sscan(strings.TrimSpace(string(raw)), &pid); err != nil || pid <= 1 {
-		return
-	}
-	output, err := exec.Command("ps", "-o", "comm=", "-p", fmt.Sprint(pid)).Output()
-	if err != nil || !strings.Contains(string(output), "agent-runtime") {
-		return
-	}
-	slog.Warn("stopping an agent runtime left behind by a previous run", "pid", pid)
-	_ = syscall.Kill(-pid, syscall.SIGTERM)
-	_ = syscall.Kill(pid, syscall.SIGTERM)
-	time.Sleep(2 * time.Second)
-	_ = syscall.Kill(pid, syscall.SIGKILL)
+	rex.ReapOrphan(filepath.Join(dataDir, "runtime.pid"), "agent-runtime")
 }
 
 // resolveSidecar finds a bundled helper binary next to rex-host, as Tauri
@@ -462,7 +450,7 @@ func resolveSidecar(envName, name string) string {
 		return ""
 	}
 	dir := filepath.Dir(executable)
-	for _, candidate := range []string{filepath.Join(dir, name), filepath.Join(dir, name+"-"+runtimeTriple()), filepath.Join(dir, "..", "src-tauri", "binaries", name+"-"+runtimeTriple())} {
+	for _, candidate := range []string{filepath.Join(dir, rex.ExecutableName(name)), filepath.Join(dir, rex.ExecutableName(name+"-"+runtimeTriple())), filepath.Join(dir, "..", "src-tauri", "binaries", rex.ExecutableName(name+"-"+runtimeTriple()))} {
 		if info, err := os.Stat(candidate); err == nil && !info.IsDir() {
 			return candidate
 		}
@@ -504,11 +492,11 @@ func resolveRuntimeBinary() (string, error) {
 	}
 	dir := filepath.Dir(executable)
 	name := filepath.Base(executable)
-	candidates := []string{filepath.Join(dir, "agent-runtime")}
+	candidates := []string{filepath.Join(dir, rex.ExecutableName("agent-runtime"))}
 	if suffix, ok := strings.CutPrefix(name, "rex-host-"); ok {
 		candidates = append(candidates, filepath.Join(dir, "agent-runtime-"+suffix))
 	}
-	candidates = append(candidates, filepath.Join(dir, "agent-runtime-"+runtimeTriple()))
+	candidates = append(candidates, filepath.Join(dir, rex.ExecutableName("agent-runtime-"+runtimeTriple())))
 	for _, candidate := range candidates {
 		if info, err := os.Stat(candidate); err == nil && !info.IsDir() {
 			return candidate, nil
@@ -517,12 +505,7 @@ func resolveRuntimeBinary() (string, error) {
 	return "", fmt.Errorf("bundled agent runtime not found next to %s", executable)
 }
 
-func runtimeTriple() string {
-	if runtime.GOARCH == "arm64" {
-		return "aarch64-apple-darwin"
-	}
-	return "x86_64-apple-darwin"
-}
+func runtimeTriple() string { return rex.RuntimeTriple() }
 
 func resolveDataDir() (string, error) {
 	if value := strings.TrimSpace(os.Getenv("REX_DATA_DIR")); value != "" {

@@ -1,0 +1,52 @@
+name: Windows foundations
+
+on:
+  pull_request:
+  push:
+    branches: [feat/windows-support]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  host:
+    runs-on: windows-latest
+    timeout-minutes: 30
+    env:
+      CGO_ENABLED: "0"
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - name: Checkout matching runtime foundation
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          repository: helpin-ai/agent-runtime
+          ref: 684ae523dc24a6e10a351c8097e5b3f1c36ecb70
+          path: .ci/runtime
+          persist-credentials: false
+      - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
+        with:
+          go-version-file: go.mod
+      - name: Use unreleased Windows runtime without changing dependency pins
+        shell: pwsh
+        run: |
+          @"
+          go 1.26.0
+          use (
+            .
+            ./.ci/runtime
+          )
+          "@ | Set-Content -Encoding utf8 go.windows.work
+          "GOWORK=$PWD/go.windows.work" >> $env:GITHUB_ENV
+      - name: Build Windows x64 host
+        run: go build -o rex-host-x64.exe ./cmd/rex-host
+      - name: Test native host foundations
+        run: go test ./internal/rex -run 'Test(NativeExecutableNames|WindowsEnvironment|WindowsJob|RoutineFailureCooldown|SuccessfulManualRoutine|ExplicitlyDisabledRoutine|RuntimeSDK)' -timeout 5m
+      - name: All host tests
+        run: go test ./... -timeout 5m
+      - name: Cross-build Windows ARM64 host
+        env:
+          GOARCH: arm64
+        run: go build -o rex-host-arm64.exe ./cmd/rex-host

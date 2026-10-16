@@ -10,7 +10,6 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
-	"syscall"
 	"time"
 )
 
@@ -91,7 +90,7 @@ func RunBrowserShim(args []string) error {
 	if os.Getenv("AGENT_BROWSER_ARGS") == "" {
 		env = append(env, "AGENT_BROWSER_ARGS="+hideAutomation)
 	}
-	return syscall.Exec(real, append([]string{real}, args...), env)
+	return forwardBrowserProcess(real, args, env)
 }
 
 func ensureBrowserSession(ctx context.Context, config shimConfig, payload []byte) error {
@@ -125,9 +124,9 @@ func BrowserShimEnv(dataDir, hostURL, token string) ([]string, error) {
 	if err := os.MkdirAll(dir, 0o700); err != nil {
 		return nil, err
 	}
-	link := filepath.Join(dir, BrowserShimName)
+	link := filepath.Join(dir, ExecutableName(BrowserShimName))
 	_ = os.Remove(link)
-	if err := os.Symlink(self, link); err != nil {
+	if err := linkBrowserShim(self, link); err != nil {
 		return nil, err
 	}
 	config, _ := json.Marshal(shimConfig{EnsureURL: hostURL + "/runtime/browser/ensure", Token: token, RealBrowser: agentBrowserPath()})

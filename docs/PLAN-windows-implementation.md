@@ -129,17 +129,17 @@ Do not duplicate these responsibilities in Rex or change other apps' defaults.
 | Gate | Status | Evidence |
 | --- | --- | --- |
 | Plan saved before implementation | complete | This file, initial plan commit |
-| Runtime Windows amd64 build | failing baseline | Unix workspace/memory-worker locks |
-| Runtime Windows arm64 build | pending | |
-| Rex Windows amd64 build | failing baseline | embedder Setpgid/syscall.Kill |
-| Rex Windows arm64 build | pending | |
+| Runtime Windows amd64 build | cross-build passed; native CI in progress | runtime feature branch, native CI run 38869790255 exposed SQLite URI bug; fixed in 684ae52 |
+| Runtime Windows arm64 build | cross-build passed | runtime feature branch |
+| Rex Windows amd64 build | cross-build passed | isolated workspace against runtime feature branch; native CI pending |
+| Rex Windows arm64 build | cross-build passed | isolated workspace against runtime feature branch |
 | Windows native core/memory/credentials | pending | |
 | Windows browser integration | pending | |
 | WSL confinement proof | pending, requires Windows | |
 | WSL setup/commands/cancel/restart | pending | |
 | Installer/signing/upgrade/uninstall | pending | |
 | Windows notifications and attention | pending | |
-| macOS regression checks | pending | |
+| macOS regression checks | foundation passed | Rex full Go tests/vet; runtime workspace/memory/runtime/API/cancellation tests; lock/memory race tests |
 | Linux regression checks | pending | |
 
 ## Stop conditions and verification rules
@@ -150,3 +150,18 @@ If a Windows runner, VM, signing credential, or private-module credential is
 missing, record the exact blocked gate and continue independent implementation.
 A release is complete only when all mandatory gates have evidence; document
 optional architecture/OS support separately when its gates remain unverified.
+
+## Implementation log
+
+- Runtime branch `feat/windows-support`: 4e6ec74 ports locks/process cancellation
+  and adds native Windows CI. 684ae52 fixes URI formatting exposed by the first
+  real Windows memory job tests, also covering memory banks/checkpoints.
+- Rex process ownership now uses a kill-on-close Windows Job object; Unix process
+  groups remain. Windows commands remain disabled (`execution_isolation=none`).
+- Native Windows CI includes host-death descendant cleanup, core tests, and both
+  host architecture builds. Cross-repository runtime input is pinned by full SHA
+  until a runtime release contains these changes.
+- Additional browser gap found: legacy takeover uses `exec.Cmd.ExtraFiles` for
+  CDP pipes; Windows needs a verified transport before that mode can be enabled.
+- GitHub connector can read workflow results but rejected draft PR creation with
+  HTTP 403. Git pushes and branch-triggered Windows CI work.
