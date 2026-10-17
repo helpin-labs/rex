@@ -24,7 +24,8 @@ jobs:
     runs-on: macos-15
     timeout-minutes: 45
     env:
-      CGO_ENABLED: '0'
+      # The runtime's macOS SQLite driver requires CGO.
+      CGO_ENABLED: '1'
       GOWORK: 'off'
       RELEASE_VERSION: ${{ inputs.release_version || '' }}
     steps:
