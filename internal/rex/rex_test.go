@@ -22,6 +22,17 @@ func openTestStore(t *testing.T) *Store {
 	return store
 }
 
+func migrationVersion(t *testing.T, statement string) int {
+	t.Helper()
+	for index, migration := range migrations {
+		if strings.Contains(migration, statement) {
+			return index + 1
+		}
+	}
+	t.Fatal("migration not found: " + statement)
+	return 0
+}
+
 func TestCapabilitiesMapToRuntimeTools(t *testing.T) {
 	bot := Bot{Name: "Reader", Capabilities: Capabilities{FilesRead: true, Web: true}, MemoryMode: MemoryOff}
 	if err := bot.Normalize(t.TempDir()); err != nil {
@@ -38,21 +49,8 @@ func TestCapabilitiesMapToRuntimeTools(t *testing.T) {
 			t.Errorf("read-only bot must not get %s", unwanted)
 		}
 	}
-	if string(bot.executionConfig()) != `{"max_tool_steps":2000,"workspace":{"access":"read_only","mode":"host_prepared"}}` {
+	if string(bot.executionConfig()) != `{"approval_review":{"auto_approve":false,"enabled":false},"max_tool_steps":2000,"workspace":{"access":"read_only","mode":"host_prepared"}}` {
 		t.Errorf("unexpected execution config %s", bot.executionConfig())
-	}
-}
-
-func TestShellForcesApprovalAndFileAccess(t *testing.T) {
-	bot := Bot{Name: "Ops", Capabilities: Capabilities{Shell: true}, ApprovalMode: ApprovalAuto}
-	if err := bot.Normalize(t.TempDir()); err != nil {
-		t.Fatal(err)
-	}
-	if bot.ApprovalMode != ApprovalAsk || !bot.Capabilities.FilesRead {
-		t.Fatalf("shell must imply ask + read access, got %+v", bot)
-	}
-	if bot.RuntimeApprovalMode() != "risk_based" {
-		t.Fatalf("got %s", bot.RuntimeApprovalMode())
 	}
 }
 

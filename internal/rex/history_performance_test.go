@@ -250,7 +250,9 @@ func TestHistoryIndexUpgradePreservesSources(t *testing.T) {
 			t.Fatal(err)
 		}
 	}
-	if _, err := h.Store.db.ExecContext(t.Context(), `DELETE FROM schema_migrations WHERE version=?`, len(migrations)); err != nil {
+	// Replay the FTS repair and any later migrations, rather than assuming it is last.
+	repairVersion := migrationVersion(t, "INSERT INTO task_history_fts(rowid,id,text) SELECT rowid,id,text FROM task_history")
+	if _, err := h.Store.db.ExecContext(t.Context(), `DELETE FROM schema_migrations WHERE version>=?`, repairVersion); err != nil {
 		t.Fatal(err)
 	}
 	if err := h.Store.migrate(t.Context()); err != nil {

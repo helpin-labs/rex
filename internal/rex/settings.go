@@ -113,9 +113,9 @@ type Settings struct {
 	BrowserPath   string `json:"browser_path"`
 	BrowserHidden bool   `json:"browser_hidden"`
 	// TypeSafe reviews proposed commands and file edits (jev). Its key is
-	// stored in the Keychain; auto-approve lets it clear low-risk local steps.
+	// stored in the system credential store; each bot selects its approval mode.
 	TypeSafe            ProviderConfig `json:"typesafe"`
-	TypeSafeAutoApprove bool           `json:"typesafe_auto_approve"`
+	TypeSafeAutoApprove bool           `json:"typesafe_auto_approve"` // Legacy value used only by the approval-mode migration.
 	// Web search providers for the runtime's web_search tool. Only keys
 	// are stored (in the Keychain); TinyFish is tried first, then Exa,
 	// then Brave.
@@ -284,7 +284,7 @@ func (m *SettingsManager) Save(ctx context.Context, input Settings) (Settings, b
 	saved, err := m.load(ctx)
 	restart := keysChanged || saved.Local.BaseURL != previous.Local.BaseURL || saved.Anthropic.BaseURL != previous.Anthropic.BaseURL ||
 		saved.OpenAI.BaseURL != previous.OpenAI.BaseURL || saved.OpenRouter.BaseURL != previous.OpenRouter.BaseURL ||
-		saved.BrowserEnabled != previous.BrowserEnabled || saved.BrowserPath != previous.BrowserPath || saved.TypeSafeAutoApprove != previous.TypeSafeAutoApprove ||
+		saved.BrowserEnabled != previous.BrowserEnabled || saved.BrowserPath != previous.BrowserPath ||
 		saved.CloudBrowsers() != previous.CloudBrowsers()
 	return saved, restart, err
 }
@@ -323,7 +323,7 @@ func (m *SettingsManager) RuntimeEnv(ctx context.Context) ([]string, error) {
 		return nil, err
 	} else if key != "" {
 		env = append(env, "TYPESAFE_API_KEY="+key, "AGENT_RUNTIME_TYPESAFE_ENABLED=true",
-			"AGENT_RUNTIME_TYPESAFE_AUTO_APPROVE="+fmt.Sprint(settings.TypeSafeAutoApprove))
+			"AGENT_RUNTIME_TYPESAFE_AUTO_APPROVE=false")
 	}
 	for _, item := range []struct{ provider, keyEnv string }{
 		{searchTinyFish, "TINYFISH_API_KEY"}, {searchExa, "EXA_API_KEY"}, {searchBrave, "BRAVE_SEARCH_API_KEY"},
