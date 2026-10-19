@@ -146,8 +146,8 @@ test('artifact discovery fails clearly on API failures instead of silently trigg
 });
 
 const releaseWorkflow = readFileSync(join(root, '.github/workflows/release.yml'), 'utf8');
-function jobCondition(job, needs, cancelled = false) {
-  const block = releaseWorkflow.split(`\n  ${job}:\n`)[1].split(/\n  [a-z]+:\n/)[0];
+function jobCondition(job, needs, cancelled = false, workflow = releaseWorkflow) {
+  const block = workflow.replace(/\r\n/g, '\n').split(`\n  ${job}:\n`)[1].split(/\n  [a-z]+:\n/)[0];
   const expression = block.match(/    if: >-\n([\s\S]*?)\n    runs-on:/)?.[1].trim()
     ?? block.match(/    if: (.*)/)[1];
   return Boolean(new Function('needs', 'github', 'always', 'cancelled', `return (${expression})`)(
@@ -158,20 +158,24 @@ function releaseNeeds(windowsResult, macosResult, windowsRun = '', macosRun = ''
     windows: { result: windowsResult }, macos: { result: macosResult } };
 }
 
-test('release job conditions skip unnecessary builds and publish only two available validated platforms', () => {
-  const none = releaseNeeds('skipped', 'skipped', '', '', '');
-  for (const job of ['windows', 'macos', 'publish']) assert.equal(jobCondition(job, none), false);
-  const fresh = releaseNeeds('success', 'success');
-  for (const job of ['windows', 'macos', 'publish']) assert.equal(jobCondition(job, fresh), true);
-  const reused = releaseNeeds('skipped', 'skipped', '100', '101');
-  assert.equal(jobCondition('windows', reused), false);
-  assert.equal(jobCondition('macos', reused), false);
-  assert.equal(jobCondition('publish', reused), true);
-  assert.equal(jobCondition('publish', releaseNeeds('success', 'skipped', '', '101')), true);
-  assert.equal(jobCondition('publish', releaseNeeds('skipped', 'success', '100')), true);
-  for (const result of ['failure', 'cancelled', 'skipped']) {
-    assert.equal(jobCondition('publish', releaseNeeds(result, 'success')), false);
-    assert.equal(jobCondition('publish', releaseNeeds('success', result)), false);
-  }
-  assert.equal(jobCondition('publish', reused, true), false);
-});
+for (const lineEnding of ['LF', 'CRLF']) {
+  const workflow = releaseWorkflow.replace(/\r?\n/g, lineEnding === 'LF' ? '\n' : '\r\n');
+  test(`release job conditions skip unnecessary builds and publish only two available validated platforms (${lineEnding})`, () => {
+    const condition = (job, needs, cancelled = false) => jobCondition(job, needs, cancelled, workflow);
+    const none = releaseNeeds('skipped', 'skipped', '', '', '');
+    for (const job of ['windows', 'macos', 'publish']) assert.equal(condition(job, none), false);
+    const fresh = releaseNeeds('success', 'success');
+    for (const job of ['windows', 'macos', 'publish']) assert.equal(condition(job, fresh), true);
+    const reused = releaseNeeds('skipped', 'skipped', '100', '101');
+    assert.equal(condition('windows', reused), false);
+    assert.equal(condition('macos', reused), false);
+    assert.equal(condition('publish', reused), true);
+    assert.equal(condition('publish', releaseNeeds('success', 'skipped', '', '101')), true);
+    assert.equal(condition('publish', releaseNeeds('skipped', 'success', '100')), true);
+    for (const result of ['failure', 'cancelled', 'skipped']) {
+      assert.equal(condition('publish', releaseNeeds(result, 'success')), false);
+      assert.equal(condition('publish', releaseNeeds('success', result)), false);
+    }
+    assert.equal(condition('publish', reused, true), false);
+  });
+}
