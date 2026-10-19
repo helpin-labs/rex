@@ -439,3 +439,26 @@ optional architecture/OS support separately when its gates remain unverified.
 - Self-signed/ad-hoc previews do not establish trusted publisher identities.
   Trusted signing/notarization, fresh OAuth, Windows 10 and native ARM64 Windows
   desktop packaging remain separate gates.
+
+
+## Elevated Windows CI fixes — 2026-10-19
+
+- The macOS CGO correction passed hosted run 39031804616, including app/DMG
+  packaging, signature verification and real bundled-service readiness.
+- Reproduced the Windows GUI failure in an elevated, noninteractive VM session:
+  WebView2 150+ intentionally ignores environment-based debugging overrides.
+  The GUI test now temporarily sets AdditionalBrowserArguments through an HKLM
+  policy scoped to rex-desktop.exe, preserving and restoring existing policy.
+  No application or macOS code changed. The complete elevated GUI check passed
+  with onboarding, provider switching and attention commands; policy restoration
+  after success and removal after forced failure also passed.
+- Reproduced the browser-cookie test race with a response delayed beyond its
+  four-second sleep. The test now waits for the actual login cookie before
+  closing the plain browser. The delayed-response regression failed before the
+  change and passed afterward twice on Mac and twice in the signed-in Windows
+  VM. Chrome native pipes passed both runs and Edge native pipes also passed.
+  An SSH-only attempt reached cookie readiness but its browser CLI could not
+  configure Chrome; the signed-in desktop checks above remain separate evidence.
+- Native Go tests, go vet and workflow validation passed. Changes are confined
+  to test readiness, elevated test setup/cleanup and this ledger. The next hosted
+  Windows run must pass before the branch is treated as ready for release.

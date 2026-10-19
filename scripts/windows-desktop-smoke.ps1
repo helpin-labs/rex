@@ -12,6 +12,10 @@ $portListener.Stop()
 $previousArguments = $env:WEBVIEW2_ADDITIONAL_BROWSER_ARGUMENTS
 $env:WEBVIEW2_ADDITIONAL_BROWSER_ARGUMENTS = "--remote-debugging-port=$port --remote-debugging-address=127.0.0.1"
 $app = $null
+$policy = $null
+$policyName = 'rex-desktop.exe'
+$previousPolicy = $null
+$previousPolicyKind = $null
 function Invoke-Browser([string]$arguments) {
     # A CLI daemon can keep its parent's stdout handle open; wait only for the CLI.
     $output = Join-Path $evidence ('command-' + [Guid]::NewGuid().ToString('N') + '.out')
@@ -23,6 +27,14 @@ function Invoke-Browser([string]$arguments) {
     return $result
 }
 try {
+    $identity = [Security.Principal.WindowsIdentity]::GetCurrent()
+    if ([Security.Principal.WindowsPrincipal]::new($identity).IsInRole([Security.Principal.WindowsBuiltInRole]::Administrator)) {
+        # WebView2 150+ ignores environment overrides in elevated CI; scope trusted policy to Rex.
+        $policy = [Microsoft.Win32.Registry]::LocalMachine.CreateSubKey('SOFTWARE\Policies\Microsoft\Edge\WebView2\AdditionalBrowserArguments')
+        $previousPolicy = $policy.GetValue($policyName, $null, [Microsoft.Win32.RegistryValueOptions]::DoNotExpandEnvironmentNames)
+        if ($null -ne $previousPolicy) { $previousPolicyKind = $policy.GetValueKind($policyName) }
+        $policy.SetValue($policyName, "$previousPolicy $env:WEBVIEW2_ADDITIONAL_BROWSER_ARGUMENTS".Trim(), [Microsoft.Win32.RegistryValueKind]::String)
+    }
     $app = Start-Process (Join-Path $InstallDirectory 'rex-desktop.exe') -RedirectStandardOutput (Join-Path $evidence 'app.out') -RedirectStandardError (Join-Path $evidence 'app.err') -PassThru
     $deadline = [DateTime]::UtcNow.AddMinutes(2)
     do {
@@ -49,6 +61,11 @@ try {
     foreach ($name in @('rex.log', 'embedder.log')) {
         $log = Join-Path $env:LOCALAPPDATA "ai.rex.desktop/$name"
         if (Test-Path $log) { Copy-Item $log (Join-Path $evidence $name) -ErrorAction Continue }
+    }
+    if ($policy) {
+        if ($null -eq $previousPolicy) { $policy.DeleteValue($policyName, $false) }
+        else { $policy.SetValue($policyName, $previousPolicy, $previousPolicyKind) }
+        $policy.Dispose()
     }
     $env:WEBVIEW2_ADDITIONAL_BROWSER_ARGUMENTS = $previousArguments
     if ($app -and !$app.HasExited) { $app.Kill($true); $app.WaitForExit(10000) | Out-Null }

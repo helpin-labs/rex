@@ -1,6 +1,7 @@
 package rex
 
 import (
+	"encoding/json"
 	"fmt"
 	"net/http"
 	"net/http/httptest"
@@ -20,6 +21,8 @@ func TestPlainBrowserHandsCookiesToTheBot(t *testing.T) {
 	}
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if r.URL.Path == "/set" {
+			// Slow responses must finish before handing the browser profile back.
+			time.Sleep(5 * time.Second)
 			http.SetCookie(w, &http.Cookie{Name: "cf_clearance", Value: "plain-ok", MaxAge: 86400, Path: "/", HttpOnly: true})
 		}
 		cookie, _ := r.Cookie("cf_clearance")
@@ -36,7 +39,33 @@ func TestPlainBrowserHandsCookiesToTheBot(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	time.Sleep(4 * time.Second)
+	t.Cleanup(func() { browser.close(5 * time.Second) })
+	deadline := time.Now().Add(30 * time.Second)
+	for {
+		raw, err := browser.call("Storage.getCookies", map[string]any{}, deadline)
+		if err != nil {
+			t.Fatal(err)
+		}
+		var stored struct {
+			Cookies []struct{ Name, Value string }
+		}
+		if err := json.Unmarshal(raw, &stored); err != nil {
+			t.Fatal(err)
+		}
+		ready := false
+		for _, cookie := range stored.Cookies {
+			if cookie.Name == "cf_clearance" && cookie.Value == "plain-ok" {
+				ready = true
+			}
+		}
+		if ready {
+			break
+		}
+		if time.Now().After(deadline) {
+			t.Fatal("plain browser did not receive the login cookie")
+		}
+		time.Sleep(100 * time.Millisecond)
+	}
 	if url := browser.close(10 * time.Second); url != server.URL+"/set" {
 		t.Fatalf("open page = %q", url)
 	}
