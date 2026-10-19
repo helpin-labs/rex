@@ -4,6 +4,18 @@ $PSNativeCommandUseErrorActionPreference = $true
 $repoRoot = Split-Path -Parent $PSScriptRoot
 $destination = Join-Path $repoRoot 'src-tauri/resources/wsl'
 New-Item -ItemType Directory -Force $destination | Out-Null
+$buildInputs = (@('go.mod', 'go.sum', 'scripts/build-wsl.ps1') | ForEach-Object { (Get-FileHash (Join-Path $repoRoot $_) -Algorithm SHA256).Hash.ToLowerInvariant() }) -join ':'
+$bundle = Join-Path $destination rootfs.tar
+$metadataPath = Join-Path $destination rootfs.json
+if ((Test-Path $bundle) -and (Test-Path $metadataPath)) {
+    try {
+        $metadata = Get-Content $metadataPath -Raw | ConvertFrom-Json
+        if ($metadata.Architecture -eq $Architecture -and $metadata.BuildInputs -eq $buildInputs -and $metadata.SHA256 -eq (Get-FileHash $bundle -Algorithm SHA256).Hash.ToLowerInvariant()) {
+            Write-Host 'Verified cached WSL image'
+            return
+        }
+    } catch { Write-Warning 'Ignoring invalid cached WSL metadata' }
+}
 $root = Join-Path $env:TEMP ('rex-wsl-build-' + [Guid]::NewGuid().ToString('N'))
 New-Item -ItemType Directory $root | Out-Null
 $distribution = 'Rex-Rootfs-Build-' + [Guid]::NewGuid().ToString('N')
@@ -41,7 +53,7 @@ try {
     Invoke-WSL -d $distribution --exec /bin/chmod 644 /etc/wsl.conf
     Invoke-WSL --terminate $distribution
     Invoke-WSL --export $distribution (Join-Path $destination rootfs.tar)
-    @{ SHA256 = (Get-FileHash (Join-Path $destination rootfs.tar) -Algorithm SHA256).Hash.ToLowerInvariant(); Architecture = $Architecture } | ConvertTo-Json | Set-Content -Encoding ascii (Join-Path $destination rootfs.json)
+    @{ SHA256 = (Get-FileHash (Join-Path $destination rootfs.tar) -Algorithm SHA256).Hash.ToLowerInvariant(); Architecture = $Architecture; BuildInputs = $buildInputs } | ConvertTo-Json | Set-Content -Encoding ascii (Join-Path $destination rootfs.json)
 } finally {
     $env:GOOS = $previousGOOS; $env:GOARCH = $previousGOARCH; $env:CGO_ENABLED = $previousCGO
     Pop-Location

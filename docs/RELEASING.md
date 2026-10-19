@@ -10,8 +10,8 @@ The workflow plans a version without creating a tag, stamps the Node, Tauri and
 Cargo manifests only in each build workspace, and builds Windows x64 and macOS
 Apple Silicon installers from the same source commit. Host/UI tests, bundled
 services, signatures and the Windows installed-GUI lifecycle must pass. A failed
-platform blocks publication; the currently unresolved hosted Windows GUI check
-has not been bypassed.
+platform blocks publication. When no semantic release is due, neither platform
+is built.
 
 The publisher verifies each installer against its version, source commit and
 SHA-256 manifest, uploads both installers, the public Windows certificate and
@@ -50,8 +50,10 @@ replace those steps.
 ## Verification and recovery
 
 Run `pnpm test:release` for version planning, manifest synchronization and artifact
-validation tests. A PR runs both desktop workflows without publishing. Their
-manual dispatch also accepts an optional stable `release_version` to exercise
+validation tests. A PR runs native Go tests and UI validation on both operating systems, plus
+Windows runtime, browser and signing checks, without building installers. New PR
+commits cancel obsolete PR checks. For native-shell or packaging changes, run a
+manual candidate build before merge. Each platform workflow's manual dispatch accepts an optional stable `release_version` to exercise
 preview signing and packaging on a feature branch; it uploads candidate artifacts
 and never publishes. macOS packaging currently targets Apple Silicon; Windows
 targets x64. Windows 10 and a native ARM64 Windows installer remain unverified.
@@ -59,6 +61,35 @@ targets x64. Windows 10 and a native ARM64 Windows installer remain unverified.
 If publication fails after a draft is created, use **Re-run failed jobs** on the
 original workflow run. The publish job resumes only a draft for the same source
 commit; it refuses to overwrite a public release. Keep the original build
-artifacts available (seven-day retention). Starting a new full workflow after
+artifacts available (30-day retention for release candidates). Starting a new full workflow after
 tag creation is not an automatic draft-recovery mechanism. Resolve an abandoned
 draft and its tag explicitly before planning another release.
+
+## Artifact promotion and build cost
+
+Release installers are named by platform, final version and source commit. The
+publisher downloads and validates their original bytes; it does not compile,
+repackage or sign. Creating a release tag does not trigger another build.
+
+A new main workflow run reuses an available platform artifact from a completed
+main run of the release workflow or its matching platform workflow for the exact
+commit and version. A previously failed overall run can supply its successfully
+validated platform. PR runs, other branches, other workflow identities, expired
+artifacts and different versions/commits are excluded. Both downloaded manifests
+and SHA-256 checksums are still verified before publication. A changed source or
+final version needs new installers; development-version PR binaries are not
+release candidates. Artifacts are retained for 30 days; after expiry, rebuilding
+is necessary.
+
+Windows candidate builds compile each host/runtime once and run the shared host
+checks there. The selected Go test subset was redundant with all-host tests and
+was removed. PRs retain a runtime-only smoke; candidates use the full sidecar
+smoke instead. Chrome/Edge native-pipe, cookie handoff, ARM64 cross-build, WSL
+confinement, installer lifecycle and signature checks remain. Tauri builds the UI
+once, saves compiled Rust dependencies before bundling, and then signs/packages
+that executable. macOS also saves compiled dependencies before bundling.
+
+The Windows WSL image cache is keyed by the Go dependency manifests and its
+build script. Reuse checks the image checksum, architecture and dependency/script fingerprint; invalid cached
+images are rebuilt. Changing the script or pinned runtime refreshes the image.
+Bump the script when refreshing the Alpine packages in the base image.

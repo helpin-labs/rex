@@ -7,6 +7,7 @@ on:
 
 permissions:
   contents: read
+  actions: read
 
 concurrency:
   group: rex-desktop-release
@@ -18,8 +19,11 @@ jobs:
     runs-on: ubuntu-latest
     permissions:
       contents: write
+      actions: read
     outputs:
       version: ${{ steps.plan.outputs.version }}
+      windows_run: ${{ steps.reuse.outputs.windows_run }}
+      macos_run: ${{ steps.reuse.outputs.macos_run }}
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
@@ -39,32 +43,46 @@ jobs:
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: node scripts/release.mjs plan
+      - name: Find validated installers from earlier runs of this source and version
+        id: reuse
+        if: steps.plan.outputs.version != ''
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          VERSION: ${{ steps.plan.outputs.version }}
+        run: node scripts/release.mjs reuse "$VERSION"
       - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         if: steps.plan.outputs.version != ''
         with:
           name: rex-release-plan
           path: release-plan.json
           if-no-files-found: error
-          retention-days: 7
+          retention-days: 30
 
   windows:
     needs: version
+    if: needs.version.outputs.version != '' && needs.version.outputs.windows_run == ''
     uses: ./.github/workflows/windows.yml
     with:
       release_version: ${{ needs.version.outputs.version }}
 
   macos:
     needs: version
+    if: needs.version.outputs.version != '' && needs.version.outputs.macos_run == ''
     uses: ./.github/workflows/macos.yml
     with:
       release_version: ${{ needs.version.outputs.version }}
 
   publish:
     needs: [version, windows, macos]
-    if: github.ref == 'refs/heads/main' && needs.version.outputs.version != ''
+    if: >-
+      always() && !cancelled() && github.ref == 'refs/heads/main' && needs.version.result == 'success' &&
+      needs.version.outputs.version != '' &&
+      (needs.windows.result == 'success' || (needs.windows.result == 'skipped' && needs.version.outputs.windows_run != '')) &&
+      (needs.macos.result == 'success' || (needs.macos.result == 'skipped' && needs.version.outputs.macos_run != ''))
     runs-on: ubuntu-latest
     permissions:
       contents: write
+      actions: read
     env:
       GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
       VERSION: ${{ needs.version.outputs.version }}
@@ -81,9 +99,16 @@ jobs:
           name: rex-release-plan
       - uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
         with:
-          pattern: rex-release-installer-*
+          name: rex-release-installer-windows-x64-${{ needs.version.outputs.version }}-${{ github.sha }}
           path: release-assets
-          merge-multiple: true
+          run-id: ${{ needs.version.outputs.windows_run || github.run_id }}
+          github-token: ${{ secrets.GITHUB_TOKEN }}
+      - uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
+        with:
+          name: rex-release-installer-macos-arm64-${{ needs.version.outputs.version }}-${{ github.sha }}
+          path: release-assets
+          run-id: ${{ needs.version.outputs.macos_run || github.run_id }}
+          github-token: ${{ secrets.GITHUB_TOKEN }}
       - name: Require matching versions, source commits and installer checksums
         run: node scripts/release.mjs verify "$VERSION"
       - name: Create or resume the draft release

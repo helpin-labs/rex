@@ -5,7 +5,7 @@ import { tmpdir } from 'node:os';
 import { dirname, join } from 'node:path';
 import { fileURLToPath, pathToFileURL } from 'node:url';
 import { execFileSync } from 'node:child_process';
-import { artifactNames, stampVersion, verifyAssets, writeManifest } from './release.mjs';
+import { artifactNames, findReusableArtifacts, stampVersion, verifyAssets, writeManifest } from './release.mjs';
 
 const root = dirname(dirname(fileURLToPath(import.meta.url)));
 const commit = 'a'.repeat(40);
@@ -84,3 +84,94 @@ for (const [message, expected, tagged = true] of [
     assert.equal(git('ls-remote', '--tags', 'origin').split('\n').filter(Boolean).length, tagged ? 1 : 0);
   });
 }
+
+function artifactFixture(platform, run = {}) {
+  return { name: `rex-release-installer-${platform}-1.2.3-${commit}`, expired: false,
+    workflow_run: { id: 100, head_branch: 'main', head_sha: commit, ...run } };
+}
+const trustedRun = { id: 100, head_branch: 'main', head_sha: commit, status: 'completed',
+  event: 'push', path: '.github/workflows/release.yml' };
+function discover(artifacts, runs = {}, options = {}) {
+  return findReusableArtifacts({ repository: 'helpin-labs/rex', version: '1.2.3', commit,
+    runId: '200', token: 'fixture-token', ...options,
+    request: async (url, init) => {
+      assert.equal(init.redirect, 'error');
+      assert.equal(init.headers.Authorization, 'Bearer fixture-token');
+      if (url.includes('artifacts?')) {
+        const name = new URL(url).searchParams.get('name');
+        return { ok: true, json: async () => ({ artifacts: artifacts.filter(a => a.name === name) }) };
+      }
+      const id = url.split('/').at(-1);
+      assert.ok(runs[id], `Unexpected run lookup: ${id}`);
+      return { ok: true, json: async () => runs[id] };
+    },
+  });
+}
+
+test('reuse discovers both exact-source final-version platforms from trusted completed main builds', async () => {
+  const result = await discover([artifactFixture('windows-x64'), artifactFixture('macos-arm64')], { 100: trustedRun });
+  assert.deepEqual(result, { windows_run: '100', macos_run: '100' });
+});
+
+test('a prior failed overall release can supply its validated platform while the missing platform builds', async () => {
+  assert.deepEqual(await discover([artifactFixture('macos-arm64')], { 100: { ...trustedRun, conclusion: 'failure' } }),
+    { windows_run: '', macos_run: '100' });
+});
+
+test('reuse ignores expired, different-source, different-version, PR, and current-run artifacts', async () => {
+  const artifacts = [
+    { ...artifactFixture('windows-x64'), expired: true },
+    artifactFixture('windows-x64', { head_sha: 'b'.repeat(40) }),
+    artifactFixture('windows-x64', { head_branch: 'feature' }),
+    artifactFixture('windows-x64', { id: 200 }),
+    { ...artifactFixture('windows-x64'), name: `rex-release-installer-windows-x64-9.9.9-${commit}` },
+  ];
+  assert.deepEqual(await discover(artifacts), { windows_run: '', macos_run: '' });
+});
+
+for (const invalid of [
+  { head_branch: 'feature' }, { head_sha: 'b'.repeat(40) }, { status: 'in_progress' },
+  { event: 'pull_request' }, { event: 'pull_request_target' }, { path: '.github/workflows/unrelated.yml' },
+  { path: '.github/workflows/macos.yml' },
+]) {
+  test(`reuse rejects a Windows run with ${JSON.stringify(invalid)}`, async () => {
+    assert.deepEqual(await discover([artifactFixture('windows-x64')], { 100: { ...trustedRun, ...invalid } }),
+      { windows_run: '', macos_run: '' });
+  });
+}
+
+test('artifact discovery fails clearly on API failures instead of silently triggering expensive rebuilds', async () => {
+  await assert.rejects(findReusableArtifacts({ repository: 'helpin-labs/rex', version: '1.2.3', commit,
+    token: 'fixture-token', request: async () => ({ ok: false, status: 403 }) }), /HTTP 403/);
+});
+
+const releaseWorkflow = readFileSync(join(root, '.github/workflows/release.yml'), 'utf8');
+function jobCondition(job, needs, cancelled = false) {
+  const block = releaseWorkflow.split(`\n  ${job}:\n`)[1].split(/\n  [a-z]+:\n/)[0];
+  const expression = block.match(/    if: >-\n([\s\S]*?)\n    runs-on:/)?.[1].trim()
+    ?? block.match(/    if: (.*)/)[1];
+  return Boolean(new Function('needs', 'github', 'always', 'cancelled', `return (${expression})`)(
+    needs, { ref: 'refs/heads/main' }, () => true, () => cancelled));
+}
+function releaseNeeds(windowsResult, macosResult, windowsRun = '', macosRun = '', version = '1.2.3') {
+  return { version: { result: 'success', outputs: { version, windows_run: windowsRun, macos_run: macosRun } },
+    windows: { result: windowsResult }, macos: { result: macosResult } };
+}
+
+test('release job conditions skip unnecessary builds and publish only two available validated platforms', () => {
+  const none = releaseNeeds('skipped', 'skipped', '', '', '');
+  for (const job of ['windows', 'macos', 'publish']) assert.equal(jobCondition(job, none), false);
+  const fresh = releaseNeeds('success', 'success');
+  for (const job of ['windows', 'macos', 'publish']) assert.equal(jobCondition(job, fresh), true);
+  const reused = releaseNeeds('skipped', 'skipped', '100', '101');
+  assert.equal(jobCondition('windows', reused), false);
+  assert.equal(jobCondition('macos', reused), false);
+  assert.equal(jobCondition('publish', reused), true);
+  assert.equal(jobCondition('publish', releaseNeeds('success', 'skipped', '', '101')), true);
+  assert.equal(jobCondition('publish', releaseNeeds('skipped', 'success', '100')), true);
+  for (const result of ['failure', 'cancelled', 'skipped']) {
+    assert.equal(jobCondition('publish', releaseNeeds(result, 'success')), false);
+    assert.equal(jobCondition('publish', releaseNeeds('success', result)), false);
+  }
+  assert.equal(jobCondition('publish', reused, true), false);
+});

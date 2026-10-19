@@ -9,6 +9,37 @@ export function validateVersion(version) {
   return version;
 }
 
+// Only completed main runs of these workflows can supply validated installers.
+export async function findReusableArtifacts({ repository, version, commit, runId, token, request = fetch }) {
+  validateVersion(version);
+  if (!/^[\w.-]+\/[\w.-]+$/.test(repository) || !/^[0-9a-f]{40}$/.test(commit)) throw new Error('Invalid build identity');
+  const get = async path => {
+    const response = await request(`https://api.github.com/repos/${repository}/actions/${path}`, {
+      headers: { Authorization: `Bearer ${token}`, Accept: 'application/vnd.github+json' }, redirect: 'error',
+    });
+    if (!response.ok) throw new Error(`Artifact discovery failed: HTTP ${response.status}`);
+    return response.json();
+  };
+  const result = {};
+  for (const [platform, output, workflow] of [
+    ['windows-x64', 'windows_run', 'windows.yml'], ['macos-arm64', 'macos_run', 'macos.yml'],
+  ]) {
+    result[output] = '';
+    const name = `rex-release-installer-${platform}-${version}-${commit}`;
+    const { artifacts } = await get(`artifacts?name=${encodeURIComponent(name)}&per_page=100`);
+    for (const artifact of artifacts) {
+      const source = artifact.workflow_run;
+      if (artifact.name !== name || artifact.expired || !source || source.head_branch !== 'main' || source.head_sha !== commit || String(source.id) === String(runId)) continue;
+      const run = await get(`runs/${source.id}`);
+      if (run.status !== 'completed' || run.head_branch !== 'main' || run.head_sha !== commit || !['push', 'workflow_dispatch'].includes(run.event)) continue;
+      if (!['.github/workflows/release.yml', `.github/workflows/${workflow}`].includes(run.path)) continue;
+      result[output] = String(run.id);
+      break;
+    }
+  }
+  return result;
+}
+
 export function stampVersion(version, root = process.cwd()) {
   validateVersion(version);
   const updates = new Map();
@@ -105,6 +136,12 @@ async function main() {
     if (next) writeFileSync('release-plan.json', JSON.stringify({ version: next, commit: result.nextRelease.gitHead, notes: result.nextRelease.notes }, null, 2) + '\n');
     return;
   }
+  if (command === 'reuse') {
+    const result = await findReusableArtifacts({ repository: process.env.GITHUB_REPOSITORY, version: value,
+      commit: process.env.GITHUB_SHA, runId: process.env.GITHUB_RUN_ID, token: process.env.GITHUB_TOKEN });
+    for (const [key, id] of Object.entries(result)) appendFileSync(process.env.GITHUB_OUTPUT, `${key}=${id}\n`);
+    return;
+  }
   if (command === 'verify') {
     const plan = JSON.parse(readFileSync('release-plan.json', 'utf8'));
     const head = execFileSync('git', ['rev-parse', 'HEAD'], { encoding: 'utf8' }).trim();
@@ -114,7 +151,7 @@ async function main() {
     writeFileSync('release-notes.md', `${plan.notes}\n\n### Preview signing\n\n${previewNotice}\n`);
     return;
   }
-  throw new Error('Usage: release.mjs plan | stamp VERSION | manifest PLATFORM VERSION | verify VERSION');
+  throw new Error('Usage: release.mjs plan | stamp VERSION | manifest PLATFORM VERSION | reuse VERSION | verify VERSION');
 }
 
 if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) await main();
