@@ -16,7 +16,7 @@ concurrency:
 jobs:
   version:
     if: github.ref == 'refs/heads/main'
-    runs-on: ubuntu-latest
+    runs-on: [self-hosted, Linux, X64]
     permissions:
       contents: write
       actions: read
@@ -79,7 +79,7 @@ jobs:
       needs.version.outputs.version != '' &&
       (needs.windows.result == 'success' || (needs.windows.result == 'skipped' && needs.version.outputs.windows_run != '')) &&
       (needs.macos.result == 'success' || (needs.macos.result == 'skipped' && needs.version.outputs.macos_run != ''))
-    runs-on: ubuntu-latest
+    runs-on: [self-hosted, Linux, X64]
     permissions:
       contents: write
       actions: read

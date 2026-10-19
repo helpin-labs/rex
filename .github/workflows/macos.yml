@@ -23,7 +23,7 @@ concurrency:
 
 jobs:
   desktop:
-    runs-on: macos-15
+    runs-on: [self-hosted, macOS, ARM64]
     timeout-minutes: 45
     env:
       # The runtime's macOS SQLite driver requires CGO.
