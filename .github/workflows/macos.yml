@@ -2,8 +2,6 @@ name: macOS foundations
 
 on:
   pull_request:
-  push:
-    branches: [feat/windows-support]
   workflow_dispatch:
     inputs:
       release_version:
@@ -18,6 +16,10 @@ on:
 
 permissions:
   contents: read
+
+concurrency:
+  group: macos-${{ github.event_name }}-${{ github.ref }}-${{ inputs.release_version || 'checks' }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
 
 jobs:
   desktop:
@@ -50,10 +52,14 @@ jobs:
           go vet ./...
           pnpm test
           pnpm test:release
+      - name: Production UI validation for PRs
+        if: github.event_name == 'pull_request'
+        run: pnpm build
       - name: Stamp the planned release version
-        if: env.RELEASE_VERSION != ''
+        if: github.event_name != 'pull_request' && env.RELEASE_VERSION != ''
         run: node scripts/release.mjs stamp "$RELEASE_VERSION"
       - name: Restore pinned embedder and model
+        if: github.event_name != 'pull_request'
         id: embedder-cache
         uses: actions/cache/restore@caa296126883cff596d87d8935842f9db880ef25 # v5
         with:
@@ -63,9 +69,10 @@ jobs:
             .cache/llama-server-b11430-aarch64-apple-darwin
           key: macos-arm64-embedder-b11430-${{ hashFiles('scripts/build-embedder.sh') }}
       - name: Build native sidecars and embedding model
+        if: github.event_name != 'pull_request'
         run: ./scripts/build-sidecars.sh
       - name: Cache the verified embedder
-        if: steps.embedder-cache.outputs.cache-hit != 'true'
+        if: github.event_name != 'pull_request' && steps.embedder-cache.outputs.cache-hit != 'true'
         uses: actions/cache/save@caa296126883cff596d87d8935842f9db880ef25 # v5
         with:
           path: |
@@ -74,9 +81,11 @@ jobs:
             .cache/llama-server-b11430-aarch64-apple-darwin
           key: macos-arm64-embedder-b11430-${{ hashFiles('scripts/build-embedder.sh') }}
       - name: Identify Rust toolchain
+        if: github.event_name != 'pull_request'
         id: rust
         run: echo "version=$(rustc --version | cut -d' ' -f2)" >> "$GITHUB_OUTPUT"
       - name: Restore Rust dependencies
+        if: github.event_name != 'pull_request'
         id: rust-cache
         uses: actions/cache/restore@caa296126883cff596d87d8935842f9db880ef25 # v5
         with:
@@ -86,10 +95,11 @@ jobs:
             src-tauri/target/release/.fingerprint
           key: macos-arm64-rust-${{ steps.rust.outputs.version }}-${{ hashFiles('src-tauri/Cargo.lock') }}
           restore-keys: macos-arm64-rust-${{ steps.rust.outputs.version }}-
-      - name: Build ad-hoc-signed app and DMG
-        run: pnpm tauri build
+      - name: Compile the desktop executable once
+        if: github.event_name != 'pull_request'
+        run: pnpm tauri build --no-bundle
       - name: Save Rust dependencies before integration checks
-        if: steps.rust-cache.outputs.cache-hit != 'true'
+        if: github.event_name != 'pull_request' && steps.rust-cache.outputs.cache-hit != 'true'
         uses: actions/cache/save@caa296126883cff596d87d8935842f9db880ef25 # v5
         with:
           path: |
@@ -97,7 +107,11 @@ jobs:
             src-tauri/target/release/build
             src-tauri/target/release/.fingerprint
           key: macos-arm64-rust-${{ steps.rust.outputs.version }}-${{ hashFiles('src-tauri/Cargo.lock') }}
+      - name: Bundle and sign the compiled app and DMG
+        if: github.event_name != 'pull_request'
+        run: pnpm tauri bundle
       - name: Verify signatures and actual bundled services
+        if: github.event_name != 'pull_request'
         run: |
           app=src-tauri/target/release/bundle/macos/Rex.app
           codesign --verify --deep --strict "$app"
@@ -107,7 +121,7 @@ jobs:
             codesign --verify "$dmg"
           done
       - name: Collect the versioned installer
-        if: env.RELEASE_VERSION != ''
+        if: github.event_name != 'pull_request' && env.RELEASE_VERSION != ''
         run: |
           mkdir -p release-assets
           installers=(src-tauri/target/release/bundle/dmg/*.dmg)
@@ -115,14 +129,14 @@ jobs:
           cp "${installers[0]}" "release-assets/Rex-$RELEASE_VERSION-macos-arm64.dmg"
           node scripts/release.mjs manifest macos-arm64 "$RELEASE_VERSION"
       - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
-        if: env.RELEASE_VERSION != ''
+        if: github.event_name != 'pull_request' && env.RELEASE_VERSION != ''
         with:
-          name: rex-release-installer-macos-arm64
+          name: rex-release-installer-macos-arm64-${{ env.RELEASE_VERSION }}-${{ github.sha }}
           path: release-assets/
           if-no-files-found: error
-          retention-days: 7
+          retention-days: 30
       - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
-        if: env.RELEASE_VERSION == ''
+        if: github.event_name != 'pull_request' && env.RELEASE_VERSION == ''
         with:
           name: rex-macos-arm64-development
           path: src-tauri/target/release/bundle/dmg/*.dmg

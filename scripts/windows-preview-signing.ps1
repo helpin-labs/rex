@@ -21,7 +21,8 @@ try {
     try { $store.Open('ReadWrite'); $store.Add($certificate) } finally { $store.Close() }
     New-Item -ItemType Directory -Force release-assets | Out-Null
     Export-Certificate -Cert $certificate -FilePath release-assets/preview.cer | Out-Null
-    $command = @{ cmd = 'powershell.exe'; args = @('-NoProfile', '-ExecutionPolicy', 'Bypass', '-File', (Join-Path $PSScriptRoot 'windows-sign.ps1'), '%1') }
+    # Use the same PowerShell 7 host and modules that created the certificate.
+    $command = @{ cmd = (Join-Path $PSHOME 'pwsh.exe'); args = @('-NoProfile', '-NonInteractive', '-ExecutionPolicy', 'Bypass', '-File', (Join-Path $PSScriptRoot 'windows-sign.ps1'), '%1') }
     @{ bundle = @{ windows = @{ signCommand = $command } } } | ConvertTo-Json -Depth 6 | Set-Content -Encoding utf8 signing-config.json
     if ($env:GITHUB_ENV) { "REX_WINDOWS_SIGNING_THUMBPRINT=$($certificate.Thumbprint)" | Out-File $env:GITHUB_ENV -Append -Encoding utf8 }
     Write-Host "Created development signing certificate $($certificate.Thumbprint). Only its public certificate is exported."

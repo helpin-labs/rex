@@ -2,8 +2,6 @@ name: Windows foundations
 
 on:
   pull_request:
-  push:
-    branches: [feat/windows-support]
   workflow_dispatch:
     inputs:
       release_version:
@@ -19,12 +17,18 @@ on:
 permissions:
   contents: read
 
+concurrency:
+  group: windows-${{ github.event_name }}-${{ github.ref }}-${{ inputs.release_version || 'checks' }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
 jobs:
   host:
+    if: github.event_name == 'pull_request'
     runs-on: windows-latest
     timeout-minutes: 30
     env:
       CGO_ENABLED: "0"
+      GOWORK: 'off'
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
@@ -34,35 +38,36 @@ jobs:
           go-version-file: go.mod
       - name: Build Windows x64 host
         run: go build -o src-tauri/binaries/rex-host-x86_64-pc-windows-msvc.exe ./cmd/rex-host
-      - name: Test native host foundations
-        run: go test ./internal/rex -run 'Test(NativeExecutableNames|WindowsEnvironment|WindowsJob|WindowsCredentialManager|WindowsDataDirectory|WindowsBrowserDiscovery|RoutineFailureCooldown|SuccessfulManualRoutine|ExplicitlyDisabledRoutine|RuntimeSDK)' -timeout 5m
+      - name: Verify the captured preview-signing hook
+        shell: pwsh
+        run: ./scripts/windows-signing-smoke.ps1
+      - name: Verify cached WSL image integrity
+        shell: pwsh
+        run: ./scripts/windows-wsl-cache-smoke.ps1
       - name: Build matching native runtime
         run: go build -o src-tauri/binaries/agent-runtime-x86_64-pc-windows-msvc.exe github.com/helpin-ai/agent-runtime/cmd/agent-runtime
       - name: Exercise real host and runtime before the embedding build
         shell: pwsh
         run: ./scripts/windows-smoke.ps1 -RuntimeOnly
-      - name: Install pinned browser and exercise native pipe
+      - name: Install pinned browser and exercise host behavior
         shell: pwsh
         run: |
           ./scripts/build-browser.ps1
-          $env:REX_BROWSER_PIPE_E2E = "$PWD/src-tauri/resources/browser/chrome-win64/chrome.exe"
-          $env:REX_AGENT_BROWSER_EXECUTABLE = "$PWD/src-tauri/resources/browser/agent-browser.exe"
-          go test ./internal/rex -run '^TestPlainBrowserNativePipe$' -count=1 -timeout 1m
-          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
-          $env:REX_BROWSER_PIPE_E2E = "${env:ProgramFiles(x86)}/Microsoft/Edge/Application/msedge.exe"
-          if (!(Test-Path $env:REX_BROWSER_PIPE_E2E)) { throw 'Edge was not found on the Windows runner' }
-          go test ./internal/rex -run '^TestPlainBrowserNativePipe$' -count=1 -timeout 1m
-          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
-          $env:REX_BROWSER_E2E = "$PWD/src-tauri/resources/browser/chrome-win64/chrome.exe"
-          go test ./internal/rex -run '^TestPlainBrowserHandsCookiesToTheBot$' -count=1 -timeout 2m
-      - name: All host tests
-        run: go test ./... -timeout 5m
-      - name: Cross-build Windows ARM64 host
-        env:
-          GOARCH: arm64
-        run: go build -o rex-host-arm64.exe ./cmd/rex-host
+          ./scripts/windows-host-checks.ps1
+      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        with:
+          node-version: '24'
+          package-manager-cache: false
+      - name: UI and release validation
+        run: |
+          npm install --global pnpm@11.5.2
+          pnpm install --frozen-lockfile
+          pnpm test
+          pnpm test:release
+          pnpm build
 
   desktop:
+    if: github.event_name != 'pull_request'
     name: Build Windows desktop and exercise sidecars
     runs-on: windows-latest
     timeout-minutes: 60
@@ -92,8 +97,6 @@ jobs:
       - name: Stamp the planned release version
         if: env.RELEASE_VERSION != ''
         run: node scripts/release.mjs stamp $env:RELEASE_VERSION
-      - name: Production UI build
-        run: pnpm build
       - name: Restore pinned CPU embedder and model
         id: embedder-cache
         uses: actions/cache/restore@caa296126883cff596d87d8935842f9db880ef25 # v5
@@ -103,6 +106,12 @@ jobs:
             src-tauri/resources/models/
             .cache/llama-server-b11430-x86_64-pc-windows-msvc-cpu
           key: windows-cpu-embedder-b11430-${{ hashFiles('scripts/build-embedder.ps1') }}
+      - name: Restore matching WSL image
+        id: wsl-cache
+        uses: actions/cache/restore@caa296126883cff596d87d8935842f9db880ef25 # v5
+        with:
+          path: src-tauri/resources/wsl/
+          key: windows-x64-wsl-${{ hashFiles('go.mod', 'go.sum', 'scripts/build-wsl.ps1') }}
       - name: Build native Windows services and pinned CPU embedding model
         shell: pwsh
         run: ./scripts/build-sidecars.ps1
@@ -115,6 +124,15 @@ jobs:
             src-tauri/resources/models/
             .cache/llama-server-b11430-x86_64-pc-windows-msvc-cpu
           key: windows-cpu-embedder-b11430-${{ hashFiles('scripts/build-embedder.ps1') }}
+      - name: Save verified WSL image before integration checks
+        if: steps.wsl-cache.outputs.cache-hit != 'true'
+        uses: actions/cache/save@caa296126883cff596d87d8935842f9db880ef25 # v5
+        with:
+          path: src-tauri/resources/wsl/
+          key: windows-x64-wsl-${{ hashFiles('go.mod', 'go.sum', 'scripts/build-wsl.ps1') }}
+      - name: Host unit, browser integration and ARM64 build checks
+        shell: pwsh
+        run: ./scripts/windows-host-checks.ps1
       - name: Real sidecar readiness and crash cleanup
         shell: pwsh
         run: ./scripts/windows-smoke.ps1
@@ -145,13 +163,9 @@ jobs:
             src-tauri/target/release/.fingerprint
           key: windows-x64-rust-${{ steps.rust.outputs.version }}-${{ hashFiles('src-tauri/Cargo.lock') }}
           restore-keys: windows-x64-rust-${{ steps.rust.outputs.version }}-
-      - name: Build the desktop installer
+      - name: Compile the desktop executable once
         shell: pwsh
-        run: |
-          $config = @('--config', 'src-tauri/tauri.windows.conf.json')
-          if ($env:RELEASE_VERSION) { $config += @('--config', 'signing-config.json') }
-          pnpm tauri build @config
-          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+        run: pnpm tauri build --no-bundle --verbose
       - name: Save Rust dependencies before integration checks
         if: steps.rust-cache.outputs.cache-hit != 'true'
         uses: actions/cache/save@caa296126883cff596d87d8935842f9db880ef25 # v5
@@ -161,6 +175,13 @@ jobs:
             src-tauri/target/release/build
             src-tauri/target/release/.fingerprint
           key: windows-x64-rust-${{ steps.rust.outputs.version }}-${{ hashFiles('src-tauri/Cargo.lock') }}
+      - name: Bundle and sign the compiled desktop executable
+        shell: pwsh
+        run: |
+          $config = @('--config', 'src-tauri/tauri.windows.conf.json')
+          if ($env:RELEASE_VERSION) { $config += @('--config', 'signing-config.json') }
+          pnpm tauri bundle --verbose @config
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
       - name: Install, reinstall and uninstall the built package
         shell: pwsh
         run: ./scripts/windows-installer-smoke.ps1
@@ -178,10 +199,10 @@ jobs:
       - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         if: env.RELEASE_VERSION != ''
         with:
-          name: rex-release-installer-windows-x64
+          name: rex-release-installer-windows-x64-${{ env.RELEASE_VERSION }}-${{ github.sha }}
           path: release-assets/
           if-no-files-found: error
-          retention-days: 7
+          retention-days: 30
       - name: Remove the temporary private signing key and runner trust
         if: always() && env.RELEASE_VERSION != ''
         shell: pwsh
