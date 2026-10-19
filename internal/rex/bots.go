@@ -7,6 +7,7 @@ import (
 	"os"
 	"path/filepath"
 	"regexp"
+	"runtime"
 	"sort"
 	"strings"
 	"time"
@@ -147,8 +148,7 @@ func (b *Bot) Normalize(workspaceRoot string) error {
 	default:
 		return fmt.Errorf("unsupported approval mode %q", b.ApprovalMode)
 	}
-	// There is no OS sandbox on macOS: a shell command can do anything the
-	// user can. Shell access therefore always asks first.
+	// Shell access keeps risk-based approval even when commands are isolated.
 	if b.Capabilities.Shell {
 		b.ApprovalMode = ApprovalAsk
 		b.Capabilities.FilesRead = true
@@ -177,8 +177,15 @@ func (b *Bot) Normalize(workspaceRoot string) error {
 		return errors.New("workspace folder must be an absolute path")
 	}
 	b.WorkspaceDir = filepath.Clean(b.WorkspaceDir)
-	if b.WorkspaceDir == "/" || b.WorkspaceDir == filepath.Clean(homeDir()) {
-		return errors.New("choose a dedicated workspace folder, not / or your home folder")
+	workspace, home := b.WorkspaceDir, filepath.Clean(homeDir())
+	if resolved, err := filepath.EvalSymlinks(workspace); err == nil {
+		workspace = resolved
+	}
+	if resolved, err := filepath.EvalSymlinks(home); err == nil {
+		home = resolved
+	}
+	if filepath.Dir(workspace) == workspace || workspace == home || runtime.GOOS == "windows" && strings.EqualFold(workspace, home) {
+		return errors.New("choose a dedicated workspace folder, not a drive root or your home folder")
 	}
 	if b.Emoji == "" {
 		b.Emoji = "bot"
@@ -211,6 +218,9 @@ func (b Bot) AllowedTools() []string {
 	}
 	if b.Capabilities.Shell {
 		tools = append(tools, "run_command")
+		if runtime.GOOS == "windows" {
+			tools = append(tools, "run_python")
+		}
 	}
 	if b.Capabilities.Web {
 		// web_search exists only when a search key is set in Settings.
@@ -303,7 +313,7 @@ func (b Bot) browserMode(settings Settings) string {
 // and any enabled skills.
 func (b Bot) SystemPrompt(skills []Skill) string {
 	var parts []string
-	parts = append(parts, fmt.Sprintf("You are %s, a personal bot running in the Rex desktop app on the user's Mac.", b.Name))
+	parts = append(parts, fmt.Sprintf("You are %s, a personal bot running in the Rex desktop app on the user's computer.", b.Name))
 	if b.Role == RoleMain {
 		parts = append(parts, mainPrompt())
 	}
@@ -322,7 +332,10 @@ func (b Bot) SystemPrompt(skills []Skill) string {
 		rules = append(rules, "You have no file access.")
 	}
 	if b.Capabilities.Shell {
-		rules = append(rules, "Shell commands run in a macOS sandbox that only allows writing inside your workspace folder. Commands may need the user's approval; prefer file tools when they are enough.",
+		if runtime.GOOS == "windows" {
+			rules = append(rules, "Commands and Python run in Linux through WSL2. Use relative paths in commands. Native Windows paths are for file tools; Windows executables are unavailable inside commands.")
+		}
+		rules = append(rules, "Shell commands run in a workspace sandbox that only allows writing inside your workspace folder. Commands may need the user's approval; prefer file tools when they are enough.",
 			"Call run_command with program and args, for example program \"python3\" with args [\"scripts/report.py\"]. Never pass one combined command string: routine commands can only be approved automatically in the program-and-args form.")
 	}
 	if b.Capabilities.Web {

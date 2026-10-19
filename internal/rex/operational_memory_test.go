@@ -85,7 +85,7 @@ func learningFixture(t *testing.T, h *Host) *operationalFixtureModel {
 	if err != nil {
 		t.Fatal(err)
 	}
-	reader, err := sql.Open("sqlite", "file:"+h.Memory.path+"?mode=ro")
+	reader, err := sql.Open("sqlite", sqliteFileURI(h.Memory.path)+"?mode=ro")
 	if err != nil {
 		t.Fatal(err)
 	}

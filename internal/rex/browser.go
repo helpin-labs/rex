@@ -8,6 +8,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	runtimebrowser "github.com/helpin-ai/agent-runtime/browser"
 	"io"
 	"log/slog"
 	"net/http"
@@ -15,6 +16,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"runtime"
 	"strings"
 	"sync"
 	"time"
@@ -90,20 +92,43 @@ type BrowserApp struct {
 func DetectBrowsers() []BrowserApp {
 	home, _ := os.UserHomeDir()
 	var found []BrowserApp
-	for _, app := range []BrowserApp{
+	apps := []BrowserApp{
 		{"Google Chrome", "Google Chrome.app/Contents/MacOS/Google Chrome"},
 		{"Brave", "Brave Browser.app/Contents/MacOS/Brave Browser"},
 		{"Microsoft Edge", "Microsoft Edge.app/Contents/MacOS/Microsoft Edge"},
 		{"Chromium", "Chromium.app/Contents/MacOS/Chromium"},
 		{"Vivaldi", "Vivaldi.app/Contents/MacOS/Vivaldi"},
-	} {
-		for _, root := range []string{"/Applications", filepath.Join(home, "Applications")} {
+	}
+	roots := []string{"/Applications", filepath.Join(home, "Applications")}
+	if runtime.GOOS == "windows" {
+		roots = []string{os.Getenv("LOCALAPPDATA"), os.Getenv("ProgramFiles"), os.Getenv("ProgramFiles(x86)")}
+		apps = []BrowserApp{
+			{"Google Chrome", filepath.Join("Google", "Chrome", "Application", "chrome.exe")},
+			{"Brave", filepath.Join("BraveSoftware", "Brave-Browser", "Application", "brave.exe")},
+			{"Microsoft Edge", filepath.Join("Microsoft", "Edge", "Application", "msedge.exe")},
+			{"Chromium", filepath.Join("Chromium", "Application", "chrome.exe")},
+			{"Vivaldi", filepath.Join("Vivaldi", "Application", "vivaldi.exe")},
+		}
+	}
+	for _, app := range apps {
+		matched := false
+		for _, root := range roots {
+			if root == "" {
+				continue
+			}
 			path := filepath.Join(root, app.Path)
 			if info, err := os.Stat(path); err == nil && !info.IsDir() {
 				found = append(found, BrowserApp{Name: app.Name, Path: path})
+				matched = true
 				break
 			}
 		}
+		if !matched && app.Name != "Chromium" {
+			if path := registeredBrowserExecutable(filepath.Base(app.Path)); path != "" {
+				found = append(found, BrowserApp{Name: app.Name, Path: path})
+			}
+		}
+
 	}
 	return found
 }
@@ -145,7 +170,7 @@ func agentBrowser(ctx context.Context, args ...string) (string, error) {
 
 // agentBrowserPath finds the agent-browser binary.
 func agentBrowserPath() string {
-	binary := firstNonEmpty(os.Getenv("AGENT_BROWSER_BINARY"), "agent-browser")
+	binary := firstNonEmpty(os.Getenv("REX_AGENT_BROWSER_EXECUTABLE"), os.Getenv("AGENT_BROWSER_BINARY"), "agent-browser")
 	if path, err := exec.LookPath(binary); err == nil {
 		return path
 	}
@@ -158,11 +183,11 @@ func agentBrowserPath() string {
 func agentBrowserEnv(ctx context.Context, env []string, args ...string) (string, error) {
 	ctx, cancel := context.WithTimeout(ctx, 60*time.Second)
 	defer cancel()
-	command := exec.CommandContext(ctx, agentBrowserPath(), args...)
+	var commandEnv []string
 	if len(env) > 0 {
-		command.Env = append(os.Environ(), env...)
+		commandEnv = append(os.Environ(), env...)
 	}
-	output, err := command.CombinedOutput()
+	output, err := runtimebrowser.RunCLI(ctx, agentBrowserPath(), commandEnv, args...)
 	if err != nil {
 		return string(output), fmt.Errorf("agent-browser %s: %w: %s", args[len(args)-1], err, strings.TrimSpace(excerpt(string(output), 300)))
 	}
@@ -289,27 +314,6 @@ func (b *BrowserControl) launch(ctx context.Context, botID, session, kind, url s
 func profileLocked(err error) bool {
 	message := strings.ToLower(err.Error())
 	return strings.Contains(message, "exit code: 21") || strings.Contains(message, "devtoolsactiveport") || strings.Contains(message, "profile") && strings.Contains(message, "in use")
-}
-
-// stopProfileHolders terminates Chrome processes started with this exact
-// profile folder. Only Rex's own bot profiles are ever passed here.
-func stopProfileHolders(profile string) {
-	output, err := exec.Command("ps", "-axo", "pid=,command=").Output()
-	if err != nil {
-		return
-	}
-	marker := "--user-data-dir=" + profile
-	for _, line := range strings.Split(string(output), "\n") {
-		line = strings.TrimSpace(line)
-		if !strings.Contains(line, marker) || strings.Contains(line, "--type=") {
-			continue
-		}
-		if pid, _, ok := strings.Cut(line, " "); ok {
-			_ = exec.Command("kill", pid).Run()
-		}
-	}
-	time.Sleep(1500 * time.Millisecond)
-	_ = os.Remove(filepath.Join(profile, "SingletonLock"))
 }
 
 // closeBotSessions closes every recorded browser session of a bot except one.
@@ -553,7 +557,17 @@ func plainBrowserArgs(profile, url string) []string {
 // which it uses when no other browser is chosen.
 func bundledChrome() string {
 	home, _ := os.UserHomeDir()
-	matches, _ := filepath.Glob(filepath.Join(home, ".agent-browser", "browsers", "chrome-*", "Google Chrome for Testing.app", "Contents", "MacOS", "Google Chrome for Testing"))
+
+	var matches []string
+	for _, layout := range [][]string{
+		{"Google Chrome for Testing.app", "Contents", "MacOS", "Google Chrome for Testing"},
+		{"chrome-win64", "chrome.exe"}, {"chrome-linux64", "chrome"},
+	} {
+		pattern := filepath.Join(append([]string{home, ".agent-browser", "browsers", "chrome-*"}, layout...)...)
+		found, _ := filepath.Glob(pattern)
+		matches = append(matches, found...)
+	}
+
 	newest := ""
 	for _, match := range matches {
 		if newest == "" || compareVersions(versionOf(match), versionOf(newest)) > 0 {
@@ -620,7 +634,7 @@ func clearChallengeCookies(profile string) {
 		if _, err := os.Stat(path); err != nil {
 			continue
 		}
-		db, err := sql.Open("sqlite", "file:"+path+"?_pragma=busy_timeout(2000)")
+		db, err := sql.Open("sqlite", sqliteFileURI(path)+"?_pragma=busy_timeout(2000)")
 		if err != nil {
 			continue
 		}
@@ -642,17 +656,7 @@ func (b *BrowserControl) userAgent(ctx context.Context) string {
 	return chromeUserAgent(firstNonEmpty(BrowserExecutable(settings), bundledChrome()))
 }
 
-func chromeUserAgent(executable string) string {
-	index := strings.Index(executable, ".app/")
-	if index < 0 {
-		return ""
-	}
-	output, err := exec.Command("/usr/libexec/PlistBuddy", "-c", "Print CFBundleShortVersionString", filepath.Join(executable[:index+4], "Contents", "Info.plist")).Output()
-	if err != nil {
-		return ""
-	}
-	return userAgentFor(strings.TrimSpace(string(output)))
-}
+func chromeUserAgent(executable string) string { return userAgentFor(browserVersion(executable)) }
 
 // userAgentFor builds Chrome's reduced user agent from a Chromium-based
 // browser's version, whose first number is Chromium's major version.
@@ -661,7 +665,11 @@ func userAgentFor(version string) string {
 	if major == "" || strings.Trim(major, "0123456789") != "" {
 		return ""
 	}
-	return "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/" + major + ".0.0.0 Safari/537.36"
+	platform := "Macintosh; Intel Mac OS X 10_15_7"
+	if runtime.GOOS == "windows" {
+		platform = "Windows NT 10.0; Win64; x64"
+	}
+	return "Mozilla/5.0 (" + platform + ") AppleWebKit/537.36 (KHTML, like Gecko) Chrome/" + major + ".0.0.0 Safari/537.36"
 }
 
 // withoutChallenge removes Cloudflare's challenge parameters from a page
@@ -688,7 +696,7 @@ func lastVisited(profile string) string {
 	if _, err := os.Stat(path); err != nil {
 		return ""
 	}
-	db, err := sql.Open("sqlite", "file:"+path+"?mode=ro&_pragma=busy_timeout(2000)")
+	db, err := sql.Open("sqlite", sqliteFileURI(path)+"?mode=ro&_pragma=busy_timeout(2000)")
 	if err != nil {
 		return ""
 	}
@@ -725,25 +733,33 @@ func (h *Host) saveArtifact(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	defer file.Close()
-	dir := filepath.Join(bot.WorkspaceDir, "outputs", "screenshots")
-	if err := os.MkdirAll(dir, 0o755); err != nil {
+
+	directory, err := os.OpenRoot(bot.WorkspaceDir)
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, err)
+		return
+	}
+	defer directory.Close()
+	dir := filepath.Join("outputs", "screenshots")
+	if err := directory.MkdirAll(dir, 0755); err != nil {
 		writeError(w, http.StatusInternalServerError, err)
 		return
 	}
 	name := time.Now().Format("2006-01-02-150405") + "-" + filepath.Base(header.Filename)
 	target := filepath.Join(dir, name)
-	out, err := os.Create(target)
+	out, err := directory.OpenFile(target, os.O_CREATE|os.O_TRUNC|os.O_WRONLY, 0644)
 	if err != nil {
 		writeError(w, http.StatusInternalServerError, err)
 		return
 	}
+
 	_, copyErr := io.Copy(out, file)
 	closeErr := out.Close()
 	if err := errors.Join(copyErr, closeErr); err != nil {
 		writeError(w, http.StatusInternalServerError, err)
 		return
 	}
-	relative, _ := filepath.Rel(bot.WorkspaceDir, target)
+	relative := target
 	var metadata map[string]any
 	_ = json.Unmarshal([]byte(r.FormValue("metadata")), &metadata)
 	writeJSON(w, http.StatusOK, map[string]any{

@@ -78,7 +78,7 @@ function ReconnectCard({ interaction }: { interaction: Interaction }) {
   </div>;
 }
 
-// MissedCard asks whether to run a routine that was missed while the Mac
+// MissedCard asks whether to run a routine that was missed while the computer
 // was off. Only the latest missed run of each routine is offered.
 function MissedCard({ item, onAnswered }: { item: AttentionItem; onAnswered: () => void }) {
   const [busy, setBusy] = useState(false);

@@ -3,7 +3,7 @@ import { Select } from "./Select";
 import { Bell, Check, CircleAlert, Copy, ExternalLink, FolderOpen, Globe, LoaderCircle, Palette, ShieldCheck } from "lucide-react";
 import { api } from "./api";
 import { SideList } from "./SideList";
-import type { ChatGPTStatus, ModelInfo, Provider, ProviderTest, Settings, Status } from "./types";
+import type { CommandSandboxStatus, ChatGPTStatus, ModelInfo, Provider, ProviderTest, Settings, Status } from "./types";
 import { Field, PageHeader, TileMark, Toggle, errorMessage, openExternal } from "./ui";
 import { type Theme, loadTheme, saveTheme } from "./theme";
 import { siAnthropic, siBrave, siLmstudio, siOpenrouter } from "simple-icons";
@@ -147,6 +147,14 @@ export function SettingsView({ status, initialTab, onSaved }: { status: Status |
   const [saving, setSaving] = useState(false);
   const [message, setMessage] = useState("");
   const [error, setError] = useState("");
+  const [sandbox, setSandbox] = useState<CommandSandboxStatus | null>(null);
+  useEffect(() => {
+    let stopped = false;
+    const refreshSandbox = () => { void api.commandSandbox().then(value => { if (!stopped) setSandbox(value); }).catch(() => undefined); };
+    refreshSandbox();
+    const timer = window.setInterval(refreshSandbox, 3000);
+    return () => { stopped = true; window.clearInterval(timer); };
+  }, []);
   const [browsers, setBrowsers] = useState<{ name: string; path: string }[]>([]);
   const [theme, setTheme] = useState<Theme>(loadTheme);
   useEffect(() => { api.browsers().then(setBrowsers).catch(() => undefined); }, []);
@@ -180,7 +188,7 @@ export function SettingsView({ status, initialTab, onSaved }: { status: Status |
   const searchOn = searchProviders.some(item => settings[item.key]?.configured);
   const keyField = (key: "anthropic" | "openai" | "openrouter" | "tinyfish" | "exa" | "brave", placeholder: string, hint?: ReactNode, label = "API key") => {
     const config = settings[key] || { base_url: "", configured: false };
-    return <Field label={label} hint={config.configured ? <span className="row">Stored in your macOS Keychain. <button type="button" className="link-button" onClick={() => update({ [key]: { ...config, clear_key: true, api_key: "" } } as Partial<Settings>)}>Remove</button></span> : hint || "Stored in your macOS Keychain"}>
+    return <Field label={label} hint={config.configured ? <span className="row">Stored in your system credential store. <button type="button" className="link-button" onClick={() => update({ [key]: { ...config, clear_key: true, api_key: "" } } as Partial<Settings>)}>Remove</button></span> : hint || "Stored in your system credential store"}>
       <input type="password" placeholder={config.configured ? "••••••••" : placeholder} value={config.api_key || ""} onChange={event => update({ [key]: { ...config, api_key: event.target.value, clear_key: false } } as Partial<Settings>)} />
     </Field>;
   };
@@ -198,7 +206,7 @@ export function SettingsView({ status, initialTab, onSaved }: { status: Status |
       {message && !dirty && <div className="inline-ok"><Check size={14} />{message}</div>}
 
       {tab === "models" && <>
-        <PageHeader title="Models" description="Where your bots' thinking happens: a model server on this Mac, your API keys, or your ChatGPT plan. Keys never leave your Keychain except to call the provider." />
+        <PageHeader title="Models" description="Where your bots' thinking happens: a model server on this computer, your API keys, or your ChatGPT plan. Keys never leave your system credential store except to call the provider." />
         <div className="card">
           <h3 className="section-title">Default for new bots</h3>
           <p className="muted small">Bots without their own model use this one too.</p>
@@ -210,13 +218,13 @@ export function SettingsView({ status, initialTab, onSaved }: { status: Status |
 
         <h3 className="gallery-section-title">Providers</h3>
         <div className="card provider-card">
-          <ProviderHead logo={providerLogos.local} title="Local model server" note="LM Studio, Ollama or any OpenAI-compatible server on this Mac. Nothing leaves your computer."
+          <ProviderHead logo={providerLogos.local} title="Local model server" note="LM Studio, Ollama or any OpenAI-compatible server on this computer. Nothing leaves your computer."
             status={local.error ? <span className="chip warn" title={local.error}>Not running</span> : <span className="chip ok">{chatModels.length} models</span>} />
           <div className="two-col">
             <Field label="Server URL" hint="LM Studio: http://127.0.0.1:1234/v1 · Ollama: http://127.0.0.1:11434/v1">
               <input value={settings.local.base_url} onChange={event => update({ local: { ...settings.local, base_url: event.target.value } })} />
             </Field>
-            <Field label="API key (optional)" hint={settings.local.configured ? "A key is stored in your Keychain." : undefined}>
+            <Field label="API key (optional)" hint={settings.local.configured ? "A key is stored in your system credential store." : undefined}>
               <input type="password" value={settings.local.api_key || ""} placeholder={settings.local.configured ? "••••••••" : "none"} onChange={event => update({ local: { ...settings.local, api_key: event.target.value } })} />
             </Field>
           </div>
@@ -260,7 +268,7 @@ export function SettingsView({ status, initialTab, onSaved }: { status: Status |
             </Field>
             {!settings.kernel_browser && <Toggle label="Show Standard browsers on screen" description="Extension browsers always use a visible window. Standard browsers can run in the background, with a preview in chat." checked={!settings.browser_hidden} onChange={visible => update({ browser_hidden: !visible })} />}
             <div className="subsection">
-              <Field label="Kernel API key (cloud browsers)" hint={settings.kernel?.configured ? <span className="row">Key stored in your Keychain. <button type="button" className="link-button" onClick={() => update({ kernel: { ...settings.kernel!, clear_key: true }, kernel_browser: false })}>Remove</button></span> : <>From <button type="button" className="link-button" onClick={() => openExternal("https://www.kernel.sh")}>kernel.sh</button>. Stored in your macOS Keychain.</>}>
+              <Field label="Kernel API key (cloud browsers)" hint={settings.kernel?.configured ? <span className="row">Key stored in your system credential store. <button type="button" className="link-button" onClick={() => update({ kernel: { ...settings.kernel!, clear_key: true }, kernel_browser: false })}>Remove</button></span> : <>From <button type="button" className="link-button" onClick={() => openExternal("https://www.kernel.sh")}>kernel.sh</button>. Stored in your system credential store.</>}>
                 <input type="password" placeholder={settings.kernel?.configured ? "••••••••" : "sk_…"} value={settings.kernel?.api_key || ""} onChange={event => update({ kernel: { ...(settings.kernel || { base_url: "", configured: false }), api_key: event.target.value, clear_key: false } })} />
               </Field>
               <Toggle label="Use Kernel cloud by default" description="Bots following Settings get a fresh cloud browser per task. This integration does not keep cloud logins or support takeover. You can choose a local mode in each bot’s Abilities. Cloud errors stop the task."
@@ -268,11 +276,22 @@ export function SettingsView({ status, initialTab, onSaved }: { status: Status |
             </div>
           </>}
         </div>
+        {sandbox?.supported && <div className="card">
+          <h3 className="section-title">Command sandbox</h3>
+          <p className="muted small">Commands and Python run in a separate Linux environment. Your files stay in the bot's folder. Setup needs WSL2; chat, browsing and memory work without it.</p>
+          <p role="status">{sandbox.message}</p>
+          <button type="button" className="button secondary" disabled={sandbox.busy || !!status?.active_runs} onClick={async () => {
+            setError("");
+            try { setSandbox(await api.setupCommandSandbox()); } catch (caught) { setError(errorMessage(caught)); }
+          }}>{sandbox.busy ? "Setting up…" : sandbox.state === "ready" ? "Repair sandbox" : "Set up or repair"}</button>
+          {!!status?.active_runs && <small className="muted">Finish or cancel active tasks before setup.</small>}
+          <small className="muted">Repair replaces only Rex's Linux environment and its package caches. Bot files and other WSL distributions are preserved.</small>
+        </div>}
         <div className="card">
           <div className="provider-head"><TileMark seed="review" icon={<ShieldCheck size={18} />} size={36} /><div className="grow"><strong>Command review (TypeSafe)</strong><small className="muted">A second opinion on file edits and commands, so routine local steps don't need your approval.</small></div>
             {keyChip(!!settings.typesafe?.configured)}</div>
           <p className="muted small">Bots set to “Ask for risky actions” never ask about reading, browsing, screenshots or memory. File edits and commands ask, unless TypeSafe's jev model reviews them and finds a routine local step. Reviews send the proposed command and recent conversation context to TypeSafe. Deletions, pushes, installs and network commands always ask.</p>
-          <Field label="TypeSafe API key" hint={settings.typesafe?.configured ? <span className="row">Key stored in your Keychain. <button type="button" className="link-button" onClick={() => update({ typesafe: { ...settings.typesafe, clear_key: true } })}>Remove</button></span> : "Stored in your macOS Keychain"}>
+          <Field label="TypeSafe API key" hint={settings.typesafe?.configured ? <span className="row">Key stored in your system credential store. <button type="button" className="link-button" onClick={() => update({ typesafe: { ...settings.typesafe, clear_key: true } })}>Remove</button></span> : "Stored in your system credential store"}>
             <input type="password" placeholder={settings.typesafe?.configured ? "••••••••" : "ts_…"} value={settings.typesafe?.api_key || ""} onChange={event => update({ typesafe: { ...(settings.typesafe || { base_url: "", configured: false }), api_key: event.target.value, clear_key: false } })} />
           </Field>
           <Toggle label="Let TypeSafe approve routine steps" description="Without this, TypeSafe only adds extra checks; you still approve every edit and command" checked={settings.typesafe_auto_approve} disabled={!settings.typesafe?.configured && !settings.typesafe?.api_key} onChange={typesafe_auto_approve => update({ typesafe_auto_approve })} />
@@ -303,14 +322,14 @@ export function SettingsView({ status, initialTab, onSaved }: { status: Status |
       {tab === "about" && <>
         <PageHeader title="General" description="How Rex looks and when it gets your attention." />
         <div className="card">
-          <div className="provider-head"><TileMark seed="appearance" icon={<Palette size={18} />} size={36} /><div className="grow"><strong>Appearance</strong><small className="muted">Auto follows your Mac's light or dark setting.</small></div></div>
+          <div className="provider-head"><TileMark seed="appearance" icon={<Palette size={18} />} size={36} /><div className="grow"><strong>Appearance</strong><small className="muted">Auto follows your computer's light or dark setting.</small></div></div>
           <div className="segmented">
             {(["system", "light", "dark"] as const).map(option => <button type="button" key={option} className={theme === option ? "active" : ""} onClick={() => { setTheme(option); saveTheme(option); }}>{option === "system" ? "Auto" : option === "light" ? "Light" : "Dark"}</button>)}
           </div>
         </div>
         <div className="card">
           <div className="provider-head"><TileMark seed="notify" icon={<Bell size={18} />} size={36} /><div className="grow"><strong>Notifications</strong><small className="muted">The Dock icon shows how many conversations are waiting.</small></div></div>
-          <Toggle label="Notify me when a bot needs me" description="A Mac notification when a bot asks for approval or a question, or a routine finishes, while Rex is in the background."
+          <Toggle label="Notify me when a bot needs me" description="A desktop notification when a bot asks for approval or a question, or a routine finishes, while Rex is in the background."
             checked={!settings.notifications_off} onChange={async on => {
               const next = { ...settings, notifications_off: !on };
               setSettings(next);
@@ -318,16 +337,16 @@ export function SettingsView({ status, initialTab, onSaved }: { status: Status |
             }} />
         </div>
         <div className="card">
-          <h3 className="section-title">About this Mac's Rex</h3>
+          <h3 className="section-title">About Rex</h3>
           <dl className="facts-list">
             <dt>Bot engine</dt><dd><span className={`chip ${status?.runtime_ready ? "ok" : "warn"}`}>{status?.runtime_ready ? "Running" : "Starting"}</span></dd>
             <dt>Data folder</dt><dd><code>{status?.data_dir}</code></dd>
             <dt>Bot workspaces</dt><dd><code>{status?.workspace_root}</code></dd>
-            <dt>Credentials</dt><dd>macOS Keychain</dd>
+            <dt>Credentials</dt><dd>System credential store</dd>
           </dl>
           <button type="button" className="button secondary small" onClick={() => api.revealLogs()}><FolderOpen size={13} />Show logs</button>
         </div>
-        <p className="muted small">Rex runs bots on this Mac. A bot's workspace folder limits Rex's file tools but is not an operating-system sandbox. Routines need the Mac awake and Rex running.</p>
+        <p className="muted small">Rex runs bots on this computer. A bot's workspace folder limits Rex's file tools but is not an operating-system sandbox. Routines need the computer awake and Rex running.</p>
       </>}
 
       {dirty && <div className="save-bar" role="status">

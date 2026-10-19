@@ -164,7 +164,7 @@ func (m *MemoryService) Configure(ctx context.Context) error {
 		m.status = "could not open memory: " + err.Error()
 		return err
 	}
-	reader, err := sql.Open("sqlite", "file:"+m.path+"?mode=ro&_pragma=busy_timeout(5000)")
+	reader, err := sql.Open("sqlite", sqliteFileURI(m.path)+"?mode=ro&_pragma=busy_timeout(5000)")
 	if err != nil {
 		backend.Close()
 		return err
@@ -219,7 +219,7 @@ func (m *MemoryService) rebuildIfEmbeddingChanged(ctx context.Context, embedding
 	if _, err := os.Stat(m.path); err != nil {
 		return nil
 	}
-	db, err := sql.Open("sqlite", "file:"+m.path+"?mode=ro")
+	db, err := sql.Open("sqlite", sqliteFileURI(m.path)+"?mode=ro")
 	if err != nil {
 		return err
 	}

@@ -4,6 +4,7 @@ import (
 	"database/sql"
 	"os"
 	"path/filepath"
+	"runtime"
 	"slices"
 	"testing"
 )
@@ -27,6 +28,7 @@ func TestPlainBrowserIsNotAutomated(t *testing.T) {
 func TestBundledChromeIsTheNewest(t *testing.T) {
 	home := t.TempDir()
 	t.Setenv("HOME", home)
+	t.Setenv("USERPROFILE", home)
 	for _, version := range []string{"148.0.7778.97", "149.0.7827.115", "99.0.1"} {
 		path := filepath.Join(home, ".agent-browser", "browsers", "chrome-"+version, "Google Chrome for Testing.app", "Contents", "MacOS", "Google Chrome for Testing")
 		if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
@@ -106,7 +108,11 @@ func TestTakeoverClearsOnlyChallengeCookies(t *testing.T) {
 }
 
 func TestHiddenBrowserSaysChrome(t *testing.T) {
-	if got := userAgentFor("154.1.96.60"); got != "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/154.0.0.0 Safari/537.36" {
+	platform := "Macintosh; Intel Mac OS X 10_15_7"
+	if runtime.GOOS == "windows" {
+		platform = "Windows NT 10.0; Win64; x64"
+	}
+	if got := userAgentFor("154.1.96.60"); got != "Mozilla/5.0 ("+platform+") AppleWebKit/537.36 (KHTML, like Gecko) Chrome/154.0.0.0 Safari/537.36" {
 		t.Fatalf("user agent = %s", got)
 	}
 	if userAgentFor("") != "" || userAgentFor("x.1") != "" {

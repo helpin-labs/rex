@@ -4,6 +4,8 @@ Personal AI bots that live on your Mac. Each one has its own chat, memory, brows
 
 Rex runs on a local model (LM Studio, Ollama), your API keys (Anthropic, OpenAI, OpenRouter) or your ChatGPT subscription. Conversations, memory and files stay on your Mac; only the model calls you choose leave it.
 
+Windows support is in development; see the [Windows preview instructions and verification status](docs/WINDOWS.md).
+
 ## Features
 
 - **Bots.** Make as many as you like, each with its own instructions, model, permissions, workspace folder and face. A new bot sets itself up by asking you a few questions.
@@ -76,6 +78,8 @@ REX_E2E_MODEL=openai/gpt-oss-20b python3 scripts/e2e.py   # release gates agains
 ```bash
 pnpm tauri:build   # Rex.app and a .dmg in src-tauri/target/release/bundle/
 ```
+
+Merges to `main` use [semantic desktop releases](docs/RELEASING.md) to publish matching Windows x64 EXE and Apple Silicon DMG installers after both platform checks pass. Preview Windows releases are self-signed; macOS releases are ad-hoc signed.
 
 Builds run on Apple Silicon and are ad-hoc signed. They aren't notarized, so on another Mac the first launch needs System Settings → Privacy & Security → Open Anyway. To distribute Rex widely, sign it with a Developer ID and notarize it.
 

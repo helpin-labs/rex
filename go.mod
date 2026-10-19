@@ -5,12 +5,13 @@ go 1.26.0
 require (
 	github.com/glebarez/go-sqlite v1.21.2
 	github.com/google/uuid v1.6.0
-	github.com/helpin-ai/agent-runtime v0.13.14
+	github.com/helpin-ai/agent-runtime v0.13.16-0.20261016094832-26f2748cde84
 	github.com/helpin-ai/agent-runtime-go v0.9.0
 	github.com/modelcontextprotocol/go-sdk v1.4.1
 	github.com/robfig/cron/v3 v3.0.1
 	github.com/zalando/go-keyring v0.2.8
 	golang.org/x/net v0.59.0
+	golang.org/x/sys v0.48.0
 	gopkg.in/yaml.v3 v3.0.1
 )
 
@@ -59,6 +60,7 @@ require (
 	github.com/evanphx/json-patch v0.5.2 // indirect
 	github.com/facebookgo/clock v0.0.0-20150410010913-600d898af40a // indirect
 	github.com/felixge/httpsnoop v1.0.4 // indirect
+	github.com/glebarez/sqlite v1.11.0 // indirect
 	github.com/go-logr/logr v1.4.3 // indirect
 	github.com/go-logr/stdr v1.2.2 // indirect
 	github.com/go-viper/mapstructure/v2 v2.5.0 // indirect
@@ -129,7 +131,6 @@ require (
 	golang.org/x/mod v0.41.0 // indirect
 	golang.org/x/oauth2 v0.36.0 // indirect
 	golang.org/x/sync v0.23.0 // indirect
-	golang.org/x/sys v0.48.0 // indirect
 	golang.org/x/text v0.42.0 // indirect
 	golang.org/x/time v0.14.0 // indirect
 	google.golang.org/api v0.264.0 // indirect

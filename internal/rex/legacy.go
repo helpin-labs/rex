@@ -136,8 +136,8 @@ func rewriteLegacyRows(dbPath, oldDir, newDir, oldWorkspace, newWorkspace string
 }
 
 func likePrefix(path string) string {
-	escaped := strings.NewReplacer(`\`, `\\`, `%`, `\%`, `_`, `\_`).Replace(path)
-	return escaped + string(filepath.Separator) + "%"
+	escaped := strings.NewReplacer(`\`, `\\`, `%`, `\%`, `_`, `\_`).Replace(path + string(filepath.Separator))
+	return escaped + "%"
 }
 
 func vacuumInto(dbPath, backup string) error {

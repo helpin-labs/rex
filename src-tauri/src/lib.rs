@@ -1,3 +1,6 @@
+#[cfg(any(target_os = "windows", test))]
+mod attention_badge;
+
 use std::net::{SocketAddr, TcpListener, TcpStream};
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Mutex;
@@ -41,9 +44,20 @@ fn set_attention(app: tauri::AppHandle, count: u32) {
     let shown = (count > 0).then_some(count);
     if let Some(window) = app.get_webview_window("main") {
         let _ = window.set_badge_count(shown.map(i64::from));
+        #[cfg(target_os = "windows")]
+        {
+            let attention = shown.map(|_| tauri::UserAttentionType::Informational);
+            let _ = window.request_user_attention(attention);
+            let icon = attention_badge::image(count);
+            let _ = window.set_overlay_icon(icon);
+        }
     }
     if let Some(tray) = app.tray_by_id("rex") {
         let _ = tray.set_title(shown.map(|count| count.to_string()));
+        #[cfg(target_os = "windows")]
+        let _ = tray.set_tooltip(Some(if count > 0 {
+            format!("Rex: {count} conversations need attention")
+        } else { "Rex".to_string() }));
     }
 }
 
@@ -73,7 +87,22 @@ fn notify(app: tauri::AppHandle, title: String, body: String, conversation_id: S
             let _ = app.emit("open-conversation", conversation_id);
         }
     });
-    #[cfg(not(target_os = "macos"))]
+    #[cfg(target_os = "windows")]
+    std::thread::spawn(move || {
+        let identifier = app.config().identifier.clone();
+        let toast = tauri_winrt_notification::Toast::new(&identifier)
+            .title(&title)
+            .text1(&body)
+            .on_activated(move |_| {
+                reveal(&app);
+                let _ = app.emit("open-conversation", conversation_id.clone());
+                Ok(())
+            });
+        if let Err(error) = toast.show() {
+            eprintln!("Could not show Windows notification: {error}");
+        }
+    });
+    #[cfg(not(any(target_os = "macos", target_os = "windows")))]
     let _ = (app, title, body, conversation_id);
 }
 
@@ -133,6 +162,9 @@ pub fn run() {
             }
         })
         .setup(|app| {
+            #[cfg(target_os = "windows")]
+            let data_dir = app.path().app_local_data_dir()?;
+            #[cfg(not(target_os = "windows"))]
             let data_dir = app.path().app_data_dir()?;
             std::fs::create_dir_all(&data_dir)?;
             let port = host_port(&data_dir);
@@ -143,10 +175,25 @@ pub fn run() {
                 .resolve("resources/models/bekko-embedding-v1-a8m-Q8_0.gguf", BaseDirectory::Resource)
                 .map(|path| path.to_string_lossy().to_string())
                 .unwrap_or_default();
+            #[cfg(target_os = "windows")]
+            let browser_executable = app.path().resolve("resources/browser/chrome-win64/chrome.exe", BaseDirectory::Resource)?;
+            #[cfg(not(target_os = "windows"))]
+            let browser_executable = std::path::PathBuf::new();
+            #[cfg(target_os = "windows")]
+            let browser_cli = app.path().resolve("resources/browser/agent-browser.exe", BaseDirectory::Resource)?;
+            #[cfg(not(target_os = "windows"))]
+            let browser_cli = std::path::PathBuf::new();
+            #[cfg(target_os = "windows")]
+            let wsl_resources = app.path().resolve("resources/wsl", BaseDirectory::Resource)?;
+            #[cfg(not(target_os = "windows"))]
+            let wsl_resources = std::path::PathBuf::new();
             let (mut events, child) = app
                 .shell()
                 .sidecar("rex-host")?
                 .env("REX_EMBEDDING_MODEL", embedding_model)
+                .env("REX_BROWSER_EXECUTABLE", browser_executable.to_string_lossy().to_string())
+                .env("REX_AGENT_BROWSER_EXECUTABLE", browser_cli.to_string_lossy().to_string())
+                .env("REX_WSL_RESOURCES", wsl_resources.to_string_lossy().to_string())
                 .env("REX_DATA_DIR", data_dir.to_string_lossy().to_string())
                 .env("REX_HOST_ADDR", format!("127.0.0.1:{port}"))
                 .env("REX_UI_TOKEN", connection.token.clone())
@@ -169,7 +216,11 @@ pub fn run() {
             });
 
             let open = MenuItemBuilder::with_id("open", "Open Rex").build(app)?;
-            let quit = MenuItemBuilder::with_id("quit", "Quit Rex").accelerator("Cmd+Q").build(app)?;
+            let quit = MenuItemBuilder::with_id("quit", "Quit Rex");
+            // Windows tray accelerators are display-only while the WebView has focus.
+            #[cfg(not(target_os = "windows"))]
+            let quit = quit.accelerator("CmdOrCtrl+Q");
+            let quit = quit.build(app)?;
             let menu = MenuBuilder::new(app).item(&open).separator().item(&quit).build()?;
             TrayIconBuilder::with_id("rex")
                 // The logo's face as a template image: macOS draws it in the
@@ -199,6 +250,7 @@ pub fn run() {
         .expect("error building Rex");
 
     app.run(|handle, event| match event {
+        #[cfg(target_os = "macos")]
         RunEvent::Reopen { .. } => reveal(handle),
         RunEvent::Exit => stop_host(handle),
         _ => {}

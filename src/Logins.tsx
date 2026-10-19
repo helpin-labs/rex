@@ -29,7 +29,7 @@ export function Logins({ bot }: { bot: Bot }) {
 
   return <div className="logins">
     <h3 className="section-title">Logins</h3>
-    <p className="muted small">Saved logins for {bot.name}. In Standard mode, Rex fills passwords only on the saved site; the bot never sees them. Passwords stay in your macOS Keychain.</p>
+    <p className="muted small">Saved logins for {bot.name}. In Standard mode, Rex fills passwords only on the saved site; the bot never sees them. Passwords stay in your system credential store.</p>
     <div className="callout">Extension mode keeps your existing local logins. To sign in again, take over its browser; automatic password filling is available in Standard mode.</div>
     {!bot.capabilities.browser && <div className="callout">Turn on “Use a browser” to let this bot sign in with these.</div>}
     {error && <div className="inline-error">{error}</div>}

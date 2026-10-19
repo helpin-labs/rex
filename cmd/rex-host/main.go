@@ -27,9 +27,22 @@ import (
 )
 
 func main() {
+	if len(os.Args) == 3 && os.Args[1] == "--remove-sandbox" {
+		dataDir, err := filepath.Abs(os.Args[2])
+		if err == nil {
+			ctx, cancel := context.WithTimeout(context.Background(), 2*time.Minute)
+			defer cancel()
+			err = rex.NewCommandSandbox(dataDir, "").Remove(ctx)
+		}
+		if err != nil {
+			fmt.Fprintln(os.Stderr, err)
+			os.Exit(1)
+		}
+		return
+	}
 	// Linked as agent-browser, rex-host opens a bot's browser on first use
 	// and hands the command to the real agent-browser.
-	if filepath.Base(os.Args[0]) == rex.BrowserShimName {
+	if strings.TrimSuffix(filepath.Base(os.Args[0]), ".exe") == rex.BrowserShimName {
 		if err := rex.RunBrowserShim(os.Args[1:]); err != nil {
 			fmt.Fprintln(os.Stderr, "agent-browser:", err)
 			os.Exit(1)
@@ -43,12 +56,18 @@ func main() {
 }
 
 func run() error {
+	if err := rex.OwnProcessTree(); err != nil {
+		return err
+	}
 	dataDir, err := resolveDataDir()
 	if err != nil {
 		return err
 	}
 	if err := os.MkdirAll(dataDir, 0o700); err != nil {
 		return fmt.Errorf("create data directory: %w", err)
+	}
+	if err := rex.SecureDataDirectory(dataDir); err != nil {
+		return fmt.Errorf("secure data directory: %w", err)
 	}
 	logFile, err := os.OpenFile(filepath.Join(dataDir, "rex.log"), os.O_CREATE|os.O_APPEND|os.O_WRONLY, 0o600)
 	if err != nil {
@@ -128,6 +147,7 @@ func run() error {
 		return err
 	}
 	host := rex.NewHost(cfg, store, runtimeClient, settings, memory, skills)
+	host.Sandbox = rex.NewCommandSandbox(dataDir, os.Getenv("REX_WSL_RESOURCES"))
 	embedder := &rex.Embedder{Binary: resolveSidecar("REX_EMBEDDER_BINARY", "llama-server"), Model: resolveEmbeddingModel(), DataDir: dataDir, Log: logFile}
 	memory.SetEmbedder(embedder)
 	if err := memory.Configure(context.Background()); err != nil {
@@ -190,7 +210,7 @@ func run() error {
 		slog.Warn("bot browsers open at the start of each run", "error", err)
 		host.Browser.OpenEagerly = true
 	}
-	runtimeArgs := runtimeLaunch{browserShim: browserShim, dataDir: dataDir, port: runtimePort, token: runtimeToken, hostURL: hostURL, internalToken: cfg.InternalToken,
+	runtimeArgs := runtimeLaunch{sandbox: host.Sandbox, browserShim: browserShim, dataDir: dataDir, port: runtimePort, token: runtimeToken, hostURL: hostURL, internalToken: cfg.InternalToken,
 		modelCredentialKey: modelCredentialKey, mcpCredentialKey: mcpCredentialKey, settings: settings, logFile: logFile}
 	host.PrepareInterruptedRuns(ctx)
 	command, done, err := runtimeArgs.start(ctx)
@@ -286,6 +306,7 @@ func shutdown(server *http.Server, host *rex.Host, command *exec.Cmd, done <-cha
 }
 
 type runtimeLaunch struct {
+	sandbox                                      *rex.CommandSandbox
 	dataDir, port, token, hostURL, internalToken string
 	// browserShim routes the runtime's agent-browser calls through Rex.
 	browserShim                          []string
@@ -358,7 +379,7 @@ func (l runtimeLaunch) start(ctx context.Context) (*exec.Cmd, <-chan error, erro
 		"AGENT_RUNTIME_BROWSER_SESSION_TIMEOUT_SECONDS=1800",
 		// Confine agent commands with macOS Seatbelt: writes only inside the
 		// bot's workspace, no reads of credentials or Rex's own data.
-		"AGENT_RUNTIME_EXECUTION_ISOLATION=seatbelt",
+		"AGENT_RUNTIME_EXECUTION_ISOLATION="+rex.ExecutionIsolation(),
 		"AGENT_RUNTIME_SEATBELT_DENY_READ="+l.dataDir,
 		// Rex owns this runtime alone, so runs cut off by a quit, crash or
 		// settings restart are continued from their checkpoints.
@@ -368,6 +389,12 @@ func (l runtimeLaunch) start(ctx context.Context) (*exec.Cmd, <-chan error, erro
 		"AGENT_RUNTIME_BROWSER_PROFILE_ROOT="+filepath.Join(l.dataDir, "browser-profiles"),
 		"AGENT_RUNTIME_BROWSER_PROFILE_APP_ID="+rex.AppID,
 	)
+	if executable := os.Getenv("REX_BROWSER_EXECUTABLE"); executable != "" {
+		command.Env = append(command.Env, "AGENT_RUNTIME_BROWSER_EXTENSION_EXECUTABLE="+executable)
+	}
+	if l.sandbox != nil {
+		command.Env = append(command.Env, l.sandbox.RuntimeEnv(ctx)...)
+	}
 	command.Env = append(command.Env, l.browserShim...)
 	command.Env = append(command.Env, env...)
 	// The bot's browser (installed Chrome/Brave/Edge, visible, with the bot's
@@ -375,7 +402,7 @@ func (l runtimeLaunch) start(ctx context.Context) (*exec.Cmd, <-chan error, erro
 	// plain agent-browser commands: any launch option of its own, such as an
 	// executable path, makes agent-browser relaunch the browser without the
 	// bot's profile.
-	command.SysProcAttr = &syscall.SysProcAttr{Setpgid: true}
+	rex.ConfigureProcess(command)
 	if err := command.Start(); err != nil {
 		return nil, nil, fmt.Errorf("start agent runtime: %w", err)
 	}
@@ -395,6 +422,9 @@ func (l runtimeLaunch) start(ctx context.Context) (*exec.Cmd, <-chan error, erro
 // baseEnvironment passes a minimal environment to the runtime so the user's
 // shell secrets are not inherited by tools.
 func baseEnvironment() []string {
+	if runtime.GOOS == "windows" {
+		return rex.WindowsEnvironment()
+	}
 	var env []string
 	for _, key := range []string{"HOME", "USER", "LOGNAME", "TMPDIR", "LANG", "LC_ALL", "SHELL"} {
 		if value, ok := os.LookupEnv(key); ok {
@@ -414,13 +444,13 @@ func stopProcess(command *exec.Cmd, done <-chan error, timeout time.Duration) {
 	if command == nil || command.Process == nil {
 		return
 	}
-	_ = syscall.Kill(-command.Process.Pid, syscall.SIGINT)
+	_ = rex.SignalProcessTree(command, false)
 	select {
 	case <-done:
 		return
 	case <-time.After(timeout):
 	}
-	_ = syscall.Kill(-command.Process.Pid, syscall.SIGKILL)
+	_ = rex.SignalProcessTree(command, true)
 	select {
 	case <-done:
 	case <-time.After(2 * time.Second):
@@ -430,25 +460,7 @@ func stopProcess(command *exec.Cmd, done <-chan error, timeout time.Duration) {
 // reapOrphanedRuntime stops a runtime left behind when a previous host was
 // killed without a chance to clean up (for example a forced quit).
 func reapOrphanedRuntime(dataDir string) {
-	path := filepath.Join(dataDir, "runtime.pid")
-	raw, err := os.ReadFile(path)
-	if err != nil {
-		return
-	}
-	_ = os.Remove(path)
-	var pid int
-	if _, err := fmt.Sscan(strings.TrimSpace(string(raw)), &pid); err != nil || pid <= 1 {
-		return
-	}
-	output, err := exec.Command("ps", "-o", "comm=", "-p", fmt.Sprint(pid)).Output()
-	if err != nil || !strings.Contains(string(output), "agent-runtime") {
-		return
-	}
-	slog.Warn("stopping an agent runtime left behind by a previous run", "pid", pid)
-	_ = syscall.Kill(-pid, syscall.SIGTERM)
-	_ = syscall.Kill(pid, syscall.SIGTERM)
-	time.Sleep(2 * time.Second)
-	_ = syscall.Kill(pid, syscall.SIGKILL)
+	rex.ReapOrphan(filepath.Join(dataDir, "runtime.pid"), "agent-runtime")
 }
 
 // resolveSidecar finds a bundled helper binary next to rex-host, as Tauri
@@ -462,7 +474,7 @@ func resolveSidecar(envName, name string) string {
 		return ""
 	}
 	dir := filepath.Dir(executable)
-	for _, candidate := range []string{filepath.Join(dir, name), filepath.Join(dir, name+"-"+runtimeTriple()), filepath.Join(dir, "..", "src-tauri", "binaries", name+"-"+runtimeTriple())} {
+	for _, candidate := range []string{filepath.Join(dir, rex.ExecutableName(name)), filepath.Join(dir, rex.ExecutableName(name+"-"+runtimeTriple())), filepath.Join(dir, "..", "src-tauri", "binaries", rex.ExecutableName(name+"-"+runtimeTriple()))} {
 		if info, err := os.Stat(candidate); err == nil && !info.IsDir() {
 			return candidate
 		}
@@ -504,11 +516,11 @@ func resolveRuntimeBinary() (string, error) {
 	}
 	dir := filepath.Dir(executable)
 	name := filepath.Base(executable)
-	candidates := []string{filepath.Join(dir, "agent-runtime")}
+	candidates := []string{filepath.Join(dir, rex.ExecutableName("agent-runtime"))}
 	if suffix, ok := strings.CutPrefix(name, "rex-host-"); ok {
 		candidates = append(candidates, filepath.Join(dir, "agent-runtime-"+suffix))
 	}
-	candidates = append(candidates, filepath.Join(dir, "agent-runtime-"+runtimeTriple()))
+	candidates = append(candidates, filepath.Join(dir, rex.ExecutableName("agent-runtime-"+runtimeTriple())))
 	for _, candidate := range candidates {
 		if info, err := os.Stat(candidate); err == nil && !info.IsDir() {
 			return candidate, nil
@@ -517,16 +529,18 @@ func resolveRuntimeBinary() (string, error) {
 	return "", fmt.Errorf("bundled agent runtime not found next to %s", executable)
 }
 
-func runtimeTriple() string {
-	if runtime.GOARCH == "arm64" {
-		return "aarch64-apple-darwin"
-	}
-	return "x86_64-apple-darwin"
-}
+func runtimeTriple() string { return rex.RuntimeTriple() }
 
 func resolveDataDir() (string, error) {
 	if value := strings.TrimSpace(os.Getenv("REX_DATA_DIR")); value != "" {
 		return value, nil
+	}
+	if runtime.GOOS == "windows" {
+		base := os.Getenv("LOCALAPPDATA")
+		if base == "" {
+			return "", errors.New("Windows local application data directory is unavailable")
+		}
+		return filepath.Join(base, "ai.rex.desktop"), nil
 	}
 	base, err := os.UserConfigDir()
 	if err != nil {

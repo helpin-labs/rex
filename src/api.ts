@@ -1,5 +1,5 @@
 import type { ChatGPTStatus,
-  AttentionItem, Bot, BotLogin, InstructionProposal, Conversation, ConversationDetail, GoogleStatus, MCPConnection, MemoryOverview, MemorySource, MemoryLearning, HistoryPage, HistoryExcerpt, ModelInfo, ProviderTest,
+  CommandSandboxStatus, AttentionItem, Bot, BotLogin, InstructionProposal, Conversation, ConversationDetail, GoogleStatus, MCPConnection, MemoryOverview, MemorySource, MemoryLearning, HistoryPage, HistoryExcerpt, ModelInfo, ProviderTest,
   Routine, RoutineRun, Run, RunEventEnvelope, Settings, Skill, Status, Turn, WorkspaceFile, CatalogSkill, SkillSource,
 } from "./types";
 
@@ -50,6 +50,8 @@ const json = (method: string, body?: unknown): RequestInit => ({ method, body: b
 
 export const api = {
   status: () => request<Status>("/api/status"),
+  commandSandbox: () => request<CommandSandboxStatus>("/api/command-sandbox"),
+  setupCommandSandbox: () => request<CommandSandboxStatus>("/api/command-sandbox/setup", { method: "POST" }),
   attention: () => request<AttentionItem[]>("/api/attention"),
   settings: () => request<Settings>("/api/settings"),
   saveSettings: (settings: Settings) => request<Settings>("/api/settings", json("PUT", settings)),

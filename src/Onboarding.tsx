@@ -46,7 +46,7 @@ export function Onboarding({ initial, onDone }: { initial: Settings; onDone: (se
     <div className="onboarding-card">
       <AppLogo size={72} />
       <h1>Welcome to Rex</h1>
-      <p className="muted">Personal bots that work on your Mac, remember what matters, and ask before they act. First, connect a model.</p>
+      <p className="muted">Personal bots that work on your computer, remember what matters, and ask before they act. First, connect a model.</p>
       <div className="segmented wide">
         <button type="button" className={mode === "local" ? "active" : ""} onClick={() => setMode("local")}>Local model (LM Studio, Ollama)</button>
         <button type="button" className={mode === "hosted" ? "active" : ""} onClick={() => setMode("hosted")}>Hosted (Anthropic, OpenAI, OpenRouter)</button>
@@ -67,7 +67,7 @@ export function Onboarding({ initial, onDone }: { initial: Settings; onDone: (se
         {(["anthropic", "openai", "openrouter"] as const).map(key => <Field key={key} label={key === "anthropic" ? "Anthropic API key" : key === "openai" ? "OpenAI API key" : "OpenRouter API key"}>
           <input type="password" value={settings[key].api_key || ""} onChange={event => setSettings({ ...settings, default_provider: key, [key]: { ...settings[key], api_key: event.target.value } })} />
         </Field>)}
-        <p className="muted small">Keys go to your macOS Keychain. The first provider you fill in becomes the default.</p>
+        <p className="muted small">Keys go to your system credential store. The first provider you fill in becomes the default.</p>
       </>}
       <button type="button" className="button primary big" disabled={busy || (mode === "local" ? !settings.default_model : !["anthropic", "openai", "openrouter"].some(key => settings[key as "openai"].api_key))} onClick={finish}>Start using Rex <ArrowRight size={16} /></button>
     </div>

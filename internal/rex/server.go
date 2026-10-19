@@ -9,7 +9,6 @@ import (
 	"log/slog"
 	"net/http"
 	"os"
-	"os/exec"
 	"os/user"
 	"path/filepath"
 	"sort"
@@ -51,6 +50,8 @@ func (h *Host) Handler() http.Handler {
 	api.HandleFunc("GET /api/status", h.status)
 	api.HandleFunc("GET /api/attention", h.attention)
 	api.HandleFunc("GET /api/settings", h.getSettings)
+	api.HandleFunc("GET /api/command-sandbox", h.commandSandboxStatus)
+	api.HandleFunc("POST /api/command-sandbox/setup", h.setupCommandSandbox)
 	api.HandleFunc("PUT /api/settings", h.saveSettings)
 	api.HandleFunc("POST /api/settings/test", h.testProvider)
 	api.HandleFunc("GET /api/providers/{provider}/models", h.providerModels)
@@ -403,7 +404,18 @@ func (h *Host) readFile(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusBadRequest, err)
 		return
 	}
-	content, err := os.ReadFile(path)
+	directory, err := os.OpenRoot(bot.WorkspaceDir)
+	if err != nil {
+		writeError(w, http.StatusNotFound, errors.New("workspace not found"))
+		return
+	}
+	defer directory.Close()
+	relative, err := filepath.Rel(bot.WorkspaceDir, path)
+	if err != nil {
+		writeError(w, http.StatusBadRequest, err)
+		return
+	}
+	content, err := directory.ReadFile(relative)
 	if err != nil {
 		writeError(w, http.StatusNotFound, errors.New("file not found"))
 		return
@@ -442,15 +454,25 @@ func (h *Host) uploadFile(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusInternalServerError, err)
 		return
 	}
-	target := filepath.Join(bot.WorkspaceDir, "inbox", name)
+
+	directory, err := os.OpenRoot(bot.WorkspaceDir)
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, err)
+		return
+	}
+	defer directory.Close()
+	target := filepath.Join("inbox", name)
 	for index := 2; ; index++ {
-		if _, err := os.Stat(target); errors.Is(err, os.ErrNotExist) {
+		if _, err := directory.Lstat(target); errors.Is(err, os.ErrNotExist) {
 			break
+		} else if err != nil {
+			writeError(w, http.StatusInternalServerError, err)
+			return
 		}
 		extension := filepath.Ext(name)
-		target = filepath.Join(bot.WorkspaceDir, "inbox", fmt.Sprintf("%s-%d%s", strings.TrimSuffix(name, extension), index, extension))
+		target = filepath.Join("inbox", fmt.Sprintf("%s-%d%s", strings.TrimSuffix(name, extension), index, extension))
 	}
-	out, err := os.OpenFile(target, os.O_CREATE|os.O_EXCL|os.O_WRONLY, 0o644)
+	out, err := directory.OpenFile(target, os.O_CREATE|os.O_EXCL|os.O_WRONLY, 0644)
 	if err != nil {
 		writeError(w, http.StatusInternalServerError, err)
 		return
@@ -458,11 +480,12 @@ func (h *Host) uploadFile(w http.ResponseWriter, r *http.Request) {
 	size, copyErr := io.Copy(out, file)
 	closeErr := out.Close()
 	if copyErr != nil || closeErr != nil {
-		_ = os.Remove(target)
+		_ = directory.Remove(target)
 		writeError(w, http.StatusInternalServerError, errors.Join(copyErr, closeErr))
 		return
 	}
-	relative, _ := filepath.Rel(bot.WorkspaceDir, target)
+	relative := target
+
 	writeJSON(w, http.StatusCreated, WorkspaceFile{Path: filepath.ToSlash(relative), Size: size, Modified: time.Now()})
 }
 
@@ -486,11 +509,7 @@ func (h *Host) revealFile(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusInternalServerError, err)
 		return
 	}
-	args := []string{path}
-	if path != bot.WorkspaceDir {
-		args = []string{"-R", path}
-	}
-	if err := exec.Command("open", args...).Start(); err != nil {
+	if err := revealPath(path, path != bot.WorkspaceDir); err != nil {
 		writeError(w, http.StatusInternalServerError, err)
 		return
 	}
@@ -498,7 +517,7 @@ func (h *Host) revealFile(w http.ResponseWriter, r *http.Request) {
 }
 
 func (h *Host) revealLogs(w http.ResponseWriter, r *http.Request) {
-	_ = exec.Command("open", "-R", filepath.Join(h.cfg.DataDir, "rex.log")).Start()
+	_ = revealPath(filepath.Join(h.cfg.DataDir, "rex.log"), true)
 	w.WriteHeader(http.StatusNoContent)
 }
 
@@ -554,10 +573,13 @@ func (h *Host) getConversation(w http.ResponseWriter, r *http.Request) {
 	if h.RuntimeReady() && conversation.ActiveRunID != nil {
 		if run, err := h.Runtime.GetRun(ctx, *conversation.ActiveRunID); err == nil {
 			detail.Runs = append(detail.Runs, *run)
-			if interactions, err := h.Runtime.ListInteractions(ctx, run.ID); err == nil {
-				for _, interaction := range interactions {
-					if interaction.Status == "pending" {
-						detail.Interactions = append(detail.Interactions, interaction)
+			// The adapter can publish an interaction before its paused checkpoint is saved.
+			if run.Status == "paused" {
+				if interactions, err := h.Runtime.ListInteractions(ctx, run.ID); err == nil {
+					for _, interaction := range interactions {
+						if interaction.Status == "pending" {
+							detail.Interactions = append(detail.Interactions, interaction)
+						}
 					}
 				}
 			}
@@ -873,7 +895,7 @@ func (h *Host) importSkill(w http.ResponseWriter, r *http.Request) {
 
 // revealSkills opens the skills folder in Finder.
 func (h *Host) revealSkills(w http.ResponseWriter, r *http.Request) {
-	if err := exec.Command("open", h.Skills.Dir).Start(); err != nil {
+	if err := revealPath(h.Skills.Dir, false); err != nil {
 		writeError(w, http.StatusInternalServerError, err)
 		return
 	}

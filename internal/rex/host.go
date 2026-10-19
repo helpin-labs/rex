@@ -11,7 +11,6 @@ import (
 	"fmt"
 	"log/slog"
 	"os"
-	"path/filepath"
 	"strings"
 	"sync"
 	"sync/atomic"
@@ -36,7 +35,7 @@ type Config struct {
 }
 
 // ErrWriteToolsUnavailable explains why write and shell access are off.
-var ErrWriteToolsUnavailable = errors.New("writing files and running commands need the macOS sandbox (Seatbelt), which is not active in the bot engine. This bot can read files in its folder")
+var ErrWriteToolsUnavailable = errors.New("writing files and running commands need a verified command sandbox, which is not active in the bot engine. This bot can read files in its folder")
 
 // Host coordinates bots, conversations, the runtime, memory and routines.
 type Host struct {
@@ -48,10 +47,11 @@ type Host struct {
 	Skills   *SkillLibrary
 	Routines *Scheduler
 	Browser  *BrowserControl
+	Sandbox  *CommandSandbox
 
 	runtimeReady atomic.Bool
 	// writeTools is true once the runtime reports that agent commands are
-	// confined with Seatbelt; only then are file writing and shell offered.
+	// confined with Seatbelt or verified WSL; only then are file writing and shell offered.
 	writeTools   atomic.Bool
 	restart      func()
 	lastActivity atomic.Int64
@@ -86,11 +86,16 @@ func NewHost(cfg Config, store *Store, runtime *RuntimeClient, settings *Setting
 
 func (h *Host) Config() Config { return h.cfg }
 
-func (h *Host) SetRestart(fn func())       { h.restart = fn }
-func (h *Host) SetRuntimeReady(ready bool) { h.runtimeReady.Store(ready) }
-func (h *Host) RuntimeReady() bool         { return h.runtimeReady.Load() }
-func (h *Host) touch()                     { h.lastActivity.Store(time.Now().UnixNano()) }
-func (h *Host) IdleFor() time.Duration     { return time.Since(time.Unix(0, h.lastActivity.Load())) }
+func (h *Host) SetRestart(fn func()) { h.restart = fn }
+func (h *Host) SetRuntimeReady(ready bool) {
+	h.runtimeReady.Store(ready)
+	if !ready {
+		h.writeTools.Store(false)
+	}
+}
+func (h *Host) RuntimeReady() bool     { return h.runtimeReady.Load() }
+func (h *Host) touch()                 { h.lastActivity.Store(time.Now().UnixNano()) }
+func (h *Host) IdleFor() time.Duration { return time.Since(time.Unix(0, h.lastActivity.Load())) }
 func (h *Host) RequestRuntimeRestart() {
 	if h.restart != nil {
 		h.restart()
@@ -100,9 +105,10 @@ func (h *Host) RequestRuntimeRestart() {
 // Bootstrap runs once the runtime is ready: it seeds first-run bots, syncs
 // every bot definition into the runtime and resumes watching open turns.
 func (h *Host) Bootstrap(ctx context.Context) error {
+	h.writeTools.Store(false)
 	if capabilities, err := h.Runtime.GetCapabilities(ctx); err == nil {
 		isolation := capabilities.ExecutionIsolation
-		h.writeTools.Store(isolation == "seatbelt")
+		h.writeTools.Store(isolation == "seatbelt" || isolation == "wsl")
 		slog.Info("bot engine command isolation", "isolation", isolation, "write_tools", h.WriteTools())
 	}
 	bots, err := h.Store.ListBots(ctx)
@@ -164,6 +170,7 @@ func (h *Host) PrepareInterruptedRuns(ctx context.Context) {
 // botFingerprint summarises everything a run fixes when it starts: the
 // system prompt (instructions, rules, skills), tools, model and MCP servers.
 func (h *Host) botFingerprint(ctx context.Context, bot Bot) string {
+	bot = h.botForRuntime(bot)
 	hash := sha256.New()
 	settings, _ := h.Settings.Get(ctx)
 	bot.BrowserBackend = bot.browserMode(settings)
@@ -185,6 +192,7 @@ func (h *Host) botFingerprint(ctx context.Context, bot Bot) string {
 }
 
 func (h *Host) SyncBot(ctx context.Context, bot Bot) error {
+	bot = h.botForRuntime(bot)
 	settings, err := h.Settings.Get(ctx)
 	if err != nil {
 		return err
@@ -195,15 +203,26 @@ func (h *Host) SyncBot(ctx context.Context, bot Bot) error {
 	return err
 }
 
+// Saved preferences survive a temporarily unavailable sandbox.
+func (h *Host) botForRuntime(bot Bot) Bot {
+	if !h.WriteTools() {
+		bot.Capabilities.FilesWrite, bot.Capabilities.Shell = false, false
+	}
+	return bot
+}
+
 // SaveBot validates, persists and syncs a bot, creating its workspace.
 func (h *Host) SaveBot(ctx context.Context, bot *Bot) error {
 	if err := bot.Normalize(h.cfg.WorkspaceRoot); err != nil {
 		return err
 	}
-	if !h.WriteTools() && (bot.Capabilities.FilesWrite || bot.Capabilities.Shell) {
+	existing, existingErr := h.Store.GetBot(ctx, bot.ID)
+	addsWrite := bot.Capabilities.FilesWrite && (existingErr != nil || !existing.Capabilities.FilesWrite)
+	addsShell := bot.Capabilities.Shell && (existingErr != nil || !existing.Capabilities.Shell)
+	if !h.WriteTools() && (addsWrite || addsShell) {
 		return ErrWriteToolsUnavailable
 	}
-	if existing, err := h.Store.GetBot(ctx, bot.ID); err == nil {
+	if existingErr == nil {
 		if bot.BrowserBackend != existing.BrowserBackend || (existing.Capabilities.Browser && !bot.Capabilities.Browser) {
 			if h.Browser.Held(bot.ID) {
 				return errors.New("hand back the browser before changing its mode")
@@ -266,8 +285,16 @@ func (h *Host) SaveBot(ctx context.Context, bot *Bot) error {
 }
 
 func ensureWorkspace(root string) error {
-	for _, dir := range []string{root, filepath.Join(root, "inbox"), filepath.Join(root, "outputs")} {
-		if err := os.MkdirAll(dir, 0o755); err != nil {
+	if err := os.MkdirAll(root, 0755); err != nil {
+		return fmt.Errorf("create workspace folder: %w", err)
+	}
+	directory, err := os.OpenRoot(root)
+	if err != nil {
+		return err
+	}
+	defer directory.Close()
+	for _, name := range []string{"inbox", "outputs"} {
+		if err := directory.MkdirAll(name, 0755); err != nil {
 			return fmt.Errorf("create workspace folder: %w", err)
 		}
 	}

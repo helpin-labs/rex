@@ -103,6 +103,7 @@ func (h *Host) resolveContext(ctx context.Context, bot Bot, model *RunModel) Res
 }
 
 func (h *Host) runAgent(ctx context.Context, bot Bot, model *RunModel) (Agent, ResolvedContext) {
+	bot = h.botForRuntime(bot)
 	settings, _ := h.Settings.Get(ctx)
 
 	bot.BrowserBackend = bot.browserMode(settings)

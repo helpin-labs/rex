@@ -26,7 +26,7 @@ export function notificationFor(item: AttentionItem, bot: Bot | undefined): { ti
     case "question": return { title: `${name} has a question`, body: plain(item.detail || item.title || "Open Rex to answer it.") };
     case "reconnect": return { title: `${name} needs you to sign in again`, body: plain(item.detail || "Open Rex and sign in to continue.") };
     case "proposal": return { title: `${name} suggests new instructions`, body: plain(item.detail || "Open Rex to apply or discard the change.") };
-    case "missed": return { title: `${item.title || "A routine"} didn't run`, body: plain(`${name} missed it while your Mac was off. Open Rex to run it now or skip it.`) };
+    case "missed": return { title: `${item.title || "A routine"} didn't run`, body: plain(`${name} missed it while your computer was off. Open Rex to run it now or skip it.`) };
     default: return { title: item.title || "Routine finished", body: plain(`${name} · ${item.detail || "Finished"}`) };
   }
 }

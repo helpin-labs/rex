@@ -5,6 +5,8 @@ import (
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
+	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 )
@@ -174,5 +176,17 @@ func TestBrowserModeDefaultsToExtensionAndPreservesExplicitChoices(t *testing.T)
 	prompt := bot.SystemPrompt(nil)
 	if !strings.Contains(prompt, "extension driver") || strings.Contains(prompt, "mcp__logins__sign_in") {
 		t.Fatal("default browser instructions do not describe Extension")
+	}
+}
+
+func TestPackagedBrowserCLIHasPriority(t *testing.T) {
+	path := filepath.Join(t.TempDir(), ExecutableName("packaged-browser"))
+	if err := os.WriteFile(path, []byte("fixture"), 0700); err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv("REX_AGENT_BROWSER_EXECUTABLE", path)
+	t.Setenv("AGENT_BROWSER_BINARY", "missing-user-install")
+	if got := agentBrowserPath(); got != path {
+		t.Fatalf("packaged browser CLI ignored: %q", got)
 	}
 }
