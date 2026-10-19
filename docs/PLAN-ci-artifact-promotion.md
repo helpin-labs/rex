@@ -29,5 +29,11 @@ Implemented on `fix/windows-release-signing`, extending PR #11.
 - Windows VM tests passed for PowerShell syntax, valid WSL cache reuse and rejection of tampered images, wrong architectures, malformed metadata and changed dependencies.
 - Standalone `tauri bundle` produced an app and DMG from the existing isolated macOS build without compilation. The resulting app passed deep/strict signature verification.
 - The real GitHub artifact-discovery CLI completed read-only with no matching artifacts, validating its API request and output contract. Positive reuse is covered with mocked GitHub responses; end-to-end trusted-main reuse requires retained artifacts after merge.
-- Application and agent-runtime Go/Rust source were not changed. The hosted signed Windows candidate at the earlier signing-fix commit is still being monitored; final workflow packaging and main-only publication/reuse must be distinguished from local checks.
+- Application and agent-runtime Go/Rust source were not changed. The hosted Windows candidate at the earlier signing-fix commit completed signing, GUI, reinstall and uninstall/data-retention assertions; its final directory cleanup raced the uninstaller and marked the job failed. Cleanup now reports warnings without overriding functional results. Final workflow packaging and main-only publication/reuse must be distinguished from local checks.
 
+
+### Browser readiness follow-up
+
+The hosted cookie-handoff check timed out querying Storage.getCookies during startup. The fixture now waits for its delayed login response to cause an authenticated browser request, then closes the plain browser and verifies the bot inherits that same HttpOnly cookie. This retains the 30-second deadline and native-pipe check without querying cookie storage during initialization.
+
+Real-browser checks passed twice on macOS and twice in the Windows VM. A third Windows iteration reached the later agent-browser launch and timed out; the VM subsequently stopped accepting SSH. Hosted confirmation of the final test change remains required. Browser application code is unchanged.

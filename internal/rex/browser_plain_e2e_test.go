@@ -1,7 +1,6 @@
 package rex
 
 import (
-	"encoding/json"
 	"fmt"
 	"net/http"
 	"net/http/httptest"
@@ -19,6 +18,7 @@ func TestPlainBrowserHandsCookiesToTheBot(t *testing.T) {
 	if executable == "" {
 		t.Skip("set REX_BROWSER_E2E to a Chromium browser executable")
 	}
+	cookieReady := make(chan struct{}, 1)
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if r.URL.Path == "/set" {
 			// Slow responses must finish before handing the browser profile back.
@@ -31,6 +31,16 @@ func TestPlainBrowserHandsCookiesToTheBot(t *testing.T) {
 			value = cookie.Value
 		}
 		fmt.Fprintf(w, "<title>cookie=%s</title>", value)
+		if r.URL.Path == "/set" {
+			// The follow-up request proves the browser processed the delayed cookie.
+			fmt.Fprint(w, `<script>fetch('/ready')</script>`)
+		}
+		if r.URL.Path == "/ready" && value == "plain-ok" {
+			select {
+			case cookieReady <- struct{}{}:
+			default:
+			}
+		}
 	}))
 	defer server.Close()
 	profile := t.TempDir()
@@ -40,31 +50,10 @@ func TestPlainBrowserHandsCookiesToTheBot(t *testing.T) {
 		t.Fatal(err)
 	}
 	t.Cleanup(func() { browser.close(5 * time.Second) })
-	deadline := time.Now().Add(30 * time.Second)
-	for {
-		raw, err := browser.call("Storage.getCookies", map[string]any{}, deadline)
-		if err != nil {
-			t.Fatal(err)
-		}
-		var stored struct {
-			Cookies []struct{ Name, Value string }
-		}
-		if err := json.Unmarshal(raw, &stored); err != nil {
-			t.Fatal(err)
-		}
-		ready := false
-		for _, cookie := range stored.Cookies {
-			if cookie.Name == "cf_clearance" && cookie.Value == "plain-ok" {
-				ready = true
-			}
-		}
-		if ready {
-			break
-		}
-		if time.Now().After(deadline) {
-			t.Fatal("plain browser did not receive the login cookie")
-		}
-		time.Sleep(100 * time.Millisecond)
+	select {
+	case <-cookieReady:
+	case <-time.After(30 * time.Second):
+		t.Fatal("plain browser did not complete the login request with its cookie")
 	}
 	if url := browser.close(10 * time.Second); url != server.URL+"/set" {
 		t.Fatalf("open page = %q", url)
