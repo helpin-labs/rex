@@ -34,6 +34,9 @@ jobs:
           go-version-file: go.mod
       - name: Build Windows x64 host
         run: go build -o src-tauri/binaries/rex-host-x86_64-pc-windows-msvc.exe ./cmd/rex-host
+      - name: Verify the captured preview-signing hook
+        shell: pwsh
+        run: ./scripts/windows-signing-smoke.ps1
       - name: Test native host foundations
         run: go test ./internal/rex -run 'Test(NativeExecutableNames|WindowsEnvironment|WindowsJob|WindowsCredentialManager|WindowsDataDirectory|WindowsBrowserDiscovery|RoutineFailureCooldown|SuccessfulManualRoutine|ExplicitlyDisabledRoutine|RuntimeSDK)' -timeout 5m
       - name: Build matching native runtime
@@ -150,7 +153,7 @@ jobs:
         run: |
           $config = @('--config', 'src-tauri/tauri.windows.conf.json')
           if ($env:RELEASE_VERSION) { $config += @('--config', 'signing-config.json') }
-          pnpm tauri build @config
+          pnpm tauri build --verbose @config
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
       - name: Save Rust dependencies before integration checks
         if: steps.rust-cache.outputs.cache-hit != 'true'
