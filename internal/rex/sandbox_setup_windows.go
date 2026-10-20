@@ -9,6 +9,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"log/slog"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -40,6 +41,8 @@ func runWSL(ctx context.Context, args ...string) ([]byte, error) {
 		return nil, err
 	}
 	command := exec.CommandContext(ctx, filepath.Join(system, "wsl.exe"), args...)
+	// WSL descendants can retain the output pipes after the client is killed.
+	command.WaitDelay = 5 * time.Second
 	command.Env = WindowsEnvironment()
 	command.SysProcAttr = &syscall.SysProcAttr{HideWindow: true}
 	out, err := command.CombinedOutput()
@@ -88,11 +91,47 @@ func (s *CommandSandbox) owns(ctx context.Context, d ownedDistribution) bool {
 		return false
 	}
 	out, err := runWSL(ctx, "--distribution", d.Name, "--user", "root", "--exec", "/bin/cat", "/etc/rex-owner")
+	if err != nil {
+		slog.Warn("Rex WSL ownership check failed", "error", err)
+	}
 	return err == nil && strings.TrimSpace(string(out)) == d.Nonce
 }
 
 func (s *CommandSandbox) bridge(d ownedDistribution) wsl.Config {
 	return wsl.Config{Distribution: d.Name, Helper: "/opt/agent-runtime/sandbox", ProbeRoot: filepath.Join(s.dataDir, "wsl", "probes")}
+}
+
+func (s *CommandSandbox) verifyRuntimeSandbox(ctx context.Context, d ownedDistribution, run func(context.Context, ...string) ([]byte, error), probe func(context.Context) error) error {
+	if err := s.validateOwnership(d); err != nil {
+		return err
+	}
+	owned := false
+	check := func() error {
+		checkCtx, cancel := context.WithTimeout(ctx, 30*time.Second)
+		defer cancel()
+		out, err := run(checkCtx, "--distribution", d.Name, "--user", "root", "--exec", "/bin/cat", "/etc/rex-owner")
+		if err != nil {
+			return fmt.Errorf("verify Rex WSL ownership: %w", err)
+		}
+		if strings.TrimSpace(string(out)) != d.Nonce {
+			return errors.New("Rex WSL ownership marker does not match")
+		}
+		owned = true
+		return probe(checkCtx)
+	}
+	err := check()
+	if err == nil || !owned || ctx.Err() != nil {
+		return err
+	}
+	// Never reset global WSL or terminate an environment without ownership proof.
+	slog.Warn("restarting Rex command sandbox after failed preflight", "error", err)
+	recoverCtx, cancel := context.WithTimeout(ctx, 10*time.Second)
+	_, err = run(recoverCtx, "--terminate", d.Name)
+	cancel()
+	if err != nil {
+		return fmt.Errorf("restart Rex WSL environment: %w", err)
+	}
+	return check()
 }
 
 func (s *CommandSandbox) RuntimeEnv(ctx context.Context) []string {
@@ -105,18 +144,19 @@ func (s *CommandSandbox) RuntimeEnv(ctx context.Context) []string {
 		s.setStatus("error", err.Error(), false)
 		return disabled
 	}
-	probeCtx, cancel := context.WithTimeout(ctx, 2*time.Minute)
-	defer cancel()
-	if !s.owns(probeCtx, installed.Active) {
-		s.setStatus("error", "Rex could not verify ownership of its Linux environment. Check WSL2, then use Set up or repair. If Windows asks for WSL installation, run wsl --install --no-distribution in an administrator terminal and restart Windows.", false)
-		return disabled
-	}
+	slog.Info("verifying Windows command sandbox before runtime startup")
 	config := s.bridge(installed.Active)
-	if _, err := config.Probe(probeCtx); err != nil {
-		s.setStatus("error", "Commands remain off: "+err.Error(), false)
+	if err := s.verifyRuntimeSandbox(ctx, installed.Active, runWSL, func(ctx context.Context) error {
+		_, err := config.Probe(ctx)
+		return err
+	}); err != nil {
+		slog.Warn("Rex WSL preflight failed; starting runtime with commands disabled", "error", err)
+		s.setStatus("error", "Commands remain off: "+err.Error()+". Check WSL2, then restart Rex or use Set up or repair.", false)
 		return disabled
 	}
 	// Runtime launch happens after the old native runtime has stopped.
+	probeCtx, cancel := context.WithTimeout(ctx, 10*time.Second)
+	defer cancel()
 	for _, old := range installed.Retired {
 		if s.owns(probeCtx, old) {
 			if _, err := runWSL(probeCtx, "--unregister", old.Name); err == nil {
