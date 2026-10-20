@@ -47,15 +47,18 @@ describe("blob avatars", () => {
     expect(values("botColors")).toEqual(botColors);
   });
 
-  it("keeps animation opt-in and renders the same blob family for the main assistant", () => {
+  it("keeps animation opt-in and gives the main assistant the app logo", () => {
     const {container, rerender} = render(<BotFace icon="review" color="#3e8e87" seed="qa" size={36} />);
     expect(container.querySelector(".working")).toBeNull();
     const timing = (container.firstElementChild as HTMLElement).style.getPropertyValue("--blink");
     rerender(<BotFace icon="review" color="#3e8e87" seed="qa" size={36} working />);
     expect(container.querySelector(".working")).toBeTruthy();
     expect((container.firstElementChild as HTMLElement).style.getPropertyValue("--blink")).toBe(timing);
+    expect(container.querySelector(".typing")).toBeNull();
+    rerender(<BotFace icon="review" color="#3e8e87" seed="qa" size={36} typing />);
+    expect(container.querySelector(".working.typing .mouth")).toBeTruthy();
     rerender(<Avatar bot={{name:"Rex",role:"main",emoji:"compass",color:"#e8613a"}} size={36} />);
-    expect(container.querySelector(".face-bot")).toBeTruthy();
-    expect(container.querySelector(".app-logo")).toBeNull();
+    expect(container.querySelector(".app-logo")).toBeTruthy();
+    expect(container.querySelector(".bot-face")).toBeNull();
   });
 });

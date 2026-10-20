@@ -30,6 +30,8 @@ function loadView(): View | null {
 
 export default function App() {
   const [status, setStatus] = useState<Status | null>(null);
+  // The bot whose reply is being written in the open chat.
+  const [typingBot, setTypingBot] = useState<string | null>(null);
   const [settings, setSettings] = useState<Settings | null>(null);
   const [bots, setBots] = useState<Bot[]>([]);
   const [threads, setThreads] = useState<Conversation[]>([]);
@@ -133,7 +135,7 @@ export default function App() {
           <button type="button" className="icon-button" title="New bot" aria-label="New bot" onClick={() => setNaming(true)}><Plus size={17} /></button>
         </div>
         {main ? <button type="button" className={`main-bot ${bot?.id === main.id ? "active" : ""}`} onClick={() => setView({ kind: "bot", botId: main.id })} title="Your main assistant">
-          <span className="main-bot-logo"><Avatar bot={main} size={84} working={!!threadOf(main.id)?.working} />{mainWaiting && <span className="waiting-dot corner" title="Needs you" />}</span>
+          <span className="main-bot-logo"><Avatar bot={main} size={84} working={!!threadOf(main.id)?.working} typing={typingBot === main.id} />{mainWaiting && <span className="waiting-dot corner" title="Needs you" />}</span>
           <strong>{main.name}</strong>
           <small>{threadOf(main.id)?.working ? "Working…" : "Main assistant"}</small>
         </button> : <div className="brand"><AppLogo size={84} /><strong>Rex</strong></div>}
@@ -143,7 +145,7 @@ export default function App() {
           const itemThread = threadOf(item.id);
           const needsYou = !!itemThread && waiting.has(itemThread.id);
           return <button type="button" key={item.id} className={`bot-row ${bot?.id === item.id ? "active" : ""}`} onClick={() => setView({ kind: "bot", botId: item.id })}>
-            <Avatar bot={item} size={46} working={!!itemThread?.working} />
+            <Avatar bot={item} size={46} working={!!itemThread?.working} typing={typingBot === item.id} />
             <span className="bot-row-text">
               <span className="bot-row-top"><strong>{item.name}</strong>{itemThread?.last_at && <small>{relativeTime(itemThread.last_at)}</small>}</span>
               <span className="bot-row-preview">
@@ -175,7 +177,7 @@ export default function App() {
       }}
       onDeleted={async () => { setEditing(null); const list = await refreshBots(); await refreshThreads(); setView(list[0] ? { kind: "bot", botId: list[0].id } : { kind: "settings" }); }} /></main> : <>
       {view?.kind === "bot" && bot && <main className="main">
-        {thread ? <Chat key={thread.id} bot={bot} bots={bots} conversationId={thread.id} status={status} pending={attention.filter(item => (item.kind === "missed" || item.kind === "proposal") && item.bot_id === bot.id)} defaultModel={bot.provider === settings?.default_provider ? settings?.default_model : undefined} onEdit={() => setEditing(bot)} onOpenSettings={tab => setView({ kind: "settings", tab })} onOpenApps={appId => setView({ kind: "apps", appId })} onChanged={() => void refreshThreads()} />
+        {thread ? <Chat key={thread.id} bot={bot} bots={bots} conversationId={thread.id} status={status} pending={attention.filter(item => (item.kind === "missed" || item.kind === "proposal") && item.bot_id === bot.id)} defaultModel={bot.provider === settings?.default_provider ? settings?.default_model : undefined} onEdit={() => setEditing(bot)} onOpenSettings={tab => setView({ kind: "settings", tab })} onOpenApps={appId => setView({ kind: "apps", appId })} onChanged={() => void refreshThreads()} onTyping={setTypingBot} />
           : <Empty icon={<LoaderCircle className="spin" size={20} />} title={`Opening ${bot.name}…`} />}
       </main>}
       {view?.kind === "routines" && <main className="main wide"><RoutinesView bots={bots} onOpenConversation={async id => { await refreshThreads(); await openConversation(id); }} /></main>}

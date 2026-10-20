@@ -1,16 +1,12 @@
-<svg xmlns="http://www.w3.org/2000/svg" width="44" height="44" viewBox="70 48 260 260">
-  <!-- Menu bar icon: the face as a macOS template image (black, gaps transparent). -->
-  <mask id="m" maskUnits="userSpaceOnUse" x="70" y="48" width="260" height="260">
-    <line x1="200" y1="112" x2="200" y2="82" stroke="#fff" stroke-width="8" stroke-linecap="round"/>
-    <circle cx="200" cy="74" r="11" fill="#fff"/>
-    <rect x="130" y="110" width="140" height="150" rx="50" fill="#fff"/>
-    <path d="M142 116 C110 110 86 130 84 170 C82 212 92 240 108 246 C124 250 132 236 134 212 L136 138 Z" fill="#fff" stroke="#000" stroke-width="10" stroke-linejoin="round"/>
-    <path d="M258 116 C290 110 314 130 316 170 C318 212 308 240 292 246 C276 250 268 236 266 212 L264 138 Z" fill="#fff" stroke="#000" stroke-width="10" stroke-linejoin="round"/>
-    <rect x="162" y="160" width="20" height="30" rx="10" fill="#000"/>
-    <rect x="218" y="160" width="20" height="30" rx="10" fill="#000"/>
-    <rect x="148" y="210" width="104" height="80" rx="40" fill="#fff" stroke="#000" stroke-width="10"/>
-    <rect x="180" y="220" width="40" height="24" rx="12" fill="#000"/>
-    <path d="M200 244 L200 258 M178 262 C188 272 200 268 200 258 C200 268 212 272 222 262" fill="none" stroke="#000" stroke-width="7" stroke-linecap="round"/>
+<svg xmlns="http://www.w3.org/2000/svg" width="44" height="44" viewBox="12 24 176 176">
+  <!-- Menu bar icon: the face as a macOS template image (black, gaps
+       transparent). Small sizes keep only the eyes and ears. -->
+  <mask id="m" maskUnits="userSpaceOnUse" x="12" y="24" width="176" height="176">
+    <path d="M100 40 C140 40 166 66 164 108 C162 150 136 174 100 174 C64 174 38 150 36 108 C34 66 60 40 100 40Z" fill="#fff"/>
+    <path d="M56 56 C32 50 14 70 18 102 C21 126 36 136 47 126 C56 118 58 92 64 74 Z" fill="#fff" stroke="#000" stroke-width="9" stroke-linejoin="round"/>
+    <path d="M144 56 C168 50 186 70 182 102 C179 126 164 136 153 126 C144 118 142 92 136 74 Z" fill="#fff" stroke="#000" stroke-width="9" stroke-linejoin="round"/>
+    <rect x="68" y="78" width="20" height="36" rx="10" fill="#000"/>
+    <rect x="112" y="78" width="20" height="36" rx="10" fill="#000"/>
   </mask>
-  <rect x="70" y="48" width="260" height="260" fill="#000" mask="url(#m)"/>
+  <rect x="12" y="24" width="176" height="176" fill="#000" mask="url(#m)"/>
 </svg>

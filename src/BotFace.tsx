@@ -85,7 +85,7 @@ const heads: Record<FaceJob, Head> = {
 function eyes(x = 55, y = 60, gap = 36, height = 32): string {
   return `<g class="look"><g class="blink"><rect x="${x}" y="${y}" width="14" height="${height}" rx="7" fill="${WHITE}"/><rect x="${x+gap}" y="${y}" width="14" height="${height}" rx="7" fill="${WHITE}"/></g></g>`;
 }
-const smile = (x = 80, y = 104, width = 12) => `<path d="M${x-width} ${y} Q${x} ${y+10} ${x+width} ${y}" fill="none" stroke="${INK}" stroke-width="3" stroke-linecap="round"/>`;
+const smile = (x = 80, y = 104, width = 12) => `<g class="mouth"><path d="M${x-width} ${y} Q${x} ${y+10} ${x+width} ${y}" fill="none" stroke="${INK}" stroke-width="3" stroke-linecap="round"/></g>`;
 const cheeks = (y = 98) => `<ellipse cx="52" cy="${y}" rx="7" ry="4" fill="${CORAL}" opacity=".5"/><ellipse cx="112" cy="${y}" rx="7" ry="4" fill="${CORAL}" opacity=".5"/>`;
 
 type Sign = { back?: string; front?: string; face?: string };
@@ -97,7 +97,7 @@ const signs: Record<FaceJob, (fill: string) => Sign> = {
   review: () => ({ face: eyes(51,60,42)+`<g class="monocle"><circle cx="100" cy="76" r="18" fill="none" stroke="${INK}" stroke-width="3.5"/><path d="M114 88 Q128 110 120 136" fill="none" stroke="${INK}" stroke-width="2" stroke-dasharray="2 4" stroke-linecap="round"/></g>`+smile(77,108,11) }),
   inbox: () => ({ face: eyes(58,64,30)+`<g class="talk"><path d="M66 104 Q80 126 94 104Z" fill="${INK}" stroke="${INK}" stroke-width="2" stroke-linejoin="round"/><ellipse cx="80" cy="114" rx="6" ry="3.5" fill="#e8613a"/></g>`, front: `<g class="waves"><path d="M140 72 Q148 86 140 100 M149 64 Q160 86 149 108" fill="none" stroke="${INK}" stroke-width="3" stroke-linecap="round"/></g>` }),
   writer: () => ({ back: `<g class="wobble"><path d="M80 20 C76 4 88 -8 100 -10 C94 0 92 10 84 20Z" fill="${GOLD}" stroke="${INK}" stroke-width="2" stroke-linejoin="round"/></g>`, face: eyes(56,62,34)+cheeks(96)+`<g class="mumble"><path d="M72 102 Q80 109 88 102" fill="none" stroke="#f7f5f2" stroke-width="3" stroke-linecap="round"/></g>` }),
-  security: () => ({ face: `<rect x="38" y="74" width="84" height="36" rx="18" fill="${INK}"/>`+eyes(58,80,32,24)+`<path d="M70 124 H90" stroke="${INK}" stroke-width="3" stroke-linecap="round"/>` }),
+  security: () => ({ face: `<rect x="38" y="74" width="84" height="36" rx="18" fill="${INK}"/>`+eyes(58,80,32,24)+`<g class="mouth"><path d="M70 124 H90" stroke="${INK}" stroke-width="3" stroke-linecap="round"/></g>` }),
   travel: () => ({ back: `<g class="wobble"><path d="M82 -2 L87 13 L105 20 V25 L87 22 L85 33 H78 L76 22 L59 25 V20 L76 13 L78 -2Z" fill="${GOLD}" stroke="${INK}" stroke-width="2" stroke-linejoin="round"/></g>` }),
   data: () => ({ face: eyes(53,57,38)+smile(80,102,9), front: `<g class="chart"><rect x="58" y="122" width="10" height="10" rx="2" fill="${WHITE}"/><rect x="76" y="114" width="10" height="18" rx="2" fill="${WHITE}"/><rect x="94" y="106" width="10" height="26" rx="2" fill="${WHITE}"/></g>` }),
   news: () => ({ back: `<g class="wobble"><path d="M32 48 L78 4 L126 48Z" fill="#f7f5f2" stroke="${INK}" stroke-width="2.5" stroke-linejoin="round"/><path d="M61 28 H93 M54 35 H102" stroke="${INK}" stroke-width="2" stroke-linecap="round"/></g>`, face: eyes(55,70)+smile(80,114,10) }),
@@ -120,12 +120,14 @@ export function faceSVG(job: FaceJob, color: string): string {
   return `<svg viewBox="0 -14 164 180" width="100%" height="100%" aria-hidden="true"><ellipse cx="80" cy="158" rx="${h.shadow}" ry="5" fill="${INK}" opacity=".12"/><g class="body">${sign.back || ""}<path d="${h.path}" fill="${fill}"/><ellipse cx="${x}" cy="${y}" rx="${rx}" ry="${rx/2}" transform="rotate(${angle} ${x} ${y})" fill="${WHITE}" opacity=".3"/>${sign.face ?? eyes()+smile()}${sign.front || ""}</g></svg>`;
 }
 
-export function BotFace({ icon, color, seed, size, working = false }: { icon: string; color: string; seed: string; size: number; working?: boolean }) {
+// Idle faces blink; working ones also look around and move; typing ones
+// (the reply is being written) also move their mouth.
+export function BotFace({ icon, color, seed, size, working = false, typing = false }: { icon: string; color: string; seed: string; size: number; working?: boolean; typing?: boolean }) {
   const job = faceJob(icon);
   const markup = useMemo(() => faceSVG(job, color), [job, color]);
   const timing = useMemo(() => {
     const rand = seeded(seed || "bot");
     return { "--delay": `${(-Math.abs(rand())*5).toFixed(2)}s`, "--blink": `${(3.5+Math.abs(rand())*2.5).toFixed(2)}s`, "--bob": `${(2.4+Math.abs(rand())*1.2).toFixed(2)}s` } as React.CSSProperties;
   }, [seed]);
-  return <span className={`bot-face face-${job} ${working ? "working" : ""}`} style={{ width:size, height:size, ...timing }} aria-hidden dangerouslySetInnerHTML={{ __html:markup }} />;
+  return <span className={`bot-face face-${job} ${working || typing ? "working" : ""} ${typing ? "typing" : ""}`} style={{ width:size, height:size, ...timing }} aria-hidden dangerouslySetInnerHTML={{ __html:markup }} />;
 }
