@@ -4,7 +4,6 @@ import remarkGfm from "remark-gfm";
 import { ArrowLeft, Check, Copy, Search, X } from "lucide-react";
 import type { Bot } from "./types";
 import { BotFace } from "./BotFace";
-import { AppLogo } from "./AppLogo";
 
 export function Markdown({ children }: { children: string }) {
   return <div className="markdown"><ReactMarkdown remarkPlugins={[remarkGfm]} components={{ pre: CodeBlock }}>{children}</ReactMarkdown></div>;
@@ -34,9 +33,7 @@ export function shade(hex: string, amount: number): string {
 }
 
 export function Avatar({ bot, size = 36, round = false, working = false }: { bot: Pick<Bot, "emoji" | "color" | "name"> & { id?: string; role?: string }; size?: number; round?: boolean; working?: boolean }) {
-  // The main bot is the app itself and wears the app's logo.
-  if (bot.role === "main") return <AppLogo size={size} working={working} />;
-  return <BotFace icon={bot.emoji} color={bot.color} seed={bot.id || bot.name} size={size} working={working} />;
+  return <BotFace icon={bot.role === "main" ? "bot" : bot.emoji} color={bot.color} seed={bot.id || bot.name} size={size} working={working} />;
 }
 
 export function Modal({ title, subtitle, onClose, children, footer, wide, className = "" }: { title: string; subtitle?: string; onClose: () => void; children: ReactNode; footer?: ReactNode; wide?: boolean; className?: string }) {

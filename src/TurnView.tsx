@@ -6,9 +6,7 @@ import { useSmoothText, useStableText } from "./useSmoothText";
 import { formatElapsed, isControlTool, stepLabel } from "./steps";
 import { bankLabel } from "./MemoryPanel";
 import type { Bot, MemoryOverview, RunEventEnvelope, RunTimelineSegment, RunToolCall, Turn } from "./types";
-import { Markdown } from "./ui";
-import { AppLogo } from "./AppLogo";
-import { BotFace } from "./BotFace";
+import { Avatar, Markdown } from "./ui";
 import { TextWithJson } from "./JsonBlock";
 import { turnFailure } from "./chatHelpers";
 
@@ -205,7 +203,7 @@ export const TurnView = memo(function TurnView({ turn, bot, events, working, mem
       </div>
     </div>)}
     <div className="bot-reply">
-      <div className="reply-meta"><span className="reply-name">{bot.role === "main" ? <AppLogo size={18} /> : <BotFace icon={bot.emoji} color={bot.color} seed={bot.id} size={18} />} {bot.name}</span>
+      <div className="reply-meta"><span className="reply-name"><Avatar bot={bot} size={18} /> {bot.name}</span>
         {turn.origin?.startsWith("report:") && <span className="reply-tag">Report from {turn.origin.slice("report:".length)}</span>}</div>
       {workRow}
       {answerText && <div className={`bubble bot ${smooth.animating ? "streaming" : ""}`}>{smooth.animating ? <StreamingMarkdown text={smooth.text} /> : <Markdown>{answerText}</Markdown>}</div>}

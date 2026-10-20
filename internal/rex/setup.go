@@ -32,11 +32,11 @@ var botIconList string
 var botIconIDs = strings.Fields(botIconList)
 
 // botFaces are the faces a bot can wear, drawn by src/BotFace.tsx: one per
-// kind of job, plus a plain bot.
-var botFaces = []string{"bot", "travel", "writer", "data", "news", "research", "fitness", "chef", "money", "inbox", "code", "planner", "music"}
+// kind of job, plus a general assistant.
+var botFaces = []string{"bot", "travel", "writer", "data", "news", "research", "fitness", "chef", "money", "inbox", "code", "planner", "music", "story", "review", "security", "design", "sales", "learning", "automation"}
 
-// botColors are the soft, slightly washed-out colours offered for a bot's face; the same list as src/BotFace.tsx.
-var botColors = []string{"#8b93e8", "#e0a35e", "#e8876f", "#62b89c", "#6aa9de", "#a592dc", "#e48aa8", "#86b46e", "#58adbb", "#c58ad6", "#c9a77c", "#8e9bb0"}
+// botColors includes the blob palette and previous saved colours; shared with src/BotFace.tsx.
+var botColors = []string{"#e8613a", "#4f6e9c", "#d9a85b", "#c2382a", "#3e8e87", "#f2845e", "#8a5a8c", "#4f7a5a", "#8b93e8", "#e0a35e", "#e8876f", "#62b89c", "#6aa9de", "#a592dc", "#e48aa8", "#86b46e", "#58adbb", "#c58ad6", "#c9a77c", "#8e9bb0"}
 
 func validFace(face string) bool {
 	return slices.Contains(botFaces, face) || slices.Contains(botIconIDs, face)
@@ -90,7 +90,7 @@ func (h *Host) setupMCP() http.Handler {
 		server := protocol.NewServer(&protocol.Implementation{Name: "rex-setup", Version: "1.0.0"}, nil)
 		server.AddTool(&protocol.Tool{
 			Name:        "configure_myself",
-			Description: "Set your name, face and instructions once you know what the user wants. Pick the face that fits your job: " + strings.Join(botFaces, ", ") + " (bot is a plain robot). The user already chose your colour.",
+			Description: "Set your name, face and instructions once you know what the user wants. Pick the face that fits your job: " + strings.Join(botFaces, ", ") + " (bot is the general assistant). The user already chose your colour.",
 			InputSchema: map[string]any{"type": "object", "additionalProperties": false, "required": []string{"name", "face", "instructions"}, "properties": map[string]any{
 				"name":         map[string]any{"type": "string", "minLength": 2, "maxLength": 40},
 				"face":         map[string]any{"type": "string", "enum": botFaces},

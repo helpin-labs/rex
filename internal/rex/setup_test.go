@@ -145,3 +145,23 @@ func TestFingerprintChangesWithTheBotsSetup(t *testing.T) {
 		t.Fatal("new tools change the fingerprint")
 	}
 }
+
+func TestExpandedBlobFacesPersistThroughSetup(t *testing.T) {
+	host := newSetupTestHost(t)
+	for _, face := range []string{"story", "review", "security", "design", "sales", "learning", "automation"} {
+		t.Run(face, func(t *testing.T) {
+			bot, err := host.DraftBot(t.Context(), "Blob "+face, face, "#3e8e87")
+			if err != nil {
+				t.Fatal(err)
+			}
+			saved, err := host.ConfigureBot(t.Context(), bot.ID, bot.Name, face, "You help the user with the task they requested.")
+			if err != nil {
+				t.Fatal(err)
+			}
+			stored, err := host.Store.GetBot(t.Context(), saved.ID)
+			if err != nil || stored.Emoji != face || stored.Color != "#3e8e87" || stored.Setup {
+				t.Fatalf("blob choice did not persist: %+v, %v", stored, err)
+			}
+		})
+	}
+}
