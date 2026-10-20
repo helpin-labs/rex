@@ -160,7 +160,7 @@ export function BotEditor({ initial, settings, status, onClose, onSaved, onDelet
         {tab === "profile" && <>
           {bot.role !== "main" && <div className="card">
             <h3 className="section-title">Look{!facePicked ? <span className="muted small"> · face suggested from the name</span> : null}</h3>
-            <div className="face-choices">{faces.map(item => <button type="button" key={item.job} title={item.label} aria-label={item.label} className={`face-choice ${currentFace === item.job ? "selected" : ""}`} onClick={() => pickFace(item.job)}>
+            <div className="face-choices">{faces.map(item => <button type="button" key={item.job} title={item.label} aria-label={item.label} aria-pressed={currentFace === item.job} className={`face-choice ${currentFace === item.job ? "selected" : ""}`} onClick={() => pickFace(item.job)}>
               <BotFace icon={item.job} color={bot.color} seed={item.job} size={40} />
             </button>)}</div>
             <ColorPicker value={bot.color} onChange={color => update({ color })} />

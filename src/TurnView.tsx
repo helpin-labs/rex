@@ -6,9 +6,7 @@ import { useSmoothText, useStableText } from "./useSmoothText";
 import { formatElapsed, isControlTool, stepLabel } from "./steps";
 import { bankLabel } from "./MemoryPanel";
 import type { Bot, MemoryOverview, RunEventEnvelope, RunTimelineSegment, RunToolCall, Turn } from "./types";
-import { Markdown } from "./ui";
-import { AppLogo } from "./AppLogo";
-import { BotFace } from "./BotFace";
+import { Avatar, Markdown } from "./ui";
 import { TextWithJson } from "./JsonBlock";
 import { turnFailure } from "./chatHelpers";
 
@@ -63,6 +61,8 @@ type TurnViewProps = {
   error?: string; onRetry?: (text: string) => void;
   // Set on the latest message the user may still edit.
   onEditMessage?: (turnId: string, text: string) => Promise<void>;
+  // Told whether the reply is being written, so the bot's face can talk.
+  onTyping?: (typing: boolean) => void;
 };
 
 // The conversation is polled every few seconds, which hands every turn a
@@ -72,7 +72,7 @@ function sameTurn(a: TurnViewProps, b: TurnViewProps) {
     a.turn.id === b.turn.id && a.turn.status === b.turn.status && a.turn.assistant_text === b.turn.assistant_text &&
     a.turn.settled_at === b.turn.settled_at && a.turn.memory_status === b.turn.memory_status && a.turn.memory_facts === b.turn.memory_facts &&
     a.turn.run_id === b.turn.run_id && (a.turn.recalled?.length ?? 0) === (b.turn.recalled?.length ?? 0) &&
-    a.memoryWhere === b.memoryWhere && a.overview === b.overview && a.onShowMemory === b.onShowMemory && a.error === b.error && a.onRetry === b.onRetry && a.onEditMessage === b.onEditMessage;
+    a.memoryWhere === b.memoryWhere && a.overview === b.overview && a.onShowMemory === b.onShowMemory && a.error === b.error && a.onRetry === b.onRetry && a.onEditMessage === b.onEditMessage && a.onTyping === b.onTyping;
 }
 
 // UsedMemories lists what the bot remembered when it answered.
@@ -130,7 +130,7 @@ function UserText({ text }: { text: string }) {
   </>;
 }
 
-export const TurnView = memo(function TurnView({ turn, bot, events, working, memoryWhere, overview, onShowMemory, error, onRetry, onEditMessage }: TurnViewProps) {
+export const TurnView = memo(function TurnView({ turn, bot, events, working, memoryWhere, overview, onShowMemory, error, onRetry, onEditMessage, onTyping }: TurnViewProps) {
   const [editing, setEditing] = useState<string | null>(null);
   const [saving, setSaving] = useState(false);
   const resend = async () => {
@@ -158,6 +158,12 @@ export const TurnView = memo(function TurnView({ turn, bot, events, working, mem
   const tools = work.filter((segment): segment is RunToolCall => segment.kind === "tool");
   const answerText = useStableText(answer?.content || (!working ? turn.assistant_text : ""), turn.status !== "failed" && turn.status !== "cancelled");
   const smooth = useSmoothText(answerText, working);
+  const typing = smooth.animating && !!answerText;
+  useEffect(() => {
+    if (!onTyping) return;
+    onTyping(typing);
+    return () => onTyping(false);
+  }, [onTyping, typing]);
   const elapsedMs = (turn.settled_at ? Date.parse(turn.settled_at) : now) - Date.parse(turn.started_at);
   const latest = [...tools].reverse()[0];
   const thinking = state.reasoning.some(item => item.status !== "completed");
@@ -205,7 +211,7 @@ export const TurnView = memo(function TurnView({ turn, bot, events, working, mem
       </div>
     </div>)}
     <div className="bot-reply">
-      <div className="reply-meta"><span className="reply-name">{bot.role === "main" ? <AppLogo size={18} /> : <BotFace icon={bot.emoji} color={bot.color} seed={bot.id} size={18} />} {bot.name}</span>
+      <div className="reply-meta"><span className="reply-name"><Avatar bot={bot} size={18} typing={typing} /> {bot.name}</span>
         {turn.origin?.startsWith("report:") && <span className="reply-tag">Report from {turn.origin.slice("report:".length)}</span>}</div>
       {workRow}
       {answerText && <div className={`bubble bot ${smooth.animating ? "streaming" : ""}`}>{smooth.animating ? <StreamingMarkdown text={smooth.text} /> : <Markdown>{answerText}</Markdown>}</div>}

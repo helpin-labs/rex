@@ -33,10 +33,10 @@ export function shade(hex: string, amount: number): string {
   return `#${channel(1)}${channel(3)}${channel(5)}`;
 }
 
-export function Avatar({ bot, size = 36, round = false, working = false }: { bot: Pick<Bot, "emoji" | "color" | "name"> & { id?: string; role?: string }; size?: number; round?: boolean; working?: boolean }) {
+export function Avatar({ bot, size = 36, round = false, working = false, typing = false }: { bot: Pick<Bot, "emoji" | "color" | "name"> & { id?: string; role?: string }; size?: number; round?: boolean; working?: boolean; typing?: boolean }) {
   // The main bot is the app itself and wears the app's logo.
-  if (bot.role === "main") return <AppLogo size={size} working={working} />;
-  return <BotFace icon={bot.emoji} color={bot.color} seed={bot.id || bot.name} size={size} working={working} />;
+  if (bot.role === "main") return <AppLogo size={size} working={working} typing={typing} />;
+  return <BotFace icon={bot.emoji} color={bot.color} seed={bot.id || bot.name} size={size} working={working} typing={typing} />;
 }
 
 export function Modal({ title, subtitle, onClose, children, footer, wide, className = "" }: { title: string; subtitle?: string; onClose: () => void; children: ReactNode; footer?: ReactNode; wide?: boolean; className?: string }) {

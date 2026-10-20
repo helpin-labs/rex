@@ -258,7 +258,7 @@ function useTurnEvents(turns: Turn[], timelines: Record<string, { events: RunEve
 // A bot's thread can grow long; it opens on its latest turns.
 const TURNS_SHOWN = 30;
 
-export function Chat({ bot, bots, conversationId, status, pending: waiting, defaultModel, onChanged, onEdit, onOpenSettings, onOpenApps }: { bot: Bot; bots: Bot[]; conversationId: string; status: Status | null; pending: AttentionItem[]; defaultModel?: string; onChanged: () => void; onEdit: () => void; onOpenSettings?: (tab: "memory") => void; onOpenApps?: (appId: string) => void }) {
+export function Chat({ bot, bots, conversationId, status, pending: waiting, defaultModel, onChanged, onEdit, onOpenSettings, onOpenApps, onTyping }: { bot: Bot; bots: Bot[]; conversationId: string; status: Status | null; pending: AttentionItem[]; defaultModel?: string; onChanged: () => void; onEdit: () => void; onOpenSettings?: (tab: "memory") => void; onOpenApps?: (appId: string) => void; onTyping?: (botId: string | null) => void }) {
   const missed = waiting.filter(item => item.kind === "missed");
   const proposalKey = waiting.filter(item => item.kind === "proposal").map(item => item.id).join(",");
   const [proposals, setProposals] = useState<InstructionProposal[]>([]);
@@ -363,6 +363,8 @@ export function Chat({ bot, bots, conversationId, status, pending: waiting, defa
     return () => window.removeEventListener("keydown", onKey);
   }, []);
   const activeRun = detail?.runs.find(run => run.id === detail.conversation.active_run_id);
+  // The sidebar shows the bot's face, which talks while its reply is written.
+  const reportTyping = useCallback((typing: boolean) => onTyping?.(typing ? bot.id : null), [onTyping, bot.id]);
   const working = !!lastTurn && lastTurn.status === "working" && (!activeRun || activeRun.status === "running" || activeRun.status === "queued");
   const pending = detail?.interactions || [];
   const approvals = pending.filter(item => item.interaction_kind !== "request_user_input" && item.interaction_kind !== "authentication");
@@ -498,7 +500,6 @@ export function Chat({ bot, bots, conversationId, status, pending: waiting, defa
       {dragging && <div className="drop-overlay"><Paperclip size={20} /><strong>Drop to attach</strong><small>{bot.capabilities.files_read ? `Saved to ${bot.name}'s workspace` : "Small text files are added to the message"}</small></div>}
       <header className="chat-header">
         <div className="chat-title">
-          <Avatar bot={bot} size={bot.role === "main" ? 50 : 40} working={working} />
           <div><h2>{bot.name}</h2><div className="badges">{capabilityBadges.map(badge => <span className="badge" key={badge}>{badge}</span>)}</div></div>
         </div>
         <div className="row chat-tools">
@@ -531,6 +532,7 @@ export function Chat({ bot, bots, conversationId, status, pending: waiting, defa
           <TurnView turn={turn} bot={bot} events={eventsByTurn[index]} working={index === turns.length - 1 && working}
             memoryWhere={memoryWhereLabel(home, bot)} overview={overview} onShowMemory={showMemory}
             error={turn.status === "failed" ? detail?.runs.find(run => run.id === turn.run_id)?.error_message : undefined} onRetry={retry}
+            onTyping={index === turns.length - 1 ? reportTyping : undefined}
             onEditMessage={index === turns.length - 1 && !working && pending.length === 0 && !turn.origin && turn.user_text ? editMessage : undefined} />
         </Fragment>)}
         {detail?.conversation.context_start && lastTurn && lastTurn.started_at < detail.conversation.context_start && <p className="fresh-note">Fresh start. {bot.name} won't carry the conversation above into new messages; memories still apply.</p>}

@@ -36,3 +36,15 @@ it("allows Auto without a key, explains fallback, and allows switching to Allow 
   fireEvent.click(screen.getByRole("button", {name:"Save changes"}));
   await waitFor(() => expect(api.saveBot).toHaveBeenCalledWith(expect.objectContaining({approval_mode:"allow_all"})));
 });
+
+
+it("offers and persists the expanded blob set while retaining a saved face", async () => {
+  const bot: Bot = {...newBot(null), id:"ops", name:"Ops", emoji:"chef-hat", color:"#62b89c"};
+  render(<BotEditor initial={bot} settings={null} status={null} onClose={vi.fn()} onSaved={vi.fn()} onDeleted={vi.fn()} />);
+  expect(screen.getByRole("button", {name:"Food"}).getAttribute("aria-pressed")).toBe("true");
+  expect(document.querySelectorAll(".face-choice")).toHaveLength(20);
+  fireEvent.click(screen.getByRole("button", {name:"Security"}));
+  expect(screen.getByRole("button", {name:"Security"}).getAttribute("aria-pressed")).toBe("true");
+  fireEvent.click(screen.getByRole("button", {name:"Save changes"}));
+  await waitFor(() => expect(api.saveBot).toHaveBeenCalledWith(expect.objectContaining({emoji:"security",color:"#62b89c"})));
+});
