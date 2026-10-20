@@ -3,14 +3,77 @@ package rex
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"golang.org/x/sys/windows"
 	"os"
 	"path/filepath"
+	"reflect"
 	"strings"
 	"testing"
 	"time"
 	"unsafe"
 )
+
+func TestWindowsWSLStartupRecovery(t *testing.T) {
+	for _, scenario := range []string{"healthy", "recover", "still broken", "ownership unavailable", "wrong owner", "termination fails", "cancelled", "foreign target"} {
+		t.Run(scenario, func(t *testing.T) {
+			s := NewCommandSandbox(t.TempDir(), "")
+			nonce := strings.Repeat("a", 32)
+			d := ownedDistribution{Name: "Rex-Sandbox-" + nonce, Nonce: nonce, Directory: filepath.Join(s.dataDir, "wsl", nonce)}
+			ctx, cancel := context.WithCancel(t.Context())
+			defer cancel()
+			var commands [][]string
+			probes := 0
+			if scenario == "foreign target" {
+				d.Name = "Ubuntu"
+			}
+			run := func(ctx context.Context, args ...string) ([]byte, error) {
+				commands = append(commands, args)
+				if deadline, ok := ctx.Deadline(); !ok || time.Until(deadline) > 30*time.Second {
+					t.Fatal("unbounded WSL startup operation")
+				}
+				if args[0] == "--terminate" {
+					if !reflect.DeepEqual(args, []string{"--terminate", d.Name}) {
+						t.Fatalf("termination escaped Rex's environment: %v", args)
+					}
+					if scenario == "termination fails" {
+						return nil, context.DeadlineExceeded
+					}
+					return nil, nil
+				}
+				if !reflect.DeepEqual(args, []string{"--distribution", d.Name, "--user", "root", "--exec", "/bin/cat", "/etc/rex-owner"}) {
+					t.Fatalf("unexpected WSL operation: %v", args)
+				}
+				if scenario == "ownership unavailable" {
+					return nil, context.DeadlineExceeded
+				}
+				if scenario == "wrong owner" {
+					return []byte("someone else"), nil
+				}
+				return []byte(nonce), nil
+			}
+			err := s.verifyRuntimeSandbox(ctx, d, run, func(ctx context.Context) error {
+				probes++
+				if scenario == "cancelled" {
+					cancel()
+					return ctx.Err()
+				}
+				if scenario != "healthy" && (probes == 1 || scenario == "still broken") {
+					return errors.New("WSL stopped responding after wake")
+				}
+				return nil
+			})
+			wantSuccess := scenario == "healthy" || scenario == "recover"
+			if (err == nil) != wantSuccess {
+				t.Fatalf("error=%v, commands=%v", err, commands)
+			}
+			wantCommands := map[string]int{"healthy": 1, "recover": 3, "still broken": 3, "ownership unavailable": 1, "wrong owner": 1, "termination fails": 2, "cancelled": 1, "foreign target": 0}[scenario]
+			if len(commands) != wantCommands {
+				t.Fatalf("commands=%v, want %d", commands, wantCommands)
+			}
+		})
+	}
+}
 
 func TestWindowsWSLOwnershipRejectsForeignTargets(t *testing.T) {
 	s := NewCommandSandbox(t.TempDir(), "")
@@ -62,6 +125,17 @@ func TestWindowsWSLSetupRepairAndProbe(t *testing.T) {
 	}
 	if env := s.RuntimeEnv(t.Context()); len(env) != 4 || env[0] != "AGENT_RUNTIME_EXECUTION_ISOLATION=wsl" {
 		t.Fatalf("verified sandbox disabled: %v %+v", env, s.Status())
+	}
+	probes := 0
+	if err := s.verifyRuntimeSandbox(t.Context(), first.Active, runWSL, func(ctx context.Context) error {
+		probes++
+		if probes == 1 {
+			return errors.New("simulate interrupted WSL preflight")
+		}
+		_, err := s.bridge(first.Active).Probe(ctx)
+		return err
+	}); err != nil || probes != 2 {
+		t.Fatalf("owned sandbox did not recover and pass confinement again: probes=%d error=%v", probes, err)
 	}
 	if err := s.install(t.Context()); err != nil {
 		t.Fatal(err)

@@ -33,6 +33,14 @@ Landlock confines command access to the bot's folder and required runtime paths.
 A failed probe disables commands instead of falling back to native shell access.
 Use Settings → repair to stage and verify a replacement before switching to it.
 
+Rex checks engine health and retries failed startup or an unresponsive engine.
+WSL startup checks have time limits. If ownership is verified but confinement
+fails, Rex restarts only its own distribution once and verifies it again.
+If WSL remains unavailable, chat and memory start with commands disabled.
+Rex never shuts down all of WSL to recover; an unavailable ownership check also
+leaves the distribution untouched. No reinstall or data deletion is needed for
+this recovery attempt.
+
 ## Updates and removal
 
 Reinstalling preserves local data, credentials and the owned command environment.

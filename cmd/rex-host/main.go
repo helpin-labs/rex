@@ -212,76 +212,54 @@ func run() error {
 	}
 	runtimeArgs := runtimeLaunch{sandbox: host.Sandbox, browserShim: browserShim, dataDir: dataDir, port: runtimePort, token: runtimeToken, hostURL: hostURL, internalToken: cfg.InternalToken,
 		modelCredentialKey: modelCredentialKey, mcpCredentialKey: mcpCredentialKey, settings: settings, logFile: logFile}
-	host.PrepareInterruptedRuns(ctx)
-	command, done, err := runtimeArgs.start(ctx)
-	if err != nil {
-		return err
-	}
-	becomeReady := func() {
-		readyCtx, cancelReady := context.WithTimeout(ctx, 60*time.Second)
-		defer cancelReady()
-		go func(exited <-chan struct{}) {
-			select {
-			case <-exited:
-				cancelReady()
-			case <-readyCtx.Done():
-			}
-		}(runtimeExited)
-		if err := runtimeClient.WaitReady(readyCtx); err != nil {
-			slog.Error("agent runtime did not become ready", "error", err)
-			return
-		}
-		host.SetRuntimeReady(true)
-		if err := host.Bootstrap(ctx); err != nil {
-			slog.Error("bootstrap failed", "error", err)
-		}
-		host.Routines.Recover(ctx)
-		slog.Info("rex is ready", "api", hostURL, "runtime", runtimeClient.BaseURL)
-	}
-	becomeReady()
-
-	crashes := 0
-	for {
-		select {
-		case <-ctx.Done():
-			slog.Info("shutting down")
-			return shutdown(httpServer, host, command, done)
-		case <-parentClosed:
-			slog.Info("desktop shell closed; shutting down")
-			return shutdown(httpServer, host, command, done)
-		case <-restartRequests:
-			host.SetRuntimeReady(false)
-			slog.Info("restarting agent runtime to apply settings")
-			stopProcess(command, done, 8*time.Second)
+	var command *exec.Cmd
+	var done <-chan error
+	var exited <-chan struct{}
+	supervisor := runtimeSupervisor{
+		checkInterval: 10 * time.Second,
+		readyTimeout:  time.Minute,
+		retryDelay:    time.Second,
+		start: func(ctx context.Context) (<-chan error, error) {
 			host.PrepareInterruptedRuns(ctx)
-			command, done, err = runtimeArgs.start(ctx)
-			if err != nil {
-				slog.Error("could not restart agent runtime", "error", err)
-				continue
+			var err error
+			command, done, exited, err = runtimeArgs.start(ctx)
+			return done, err
+		},
+		stop: func() error {
+			if err := stopProcess(command, exited, 8*time.Second); err != nil {
+				return err
 			}
-			becomeReady()
-		case err := <-done:
-			// The runtime crashed. Restart it a few times before giving up;
-			// runs resume from their durable checkpoints.
-			host.SetRuntimeReady(false)
-			crashes++
-			slog.Error("agent runtime exited", "error", err, "crashes", crashes)
-			if crashes > 5 {
-				_ = httpServer.Shutdown(context.Background())
-				return fmt.Errorf("agent runtime keeps crashing: %w", err)
-			}
-			time.Sleep(time.Duration(crashes) * time.Second)
-			host.PrepareInterruptedRuns(ctx)
-			command, done, err = runtimeArgs.start(ctx)
+			command, done, exited = nil, nil, nil
+			return nil
+		},
+		health: func(ctx context.Context) error {
+			health, err := runtimeClient.Health(ctx)
 			if err != nil {
 				return err
 			}
-			becomeReady()
-		case err := <-serveErrors:
-			stopProcess(command, done, 5*time.Second)
-			return fmt.Errorf("desktop API exited: %w", err)
-		}
+			if health["status"] != "ok" {
+				return fmt.Errorf("unexpected runtime health status %q", health["status"])
+			}
+			return nil
+		},
+		setReady: func(ctx context.Context, ready bool) {
+			host.SetRuntimeReady(ready)
+			if !ready {
+				return
+			}
+			if err := host.Bootstrap(ctx); err != nil {
+				slog.Error("bootstrap failed", "error", err)
+			}
+			host.Routines.Recover(ctx)
+			slog.Info("rex is ready", "api", hostURL, "runtime", runtimeClient.BaseURL)
+		},
 	}
+	err = supervisor.run(ctx, parentClosed, restartRequests, serveErrors)
+	shutdownErr := shutdown(httpServer, host, command, exited)
+	if err != nil {
+		return err
+	}
+	return shutdownErr
 }
 
 // bestEffortWriter writes to the log file and, if still possible, stderr.
@@ -292,7 +270,7 @@ func (w bestEffortWriter) Write(p []byte) (int, error) {
 	return w.primary.Write(p)
 }
 
-func shutdown(server *http.Server, host *rex.Host, command *exec.Cmd, done <-chan error) error {
+func shutdown(server *http.Server, host *rex.Host, command *exec.Cmd, done <-chan struct{}) error {
 	host.SetRuntimeReady(false)
 	browserCtx, cancelBrowser := context.WithTimeout(context.Background(), 10*time.Second)
 	host.Browser.CloseAll(browserCtx)
@@ -300,7 +278,9 @@ func shutdown(server *http.Server, host *rex.Host, command *exec.Cmd, done <-cha
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()
 	_ = server.Shutdown(ctx)
-	stopProcess(command, done, 8*time.Second)
+	if err := stopProcess(command, done, 8*time.Second); err != nil {
+		return err
+	}
 	slog.Info("rex host stopped cleanly")
 	return nil
 }
@@ -315,18 +295,14 @@ type runtimeLaunch struct {
 	logFile                              io.Writer
 }
 
-// runtimeExited closes when the current runtime process exits, so waiting
-// for readiness stops early instead of timing out.
-var runtimeExited <-chan struct{}
-
-func (l runtimeLaunch) start(ctx context.Context) (*exec.Cmd, <-chan error, error) {
+func (l runtimeLaunch) start(ctx context.Context) (*exec.Cmd, <-chan error, <-chan struct{}, error) {
 	binary, err := resolveRuntimeBinary()
 	if err != nil {
-		return nil, nil, err
+		return nil, nil, nil, err
 	}
 	settings, err := l.settings.Get(ctx)
 	if err != nil {
-		return nil, nil, err
+		return nil, nil, nil, err
 	}
 	endpoint := settings.LocalEndpoint()
 	app := map[string]any{
@@ -354,11 +330,11 @@ func (l runtimeLaunch) start(ctx context.Context) (*exec.Cmd, <-chan error, erro
 	}
 	appConfig, err := json.Marshal(map[string]any{"apps": []any{app}})
 	if err != nil {
-		return nil, nil, err
+		return nil, nil, nil, err
 	}
 	env, err := l.settings.RuntimeEnv(ctx)
 	if err != nil {
-		return nil, nil, err
+		return nil, nil, nil, err
 	}
 	command := exec.Command(binary)
 	command.Stdout = l.logFile
@@ -404,7 +380,7 @@ func (l runtimeLaunch) start(ctx context.Context) (*exec.Cmd, <-chan error, erro
 	// bot's profile.
 	rex.ConfigureProcess(command)
 	if err := command.Start(); err != nil {
-		return nil, nil, fmt.Errorf("start agent runtime: %w", err)
+		return nil, nil, nil, fmt.Errorf("start agent runtime: %w", err)
 	}
 	done := make(chan error, 1)
 	exited := make(chan struct{})
@@ -412,11 +388,11 @@ func (l runtimeLaunch) start(ctx context.Context) (*exec.Cmd, <-chan error, erro
 		err := command.Wait()
 		close(exited)
 		done <- err
+		close(done)
 	}()
-	runtimeExited = exited
 	_ = os.WriteFile(filepath.Join(l.dataDir, "runtime.pid"), []byte(fmt.Sprint(command.Process.Pid)), 0o600)
 	slog.Info("agent runtime started", "pid", command.Process.Pid, "port", l.port)
-	return command, done, nil
+	return command, done, exited, nil
 }
 
 // baseEnvironment passes a minimal environment to the runtime so the user's
@@ -440,20 +416,27 @@ func baseEnvironment() []string {
 
 // stopProcess interrupts the runtime's process group, then kills it if it
 // does not exit in time.
-func stopProcess(command *exec.Cmd, done <-chan error, timeout time.Duration) {
+func stopProcess(command *exec.Cmd, done <-chan struct{}, timeout time.Duration) error {
 	if command == nil || command.Process == nil {
-		return
+		return nil
+	}
+	select {
+	case <-done:
+		return nil
+	default:
 	}
 	_ = rex.SignalProcessTree(command, false)
 	select {
 	case <-done:
-		return
+		return nil
 	case <-time.After(timeout):
 	}
 	_ = rex.SignalProcessTree(command, true)
 	select {
 	case <-done:
+		return nil
 	case <-time.After(2 * time.Second):
+		return errors.New("previous agent runtime has not stopped")
 	}
 }
 
