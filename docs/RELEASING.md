@@ -89,6 +89,12 @@ confinement, installer lifecycle and signature checks remain. Tauri builds the U
 once, saves compiled Rust dependencies before bundling, and then signs/packages
 that executable. macOS also saves compiled dependencies before bundling.
 
+macOS includes pinned Chrome for Testing and the standalone agent-browser CLI.
+Their archives are cached, checksum-verified on reuse and extracted into each
+app bundle. The macOS bundle smoke opens and reads a page with the packaged
+browser using an isolated home and a system-only PATH, so a runner's installed
+browser tools cannot hide missing resources.
+
 The Windows WSL image cache is keyed by the Go dependency manifests and its
 build script. Reuse checks the image checksum, architecture and dependency/script fingerprint; invalid cached
 images are rebuilt. Changing the script or pinned runtime refreshes the image.

@@ -39,7 +39,7 @@ Tauri 2 shell (Rust) ──▶ rex-host (Go) ──▶ agent-runtime (Go, SQLite
 
 ## Develop
 
-You need macOS, Go 1.25+, Rust, Node 20+, pnpm, cmake (to build the bundled embedder once), [`agent-browser`](https://github.com/vercel-labs/agent-browser) for browser bots, and a model server, an API key or a ChatGPT subscription.
+You need macOS on Apple Silicon, Go 1.25+, Rust, Node 20+, pnpm, cmake (to build the bundled embedder once), and a model server, an API key or a ChatGPT subscription. Sidecar builds also fetch pinned Chrome for Testing and the standalone agent-browser CLI; desktop users need no separate browser-tool installation.
 
 ```bash
 pnpm install
@@ -82,6 +82,8 @@ pnpm tauri:build   # Rex.app and a .dmg in src-tauri/target/release/bundle/
 Merges to `main` use [semantic desktop releases](docs/RELEASING.md) to publish matching Windows x64 EXE and Apple Silicon DMG installers after both platform checks pass. Preview Windows releases are self-signed; macOS releases are ad-hoc signed.
 
 Builds run on Apple Silicon and are ad-hoc signed. They aren't notarized, so on another Mac the first launch needs System Settings → Privacy & Security → Open Anyway. To distribute Rex widely, sign it with a Developer ID and notarize it.
+
+Both desktop installers include Chrome for Testing and agent-browser. An explicitly selected or installed browser remains preferred in Standard mode; bundled Chrome is the fallback and is used by Extension mode. Browser downloads are checksum-verified and cached between builds.
 
 ## Known limits
 

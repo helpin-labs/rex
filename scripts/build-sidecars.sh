@@ -29,4 +29,5 @@ fi
 echo "agent-runtime: $(cd "$repo_root" && go list -m -f '{{if .Main}}local checkout from go.work{{else}}{{.Version}} from GitHub{{end}}' github.com/helpin-ai/agent-runtime)"
 cp "$bin_dir/rex-host-$target_triple" "$repo_root/bin/rex-host"
 "$repo_root/scripts/build-embedder.sh"
+"$repo_root/scripts/build-browser.sh"
 echo "sidecars built for $target_triple"

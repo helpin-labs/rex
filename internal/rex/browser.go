@@ -134,8 +134,7 @@ func DetectBrowsers() []BrowserApp {
 }
 
 // BrowserExecutable is the browser bots use: the chosen one if it still
-// exists, else the first installed one, else agent-browser's bundled Chrome
-// for Testing ("").
+// exists, else the first installed one, else bundled Chrome for Testing.
 func BrowserExecutable(settings Settings) string {
 	if settings.BrowserPath != "" {
 		if _, err := os.Stat(settings.BrowserPath); err == nil {
@@ -145,7 +144,7 @@ func BrowserExecutable(settings Settings) string {
 	if found := DetectBrowsers(); len(found) > 0 {
 		return found[0].Path
 	}
-	return ""
+	return bundledChrome()
 }
 
 // run executes agent-browser with the browser bots are configured to use.
@@ -553,9 +552,13 @@ func plainBrowserArgs(profile, url string) []string {
 		"--password-store=basic", "--use-mock-keychain", "--remote-debugging-pipe", hideAutomation, "--new-window", url}
 }
 
-// bundledChrome is the newest Chrome for Testing agent-browser installed,
-// which it uses when no other browser is chosen.
+// bundledChrome prefers Rex's packaged browser, then agent-browser's downloads.
 func bundledChrome() string {
+	if path := os.Getenv("REX_BROWSER_EXECUTABLE"); path != "" {
+		if info, err := os.Stat(path); err == nil && !info.IsDir() {
+			return path
+		}
+	}
 	home, _ := os.UserHomeDir()
 
 	var matches []string

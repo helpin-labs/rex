@@ -41,6 +41,10 @@ Rex never shuts down all of WSL to recover; an unavailable ownership check also
 leaves the distribution untouched. No reinstall or data deletion is needed for
 this recovery attempt.
 
+On Windows, reopening Rex brings the running window forward and reuses its
+engine. Closing the window hides it in the tray; choose Quit Rex from the tray
+menu to stop the application.
+
 ## Updates and removal
 
 Reinstalling preserves local data, credentials and the owned command environment.

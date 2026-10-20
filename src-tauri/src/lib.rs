@@ -144,7 +144,11 @@ fn stop_host(handle: &tauri::AppHandle) {
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
-    let app = tauri::Builder::default()
+    let builder = tauri::Builder::default();
+    // A reopened tray app must not start another host against the same databases.
+    #[cfg(target_os = "windows")]
+    let builder = builder.plugin(tauri_plugin_single_instance::init(|app, _, _| reveal(app)));
+    let app = builder
         .plugin(tauri_plugin_opener::init())
         .plugin(tauri_plugin_shell::init())
         .invoke_handler(tauri::generate_handler![host_connection, set_attention, notify])
@@ -177,11 +181,21 @@ pub fn run() {
                 .unwrap_or_default();
             #[cfg(target_os = "windows")]
             let browser_executable = app.path().resolve("resources/browser/chrome-win64/chrome.exe", BaseDirectory::Resource)?;
-            #[cfg(not(target_os = "windows"))]
+            #[cfg(target_os = "macos")]
+            let browser_resources = if cfg!(debug_assertions) {
+                std::path::PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("resources/browser")
+            } else {
+                app.path().resolve("resources/browser", BaseDirectory::Resource)?
+            };
+            #[cfg(target_os = "macos")]
+            let browser_executable = browser_resources.join("chrome-mac-arm64/Google Chrome for Testing.app/Contents/MacOS/Google Chrome for Testing");
+            #[cfg(not(any(target_os = "windows", target_os = "macos")))]
             let browser_executable = std::path::PathBuf::new();
             #[cfg(target_os = "windows")]
             let browser_cli = app.path().resolve("resources/browser/agent-browser.exe", BaseDirectory::Resource)?;
-            #[cfg(not(target_os = "windows"))]
+            #[cfg(target_os = "macos")]
+            let browser_cli = browser_resources.join("agent-browser");
+            #[cfg(not(any(target_os = "windows", target_os = "macos")))]
             let browser_cli = std::path::PathBuf::new();
             #[cfg(target_os = "windows")]
             let wsl_resources = app.path().resolve("resources/wsl", BaseDirectory::Resource)?;

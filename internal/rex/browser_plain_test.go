@@ -26,6 +26,7 @@ func TestPlainBrowserIsNotAutomated(t *testing.T) {
 }
 
 func TestBundledChromeIsTheNewest(t *testing.T) {
+	t.Setenv("REX_BROWSER_EXECUTABLE", "")
 	home := t.TempDir()
 	t.Setenv("HOME", home)
 	t.Setenv("USERPROFILE", home)
@@ -40,6 +41,35 @@ func TestBundledChromeIsTheNewest(t *testing.T) {
 	}
 	if got := versionOf(bundledChrome()); got != "149.0.7827.115" {
 		t.Fatalf("bundled Chrome = %s", got)
+	}
+}
+
+func TestPackagedChromeHasPriorityOverDownloads(t *testing.T) {
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+	t.Setenv("USERPROFILE", home)
+	packaged := filepath.Join(home, "Rex.app", "Chrome")
+	downloaded := filepath.Join(home, ".agent-browser", "browsers", "chrome-999.0.0", "chrome-win64", "chrome.exe")
+	for _, path := range []string{packaged, downloaded} {
+		if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.WriteFile(path, nil, 0o755); err != nil {
+			t.Fatal(err)
+		}
+	}
+	t.Setenv("REX_BROWSER_EXECUTABLE", packaged)
+	if got := bundledChrome(); got != packaged {
+		t.Fatalf("packaged Chrome ignored: %q", got)
+	}
+	for _, missing := range []string{packaged + "-missing", home} {
+		t.Setenv("REX_BROWSER_EXECUTABLE", missing)
+		if got := bundledChrome(); got != downloaded {
+			t.Fatalf("invalid packaged browser prevented fallback: %q", got)
+		}
+	}
+	if got := BrowserExecutable(Settings{BrowserPath: packaged}); got != packaged {
+		t.Fatalf("explicit browser selection ignored: %q", got)
 	}
 }
 
