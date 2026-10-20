@@ -20,7 +20,7 @@ export type Bot = {
   context_window?: number;
   capabilities: Capabilities;
   browser_backend?: "" | "standard" | "extension" | "cloud";
-  approval_mode: "ask" | "auto";
+  approval_mode: "ask" | "auto" | "allow_all";
   workspace_dir: string;
   memory_mode: "private" | "shared" | "off";
   skills: string[];

@@ -70,11 +70,11 @@ type Bot struct {
 // RoleMain marks the main bot.
 const RoleMain = "main"
 
-// Approval modes exposed to users. "ask" gates every mutating tool; "auto"
-// lets the bot act inside its granted scope without asking.
+// Approval modes control automatic gates; explicit interaction tools still pause.
 const (
-	ApprovalAsk  = "ask"
-	ApprovalAuto = "auto"
+	ApprovalAsk      = "ask"
+	ApprovalAuto     = "auto"
+	ApprovalAllowAll = "allow_all"
 )
 
 // Memory modes. "private" uses a bank only this bot can read; "shared" uses
@@ -142,15 +142,13 @@ func (b *Bot) Normalize(workspaceRoot string) error {
 	}
 	b.Model = strings.TrimSpace(b.Model)
 	switch b.ApprovalMode {
-	case ApprovalAsk, ApprovalAuto:
+	case ApprovalAsk, ApprovalAuto, ApprovalAllowAll:
 	case "":
 		b.ApprovalMode = ApprovalAsk
 	default:
 		return fmt.Errorf("unsupported approval mode %q", b.ApprovalMode)
 	}
-	// Shell access keeps risk-based approval even when commands are isolated.
 	if b.Capabilities.Shell {
-		b.ApprovalMode = ApprovalAsk
 		b.Capabilities.FilesRead = true
 	}
 	if b.Capabilities.FilesWrite {
@@ -238,13 +236,10 @@ func (b Bot) AllowedTools() []string {
 }
 
 // RuntimeApprovalMode translates the user-facing mode to the runtime's.
-// "Ask" uses the runtime's risk-based policy: reads and routine reversible
-// actions (browser clicks, screenshots, memory) run without asking, while
-// file writes, commands and external writes pause for approval unless the
-// optional TypeSafe reviewer clears a low-risk local step.
+// Ask and Auto use risk-based gates; Auto opts into Jev in executionConfig.
 func (b Bot) RuntimeApprovalMode() string {
 	// A bot setting itself up always asks before turning on tools.
-	if b.ApprovalMode == ApprovalAuto && !b.Setup {
+	if b.ApprovalMode == ApprovalAllowAll && !b.Setup {
 		return "never"
 	}
 	return "risk_based"
@@ -262,7 +257,11 @@ func (b Bot) RuntimeProvider() string {
 }
 
 func (b Bot) executionConfig() json.RawMessage {
-	config := map[string]any{"max_tool_steps": 2000}
+	review := b.ApprovalMode == ApprovalAuto && !b.Setup
+	config := map[string]any{
+		"max_tool_steps":  2000,
+		"approval_review": map[string]bool{"enabled": review, "auto_approve": review},
+	}
 	if b.ContextWindow > 0 {
 		config["native_context"] = contextPolicy(b.ContextWindow, 0)
 	}
@@ -335,7 +334,7 @@ func (b Bot) SystemPrompt(skills []Skill) string {
 		if runtime.GOOS == "windows" {
 			rules = append(rules, "Commands and Python run in Linux through WSL2. Use relative paths in commands. Native Windows paths are for file tools; Windows executables are unavailable inside commands.")
 		}
-		rules = append(rules, "Shell commands run in a workspace sandbox that only allows writing inside your workspace folder. Commands may need the user's approval; prefer file tools when they are enough.",
+		rules = append(rules, "Shell commands run in a workspace sandbox that only allows writing inside your workspace folder. Call enabled tools directly and let the runtime handle command approval; do not ask for command permission through request_user_input. Prefer file tools when they are enough.",
 			"Call run_command with program and args, for example program \"python3\" with args [\"scripts/report.py\"]. Never pass one combined command string: routine commands can only be approved automatically in the program-and-args form.")
 	}
 	if b.Capabilities.Web {

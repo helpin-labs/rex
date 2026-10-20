@@ -191,6 +191,9 @@ ALTER TABLE instruction_proposals ADD COLUMN catalog_id TEXT NOT NULL DEFAULT ''
 	CREATE TRIGGER task_history_deleted AFTER DELETE ON task_history BEGIN DELETE FROM task_history_fts WHERE rowid=old.rowid; END;
 	CREATE TRIGGER task_history_inserted AFTER INSERT ON task_history BEGIN INSERT INTO task_history_fts(rowid,id,text) VALUES(new.rowid,new.id,new.text); END;
 	CREATE TRIGGER task_history_updated AFTER UPDATE OF text,id ON task_history BEGIN DELETE FROM task_history_fts WHERE rowid=old.rowid; INSERT INTO task_history_fts(rowid,id,text) VALUES(new.rowid,new.id,new.text); END;`,
+	`UPDATE bots SET approval_mode='allow_all' WHERE approval_mode='auto';
+    UPDATE bots SET approval_mode='auto' WHERE approval_mode='ask' AND setup=0
+        AND COALESCE((SELECT json_extract(value,'$.typesafe_auto_approve') FROM settings WHERE key='settings.v1'),0)=1;`,
 }
 
 func (s *Store) migrate(ctx context.Context) error {

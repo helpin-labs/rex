@@ -290,11 +290,10 @@ export function SettingsView({ status, initialTab, onSaved }: { status: Status |
         <div className="card">
           <div className="provider-head"><TileMark seed="review" icon={<ShieldCheck size={18} />} size={36} /><div className="grow"><strong>Command review (TypeSafe)</strong><small className="muted">A second opinion on file edits and commands, so routine local steps don't need your approval.</small></div>
             {keyChip(!!settings.typesafe?.configured)}</div>
-          <p className="muted small">Bots set to “Ask for risky actions” never ask about reading, browsing, screenshots or memory. File edits and commands ask, unless TypeSafe's jev model reviews them and finds a routine local step. Reviews send the proposed command and recent conversation context to TypeSafe. Deletions, pushes, installs and network commands always ask.</p>
+          <p className="muted small">Choose Auto (Jev) in each bot's approval settings to review commands and file edits. Reviews send the proposed operation and recent conversation context to TypeSafe. Routine local steps can be cleared; other protected actions ask. Without a key, or if review fails, the bot uses normal approval gates. Ask and Allow all do not use Jev.</p>
           <Field label="TypeSafe API key" hint={settings.typesafe?.configured ? <span className="row">Key stored in your system credential store. <button type="button" className="link-button" onClick={() => update({ typesafe: { ...settings.typesafe, clear_key: true } })}>Remove</button></span> : "Stored in your system credential store"}>
             <input type="password" placeholder={settings.typesafe?.configured ? "••••••••" : "ts_…"} value={settings.typesafe?.api_key || ""} onChange={event => update({ typesafe: { ...(settings.typesafe || { base_url: "", configured: false }), api_key: event.target.value, clear_key: false } })} />
           </Field>
-          <Toggle label="Let TypeSafe approve routine steps" description="Without this, TypeSafe only adds extra checks; you still approve every edit and command" checked={settings.typesafe_auto_approve} disabled={!settings.typesafe?.configured && !settings.typesafe?.api_key} onChange={typesafe_auto_approve => update({ typesafe_auto_approve })} />
         </div>
       </>}
 

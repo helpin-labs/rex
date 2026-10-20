@@ -102,8 +102,7 @@ export function BotEditor({ initial, settings, status, onClose, onSaved, onDelet
     if (key === "files_write" && value) capabilities.files_read = true;
     if (key === "files_read" && !value) { capabilities.files_write = false; capabilities.shell = false; }
     if (key === "shell" && value) capabilities.files_read = true;
-    // Shell commands always ask first.
-    return { ...current, capabilities, approval_mode: capabilities.shell ? "ask" : current.approval_mode };
+    return { ...current, capabilities };
   }); };
   const toggleList = (key: "skills" | "mcp_connections", id: string) => update({ [key]: bot[key].includes(id) ? bot[key].filter(item => item !== id) : [...bot[key], id] } as Partial<Bot>);
 
@@ -127,7 +126,7 @@ export function BotEditor({ initial, settings, status, onClose, onSaved, onDelet
       disabled: settings ? !settings.browser_enabled : false, note: settings && !settings.browser_enabled ? "Browsers are off in Settings → Tools." : undefined },
     { key: "files_read" as const, icon: <FileText size={17} />, label: "Read files", description: "Files in its own workspace folder only" },
     { key: "files_write" as const, icon: <PenLine size={17} />, label: "Create and edit files", description: "Inside its workspace folder", disabled: !writeTools && !bot.capabilities.files_write, note: writeTools ? undefined : "Needs the command sandbox, which is not active in the bot engine." },
-    { key: "shell" as const, icon: <SquareTerminal size={17} />, label: "Run shell commands", description: "In a command sandbox limited to its folder. Asks first unless TypeSafe clears it.", disabled: !writeTools && !bot.capabilities.shell },
+    { key: "shell" as const, icon: <SquareTerminal size={17} />, label: "Run shell commands", description: "In a command sandbox limited to its folder. Uses the approval mode below.", disabled: !writeTools && !bot.capabilities.shell },
   ];
   const on = abilities.filter(item => bot.capabilities[item.key]).length;
   const setupExtension = async () => {
@@ -207,10 +206,13 @@ export function BotEditor({ initial, settings, status, onClose, onSaved, onDelet
           </div>}
           <div className="card">
             <h3 className="section-title">Approvals</h3>
-            <div className="choice-row" role="radiogroup" aria-label="Approvals">
-              <ChoiceCard icon={<UserRound size={16} />} title="Ask for risky actions" description="Reading, browsing and memory never ask. File edits, commands and app writes ask first." selected={bot.approval_mode === "ask"} onClick={() => update({ approval_mode: "ask" })} />
-              <ChoiceCard icon={<Check size={16} />} title="Act within its scope" description={bot.capabilities.shell ? "Not available while it can run shell commands: those always ask." : "Acts without asking, within the abilities above."} selected={bot.approval_mode === "auto"} disabled={bot.capabilities.shell} onClick={() => update({ approval_mode: "auto" })} />
+            <div className="choice-row three" role="radiogroup" aria-label="Approvals">
+              <ChoiceCard icon={<UserRound size={16} />} title="Ask" description="Protected commands, file edits and app writes ask first. Routine actions run directly." selected={bot.approval_mode === "ask"} onClick={() => update({ approval_mode: "ask" })} />
+              <ChoiceCard icon={<Check size={16} />} title="Auto (Jev)" description="Jev reviews commands and edits, clearing routine local steps. Other protected actions ask." selected={bot.approval_mode === "auto"} onClick={() => update({ approval_mode: "auto" })} />
+              <ChoiceCard icon={<CircleOff size={16} />} title="Allow all" description="Enabled tools run without automatic approval, including commands and app writes. The sandbox still applies." selected={bot.approval_mode === "allow_all"} onClick={() => update({ approval_mode: "allow_all" })} />
             </div>
+            {bot.approval_mode === "auto" && !settings?.typesafe?.configured && <p className="field-hint">Add a TypeSafe key in Settings → Tools to use Jev. Until then, protected actions ask.</p>}
+            <p className="field-hint">Explicit approval requests and questions still pause in every mode. Bots setting themselves up always ask.</p>
           </div>
           {bot.capabilities.files_read && <div className="card">
             <Field label="Workspace folder" hint="Its file tools only reach this folder. It is not an operating-system sandbox for everything else."><input value={bot.workspace_dir} onChange={event => update({ workspace_dir: event.target.value })} placeholder={`${status?.workspace_root || "~/Rex"}/${bot.name ? bot.name.toLowerCase().replace(/[^a-z0-9]+/g, "-") : "bot"}`} /></Field>
