@@ -10,13 +10,18 @@ import time
 import urllib.request
 
 contents = Path(sys.argv[1]).resolve() / 'Contents'
-with tempfile.TemporaryDirectory(prefix='rex-macos-bundle-') as directory:
+with tempfile.TemporaryDirectory(prefix='rex-macos-bundle-', dir='/tmp') as directory:
     root = Path(directory)
     data = root / 'data'
     binaries = contents / 'MacOS'
+    browser_resources = contents / 'Resources/resources/browser'
+    browser_cli = browser_resources / 'agent-browser'
+    chrome = browser_resources / 'chrome-mac-arm64/Google Chrome for Testing.app/Contents/MacOS/Google Chrome for Testing'
+    subprocess.run(['codesign', '--verify', '--deep', '--strict', str(chrome.parents[2])], check=True)
     env = dict(os.environ, REX_DATA_DIR=str(data), REX_WORKSPACE_ROOT=str(root / 'workspace'),
                REX_SECRETS='memory', REX_HOST_ADDR='127.0.0.1:0',
                AGENT_RUNTIME_BINARY=str(binaries / 'agent-runtime'),
+               REX_AGENT_BROWSER_EXECUTABLE=str(browser_cli), REX_BROWSER_EXECUTABLE=str(chrome),
                REX_EMBEDDER_BINARY=str(binaries / 'llama-server'),
                REX_EMBEDDING_MODEL=str(contents / 'Resources/resources/models/bekko-embedding-v1-a8m-Q8_0.gguf'))
     with (root / 'host.log').open('w+') as log:
@@ -45,6 +50,28 @@ with tempfile.TemporaryDirectory(prefix='rex-macos-bundle-') as directory:
             for name in ('runtime.pid', 'embedder.pid'):
                 children.append(int((data / name).read_text()))
             print('Bundled macOS host, runtime and embedding model are ready.')
+            # A fresh account must browse without Homebrew, Node or downloaded browsers.
+            browser_home = root / 'browser-home'
+            browser_home.mkdir()
+            browser_env = dict(env, HOME=str(browser_home), PATH='/usr/bin:/bin:/usr/sbin:/sbin')
+            for key in list(browser_env):
+                if key.startswith('AGENT_BROWSER_'):
+                    del browser_env[key]
+            session = 'bundle-' + root.name.rsplit('-', 1)[-1]
+            def browser(*args):
+                result = subprocess.run([browser_cli, '--session', session, *args], env=browser_env,
+                                        capture_output=True, text=True, timeout=60)
+                if result.returncode:
+                    raise RuntimeError(f'Bundled browser failed: {result.stdout} {result.stderr}')
+                return result.stdout
+            try:
+                assert browser('--version').strip() == 'agent-browser 0.25.5'
+                browser('--executable-path', str(chrome), 'open',
+                        'data:text/html,<title>Rex bundled browser</title>')
+                assert 'Rex bundled browser' in browser('eval', 'document.title')
+                print('Bundled Chrome and agent-browser opened and read a page without external browser tools.')
+            finally:
+                browser('close')
         except Exception:
             log.flush()
             log.seek(0)

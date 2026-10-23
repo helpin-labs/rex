@@ -68,9 +68,26 @@ jobs:
             src-tauri/resources/models/
             .cache/llama-server-b11430-aarch64-apple-darwin
           key: macos-arm64-embedder-b11430-${{ hashFiles('scripts/build-embedder.sh') }}
-      - name: Build native sidecars and embedding model
+      - name: Restore pinned browser downloads
+        if: github.event_name != 'pull_request'
+        id: browser-cache
+        uses: actions/cache/restore@caa296126883cff596d87d8935842f9db880ef25 # v5
+        with:
+          path: |
+            .cache/chrome-149.0.7827.115-mac-arm64.zip
+            .cache/agent-browser-0.25.5.tgz
+          key: macos-arm64-browser-${{ hashFiles('scripts/build-browser.sh') }}
+      - name: Build native sidecars, browser and embedding model
         if: github.event_name != 'pull_request'
         run: ./scripts/build-sidecars.sh
+      - name: Cache verified browser downloads
+        if: github.event_name != 'pull_request' && steps.browser-cache.outputs.cache-hit != 'true'
+        uses: actions/cache/save@caa296126883cff596d87d8935842f9db880ef25 # v5
+        with:
+          path: |
+            .cache/chrome-149.0.7827.115-mac-arm64.zip
+            .cache/agent-browser-0.25.5.tgz
+          key: macos-arm64-browser-${{ hashFiles('scripts/build-browser.sh') }}
       - name: Cache the verified embedder
         if: github.event_name != 'pull_request' && steps.embedder-cache.outputs.cache-hit != 'true'
         uses: actions/cache/save@caa296126883cff596d87d8935842f9db880ef25 # v5
