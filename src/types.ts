@@ -345,3 +345,50 @@ export type HistoryPage = { entries: HistoryEntry[]; next_cursor?: number };
 export type HistoryExcerpt = HistoryEntry & { offset: number; truncated: boolean; next_offset?: number };
 
 export type CommandSandboxStatus = { supported: boolean; state: string; message: string; busy: boolean };
+
+/** A runtime work job: one contract run over a list of items. */
+export type WorkJobCounts = { total: number; pending: number; running: number; retry_wait: number; blocked: number; completed: number; found: number; no_result: number; exceptions: number; failed: number; cancelled: number };
+export type WorkJob = {
+  id: string;
+  state: "queued" | "running" | "waiting" | "paused" | "verifying" | "completed" | "failed" | "cancelled";
+  waiting_reason?: string;
+  blocked_run_id?: string;
+  error?: string;
+  spec: { objective: string; batch_size: number; max_concurrency: number };
+  counts: WorkJobCounts;
+  usage: { input_tokens: number; output_tokens: number; cached_input_tokens: number; reserved_tokens: number };
+  active_runs: string[];
+  dataset_revision: number;
+  created_at: string;
+  updated_at: string;
+  completed_at?: string;
+};
+/** Rex's record of a job plus the engine's live view. */
+export type JobView = {
+  id: string;
+  bot_id: string;
+  conversation_id: string;
+  title: string;
+  state: string;
+  dataset_path?: string;
+  created_at: string;
+  updated_at: string;
+  job?: WorkJob;
+  /** Items workers are on right now. */
+  current: { id: string; label: string }[];
+  items_per_minute: number;
+  error?: string;
+};
+export type WorkItem = {
+  id: string;
+  state: string;
+  input: unknown;
+  attempts: number;
+  outcome?: "completed" | "no_result" | "exception";
+  result?: unknown;
+  exception?: { kind: string; detail: string };
+  run_id?: string;
+  last_error?: string;
+  updated_at: string;
+};
+export type WorkItemPage = { items: WorkItem[]; next_after?: string };

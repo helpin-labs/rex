@@ -1020,3 +1020,71 @@ textarea { resize: vertical; line-height: 1.5; }
 .operational-memory summary { cursor: pointer; margin-bottom: 8px; }
 .operational-memory input { min-width: 0; flex: 1; }
 .memory-evidence pre { white-space: pre-wrap; overflow-wrap: anywhere; font-size: 12px; max-height: 380px; overflow: auto; }
+
+/* Batch jobs: progress cards in conversations, the item browser and the Jobs page. */
+.chip.info { background: var(--accent-soft); color: var(--accent-text); }
+.chip.danger { background: var(--danger-soft); color: var(--danger); }
+.chip.muted { background: var(--surface-2); color: var(--muted); }
+.conversation-jobs { display: flex; flex-direction: column; gap: 8px; padding: 0 0 8px; }
+.conversation-jobs > .link-button { align-self: flex-start; }
+.job-card { display: flex; flex-direction: column; gap: 8px; padding: 12px 14px; border: 1px solid var(--border); border-left: 3px solid var(--accent); border-radius: 12px; background: var(--surface); }
+.job-card.warn { border-left-color: var(--warn); }
+.job-card.ok { border-left-color: var(--ok); }
+.job-card.danger { border-left-color: var(--danger); }
+.job-card.muted { border-left-color: var(--border-strong); }
+.job-card-head { display: flex; align-items: center; gap: 10px; }
+.job-card-title { display: flex; flex-direction: column; min-width: 0; flex: 1; }
+.job-card-title strong { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 13.5px; }
+.job-card-title small { font-size: 11.5px; }
+.job-icon { color: var(--accent-text); flex: 0 0 auto; }
+.job-bar { display: flex; height: 8px; overflow: hidden; border-radius: 999px; background: var(--surface-3, var(--surface-2)); }
+.job-bar.thin { height: 4px; }
+.job-bar-part { height: 100%; transition: width .6s ease; }
+.job-bar-part.found { background: var(--ok); }
+.job-bar-part.none { background: color-mix(in srgb, var(--ok) 45%, var(--surface-2)); }
+.job-bar-part.exception { background: var(--warn); }
+.job-bar-part.failed { background: var(--danger); }
+.job-bar-part.running { background: repeating-linear-gradient(45deg, var(--accent) 0 6px, color-mix(in srgb, var(--accent) 60%, transparent) 6px 12px); background-size: 17px 17px; animation: job-stripes 1s linear infinite; }
+.job-bar-part.retrying { background: color-mix(in srgb, var(--warn) 45%, var(--surface-2)); }
+@keyframes job-stripes { to { background-position: 17px 0; } }
+@media (prefers-reduced-motion: reduce) { .job-bar-part.running { animation: none; } .job-bar-part { transition: none; } }
+.job-stats { display: flex; flex-wrap: wrap; align-items: center; gap: 4px 12px; font-size: 12.5px; }
+.job-stats .stat::before { content: ""; display: inline-block; width: 7px; height: 7px; margin-right: 5px; border-radius: 50%; background: var(--border-strong); vertical-align: 1px; }
+.job-stats .stat.found::before { background: var(--ok); }
+.job-stats .stat.none::before { background: color-mix(in srgb, var(--ok) 45%, var(--surface-2)); }
+.job-stats .stat.exception::before { background: var(--warn); }
+.job-stats .stat.failed::before { background: var(--danger); }
+.job-current, .job-note { margin: 0; font-size: 12.5px; overflow: hidden; text-overflow: ellipsis; }
+.job-current { white-space: nowrap; }
+.job-actions { display: flex; flex-wrap: wrap; align-items: center; gap: 6px; }
+.job-actions .spacer { flex: 1; }
+.job-tokens { font-size: 11.5px; }
+.button.ghost { background: transparent; border-color: var(--border); color: var(--text); }
+.button.ghost:hover { background: var(--surface-2); }
+.bot-row-job { display: flex; flex-direction: column; gap: 3px; width: 100%; }
+.bot-row-job .job-bar { width: 100%; }
+.job-badge { display: inline-flex; align-items: center; gap: 4px; color: var(--accent-text); font-size: 12px; }
+.job-badge.warn { color: var(--warn); }
+.job-tabs { display: flex; flex-wrap: wrap; gap: 4px; margin-bottom: 10px; border-bottom: 1px solid var(--border); }
+.job-tab { display: inline-flex; align-items: center; gap: 6px; padding: 7px 10px; border: 0; border-bottom: 2px solid transparent; background: none; color: var(--muted); font-size: 13px; }
+.job-tab small { padding: 0 6px; border-radius: 999px; background: var(--surface-2); font-size: 11px; }
+.job-tab.active { border-bottom-color: var(--accent); color: var(--text); font-weight: 600; }
+.job-items { max-height: 60vh; overflow: auto; }
+.job-item { border-bottom: 1px solid var(--border); }
+.job-item-row { display: flex; align-items: center; gap: 10px; width: 100%; padding: 8px 4px; border: 0; background: none; color: var(--text); text-align: left; }
+.job-item-row:hover { background: var(--surface-2); }
+.job-item-name { display: flex; flex-direction: column; min-width: 0; flex: 0 1 40%; }
+.job-item-name strong { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 13px; font-weight: 550; }
+.job-item-name small { font-size: 11px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.job-item-preview { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 12.5px; }
+.job-item-detail { padding: 4px 8px 12px 28px; font-size: 12.5px; }
+.job-item-detail h4 { margin: 8px 0 4px; font-size: 11.5px; text-transform: uppercase; letter-spacing: .04em; color: var(--muted); }
+.job-item-detail pre { max-height: 260px; overflow: auto; margin: 0; padding: 8px 10px; border-radius: 8px; background: var(--surface-2); font-size: 12px; white-space: pre-wrap; word-break: break-word; }
+.job-items-empty { padding: 24px; text-align: center; }
+.jobs-page { overflow: auto; padding-bottom: 32px; }
+.jobs-section { margin: 18px 0 8px; font-size: 12px; text-transform: uppercase; letter-spacing: .05em; color: var(--muted); }
+.jobs-entry { display: flex; flex-direction: column; gap: 4px; margin-bottom: 12px; }
+.jobs-entry > .link-button { align-self: flex-end; font-size: 12px; }
+@media (max-width: 640px) { .job-item-preview { display: none; } .job-item-name { flex: 1; } }
+.side-tool-wrap { position: relative; display: inline-flex; }
+.side-tool-count { position: absolute; top: 2px; right: 1px; min-width: 15px; height: 15px; padding: 0 4px; border-radius: 999px; background: var(--accent-fill); color: white; font-size: 10px; font-weight: 700; line-height: 15px; text-align: center; pointer-events: none; }

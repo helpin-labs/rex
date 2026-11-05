@@ -340,6 +340,8 @@ func (l runtimeLaunch) start(ctx context.Context) (*exec.Cmd, <-chan error, <-ch
 		// ChatGPT runs ask Rex for a fresh token before theirs expires.
 		"memory_learning_callback":  map[string]any{"url": l.hostURL + "/runtime/memory/learning", "token_env": "REX_MODEL_CALLBACK_TOKEN"},
 		"model_credential_callback": map[string]any{"url": l.hostURL + "/runtime/model-credentials/refresh", "token_env": "REX_MODEL_CALLBACK_TOKEN"},
+		// Batch jobs: the runtime owns long item lists for bots.
+		"work_jobs": true,
 		"model_endpoints": []map[string]any{{
 			"id": endpoint.ID, "base_url": endpoint.BaseURL, "auth_mode": endpoint.AuthMode,
 			"allow_http": strings.HasPrefix(endpoint.BaseURL, "http://"),

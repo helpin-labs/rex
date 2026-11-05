@@ -1,6 +1,6 @@
 import type { ChatGPTStatus,
   CommandSandboxStatus, AttentionItem, Bot, BotLogin, InstructionProposal, Conversation, ConversationDetail, GoogleStatus, MCPConnection, MemoryOverview, MemorySource, MemoryLearning, HistoryPage, HistoryExcerpt, ModelInfo, ProviderTest,
-  Routine, RoutineRun, Run, RunEventEnvelope, Settings, Skill, Status, Turn, WorkspaceFile, CatalogSkill, SkillSource,
+  Routine, RoutineRun, Run, RunEventEnvelope, Settings, Skill, Status, Turn, WorkspaceFile, CatalogSkill, SkillSource, JobView, WorkItemPage,
 } from "./types";
 
 type Connection = { url: string; token: string };
@@ -68,6 +68,12 @@ export const api = {
     request<BotLogin>(`/api/bots/${encodeURIComponent(botId)}/logins${id ? `/${id}` : ""}`, json(id ? "PUT" : "POST", login)),
   deleteLogin: (botId: string, id: string) => request<void>(`/api/bots/${encodeURIComponent(botId)}/logins/${id}`, json("DELETE")),
   proposals: () => request<InstructionProposal[]>("/api/proposals"),
+  jobs: (botId?: string) => request<JobView[]>(`/api/jobs${botId ? `?bot_id=${encodeURIComponent(botId)}` : ""}`),
+  job: (id: string) => request<JobView>(`/api/jobs/${encodeURIComponent(id)}`),
+  jobItems: (id: string, state = "", after = "", limit = 100) =>
+    request<WorkItemPage>(`/api/jobs/${encodeURIComponent(id)}/items?state=${encodeURIComponent(state)}&after=${encodeURIComponent(after)}&limit=${limit}`),
+  jobAction: (id: string, action: "pause" | "resume" | "cancel") => request<JobView>(`/api/jobs/${encodeURIComponent(id)}/${action}`, json("POST", {})),
+  revealJobResults: (id: string) => request<void>(`/api/jobs/${encodeURIComponent(id)}/reveal`, json("POST", {})),
   lookBack: (botId: string) => request<void>(`/api/bots/${botId}/retrospective`, json("POST", {})),
   answerProposal: (id: string, action: "apply" | "discard" | "review") => request<void>(`/api/proposals/${id}`, json("POST", { action })),
   draftBot: (name: string, face: string, color: string) => request<Bot>("/api/bots/draft", json("POST", { name, face, color })),

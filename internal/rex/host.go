@@ -154,6 +154,8 @@ func (h *Host) Bootstrap(ctx context.Context) error {
 		slog.Error("could not give each bot one conversation", "error", err)
 	}
 	h.recoverTurns(ctx)
+	resetWorkJobsAvailability()
+	h.startJobWatcher()
 	return nil
 }
 
@@ -580,6 +582,9 @@ func (h *Host) runMCPServers(ctx context.Context, bot Bot) ([]RunMCPServer, erro
 	// Every bot can search the skill catalog and suggest a skill for
 	// itself; the user installs it from the suggestion.
 	servers = append(servers, h.catalogMCPServer(bot.ID, true))
+	if !bot.Setup && h.WorkJobsAvailable(ctx) {
+		servers = append(servers, h.jobsMCPServer(bot))
+	}
 	if bot.Capabilities.Browser && !bot.Setup {
 		servers = append(servers, h.loginsMCPServer(bot))
 	}
