@@ -49,7 +49,8 @@ type Host struct {
 	Browser  *BrowserControl
 	Sandbox  *CommandSandbox
 
-	runtimeReady atomic.Bool
+	runtimeReady   atomic.Bool
+	runtimeWaiting atomic.Value
 	// writeTools is true once the runtime reports that agent commands are
 	// confined with Seatbelt or verified WSL; only then are file writing and shell offered.
 	writeTools   atomic.Bool
@@ -93,7 +94,17 @@ func (h *Host) SetRuntimeReady(ready bool) {
 		h.writeTools.Store(false)
 	}
 }
-func (h *Host) RuntimeReady() bool     { return h.runtimeReady.Load() }
+func (h *Host) RuntimeReady() bool { return h.runtimeReady.Load() }
+
+// SetRuntimeWaiting records that a starting runtime waits for the previous
+// one to release the store ("" when it does not).
+func (h *Host) SetRuntimeWaiting(owner string) { h.runtimeWaiting.Store(owner) }
+
+// RuntimeWaiting returns the store owner a starting runtime waits for.
+func (h *Host) RuntimeWaiting() string {
+	owner, _ := h.runtimeWaiting.Load().(string)
+	return owner
+}
 func (h *Host) touch()                 { h.lastActivity.Store(time.Now().UnixNano()) }
 func (h *Host) IdleFor() time.Duration { return time.Since(time.Unix(0, h.lastActivity.Load())) }
 func (h *Host) RequestRuntimeRestart() {

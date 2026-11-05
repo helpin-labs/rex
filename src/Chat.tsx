@@ -517,7 +517,7 @@ export function Chat({ bot, bots, conversationId, status, pending: waiting, defa
         </div>
       </header>
       {searching && <ChatSearch query={query} onQuery={setQuery} matches={matches} current={matchIndex} onMove={moveMatch} onClose={closeSearch} container={contentRef.current} renderKey={`${shown}:${turns.length}`} />}
-      {status && !status.runtime_ready && <div className="banner">Starting the bot engine…</div>}
+      {status && !status.runtime_ready && <div className="banner">{status.runtime_waiting ? "Waiting for the previous bot engine to exit…" : "Starting the bot engine…"}</div>}
       {browserHeld && <div className="banner warning">You have control of {bot.name}'s browser. The bot waits until you hand it back.</div>}
       <div className="transcript" ref={scrollRef} onScroll={onScroll} onPointerDown={() => { clicked.current = Date.now(); }}><div className="transcript-content" ref={contentRef}>
         {detail && turns.length === 0 && <div className="chat-empty">

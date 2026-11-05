@@ -202,7 +202,7 @@ func recoverer(next http.Handler) http.Handler {
 func (h *Host) status(w http.ResponseWriter, r *http.Request) {
 	settings, _ := h.Settings.Get(r.Context())
 	writeJSON(w, http.StatusOK, map[string]any{
-		"status": "ok", "runtime_ready": h.RuntimeReady(), "app_id": AppID,
+		"status": "ok", "runtime_ready": h.RuntimeReady(), "runtime_waiting": h.RuntimeWaiting(), "app_id": AppID,
 		"data_dir": h.cfg.DataDir, "workspace_root": h.cfg.WorkspaceRoot,
 		"memory":    map[string]any{"available": h.Memory.Available(), "status": h.Memory.Status()},
 		"onboarded": settings.Onboarded, "active_runs": h.ActiveRuns(), "write_tools": h.WriteTools(),

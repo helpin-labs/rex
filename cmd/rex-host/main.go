@@ -10,6 +10,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	sdk "github.com/helpin-ai/agent-runtime-go"
 	"io"
 	"log/slog"
 	"net"
@@ -226,7 +227,7 @@ func run() error {
 			return done, err
 		},
 		stop: func() error {
-			if err := stopProcess(command, exited, 8*time.Second); err != nil {
+			if err := stopProcess(command, exited, runtimeStopGrace); err != nil {
 				return err
 			}
 			command, done, exited = nil, nil, nil
@@ -235,13 +236,14 @@ func run() error {
 		health: func(ctx context.Context) error {
 			health, err := runtimeClient.Health(ctx)
 			if err != nil {
-				return err
+				return runtimeHealthError(err)
 			}
 			if health["status"] != "ok" {
 				return fmt.Errorf("unexpected runtime health status %q", health["status"])
 			}
 			return nil
 		},
+		setWaiting: host.SetRuntimeWaiting,
 		setReady: func(ctx context.Context, ready bool) {
 			host.SetRuntimeReady(ready)
 			if !ready {
@@ -262,6 +264,24 @@ func run() error {
 	return shutdownErr
 }
 
+// runtimeStopGrace covers the runtime's own shutdown: closing bot browsers
+// and draining its HTTP server take up to 30 seconds. Killing it earlier is
+// safe (runs recover from checkpoints) but interrupts work needlessly.
+const runtimeStopGrace = 30 * time.Second
+
+// runtimeHealthError recognizes a runtime that is alive but waiting for its
+// predecessor to release the store.
+func runtimeHealthError(err error) error {
+	var status *sdk.HTTPStatusError
+	if errors.As(err, &status) && status.StatusCode == http.StatusServiceUnavailable {
+		var body map[string]string
+		if json.Unmarshal([]byte(status.Body), &body) == nil && body["status"] == "waiting_for_store_owner" {
+			return &runtimeWaitingError{owner: body["owner"]}
+		}
+	}
+	return err
+}
+
 // bestEffortWriter writes to the log file and, if still possible, stderr.
 type bestEffortWriter struct{ primary, secondary io.Writer }
 
@@ -278,7 +298,7 @@ func shutdown(server *http.Server, host *rex.Host, command *exec.Cmd, done <-cha
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()
 	_ = server.Shutdown(ctx)
-	if err := stopProcess(command, done, 8*time.Second); err != nil {
+	if err := stopProcess(command, done, runtimeStopGrace); err != nil {
 		return err
 	}
 	slog.Info("rex host stopped cleanly")

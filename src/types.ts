@@ -39,6 +39,8 @@ export type Bot = {
 export type Status = {
   status: string;
   runtime_ready: boolean;
+  /** Set while a new bot engine waits for the previous one to exit. */
+  runtime_waiting?: string;
   data_dir: string;
   workspace_root: string;
   memory: { available: boolean; status: string };
