@@ -738,7 +738,7 @@ func (h *Host) checkJobs(ctx context.Context) {
 
 func userDecision(reason string) bool {
 	switch reason {
-	case sdk.WorkJobWaitingNoProgress, sdk.WorkJobWaitingExceptions, sdk.WorkJobWaitingBudget, sdk.WorkJobWaitingWorkerAuth:
+	case sdk.WorkJobWaitingNoProgress, sdk.WorkJobWaitingExceptions, sdk.WorkJobWaitingBudget, sdk.WorkJobWaitingWorkerAuth, sdk.WorkJobWaitingUncertainEffects:
 		return true
 	}
 	return false
@@ -837,10 +837,11 @@ func (h *Host) reportJob(ctx context.Context, record JobRecord, job *sdk.WorkJob
 	default:
 		shown = fmt.Sprintf("Batch job “%s” needs a decision", record.Title)
 		reason := map[string]string{
-			sdk.WorkJobWaitingNoProgress: "several workers in a row could not complete any item",
-			sdk.WorkJobWaitingExceptions: "more items ended as exceptions than the job allows",
-			sdk.WorkJobWaitingBudget:     "it reached its token budget",
-			sdk.WorkJobWaitingWorkerAuth: "a worker needs the AI connection to be signed in again",
+			sdk.WorkJobWaitingNoProgress:       "several workers in a row could not complete any item",
+			sdk.WorkJobWaitingExceptions:       "more items ended as exceptions than the job allows",
+			sdk.WorkJobWaitingBudget:           "it reached its token budget",
+			sdk.WorkJobWaitingWorkerAuth:       "a worker needs the AI connection to be signed in again",
+			sdk.WorkJobWaitingUncertainEffects: "a worker made changes (for example sent or updated something) and stopped before finishing its items, so retrying them could repeat those changes",
 		}[job.WaitingReason]
 		model = fmt.Sprintf("Your batch job %q (%s) paused because %s. Progress: %s. Results so far are in %s. Explain this to the user with examples from get_batch_job and ask whether to continue (they can press Resume on the job card) or change the approach.", record.Title, record.ID, reason, counts, datasetPath)
 	}

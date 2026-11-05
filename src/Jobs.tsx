@@ -15,6 +15,9 @@ export function jobActive(view: JobView): boolean {
   return state === "queued" || state === "running" || state === "verifying" || state === "waiting" || state === "paused";
 }
 
+/** Waiting reasons the user clears with Continue. */
+const decisionReasons = ["no_progress", "exceptions", "budget", "uncertain_effects"];
+
 const waitingText: Record<string, string> = {
   no_progress: "Workers keep failing to finish items. Check the latest results, then resume or change the approach.",
   exceptions: "More items ended as exceptions than the job allows. Review them, then resume to accept them.",
@@ -24,6 +27,7 @@ const waitingText: Record<string, string> = {
   dependencies: "The remaining items wait for others to finish.",
   unavailable: "The bot engine cannot run this job right now.",
   retry_backoff: "Waiting to retry items whose sites did not answer.",
+  uncertain_effects: "A worker made changes and stopped before finishing. Check what it did, then continue to retry the held items.",
 };
 
 /** The job's state in a few words, and its colour. */
@@ -37,7 +41,7 @@ export function jobPhase(view: JobView): { label: string; tone: "ok" | "warn" | 
       return { label: workers > 1 ? `Running · ${workers} workers` : "Running", tone: "busy" };
     }
     case "verifying": return { label: "Checking results", tone: "busy" };
-    case "waiting": return ["worker_input", "worker_auth", "no_progress", "exceptions", "budget"].includes(job.waiting_reason || "")
+    case "waiting": return ["worker_input", "worker_auth", "no_progress", "exceptions", "budget", "uncertain_effects"].includes(job.waiting_reason || "")
       ? { label: "Needs you", tone: "warn" } : { label: "Waiting", tone: "muted" };
     case "paused": return { label: "Paused", tone: "muted" };
     case "completed": return { label: "Done", tone: "ok" };
@@ -124,9 +128,9 @@ export function JobCard({ view, bot, onChanged, showBot }: { view: JobView; bot?
       {view.dataset_path && <button type="button" className="button small ghost" onClick={() => void api.revealJobResults(view.id).catch(caught => setError(errorMessage(caught)))}><FolderOpen size={13} />Results</button>}
       <span className="spacer" />
       {job && <span className="muted job-tokens" title="Reported model tokens">{number.format(job.usage.input_tokens + job.usage.output_tokens)} tokens</span>}
-      {active && job?.state !== "paused" && !(job?.state === "waiting" && ["no_progress", "exceptions", "budget"].includes(job.waiting_reason || "")) &&
+      {active && job?.state !== "paused" && !(job?.state === "waiting" && decisionReasons.includes(job.waiting_reason || "")) &&
         <button type="button" className="button small ghost" disabled={!!busy} onClick={() => void act("pause")}><Pause size={13} />Pause</button>}
-      {(job?.state === "paused" || (job?.state === "waiting" && ["no_progress", "exceptions", "budget"].includes(job.waiting_reason || ""))) &&
+      {(job?.state === "paused" || (job?.state === "waiting" && decisionReasons.includes(job.waiting_reason || ""))) &&
         <button type="button" className="button small primary" disabled={!!busy} onClick={() => void act("resume")}><Play size={13} />{job.state === "paused" ? "Resume" : "Continue"}</button>}
       {active && <button type="button" className="button small ghost danger-text" disabled={!!busy} onClick={() => void act("cancel")}><Square size={12} />Cancel</button>}
     </footer>
