@@ -268,6 +268,29 @@ type startJobInput struct {
 	Workers                 int                 `json:"workers,omitempty"`
 }
 
+// jobIdempotencyKey binds a job to its starting request and everything it
+// asked for. Without a request identity every start is a new job.
+func jobIdempotencyKey(botID, requestKey string, input startJobInput, items []sdk.WorkItemInput) string {
+	if requestKey == "" {
+		requestKey = "unidentified-" + randomHex(16)
+	}
+	digest := sha256.New()
+	_ = json.NewEncoder(digest).Encode([]any{botID, requestKey, input, items})
+	return "rex-" + hex.EncodeToString(digest.Sum(nil))[:32]
+}
+
+// jobRequestKey identifies a start_batch_job call from the runtime's
+// tools/call metadata: the calling run and the model's tool call id, which
+// a retried call keeps and a new call does not.
+func jobRequestKey(meta protocol.Meta) string {
+	runID, _ := meta["agent_runtime/run_id"].(string)
+	callID, _ := meta["agent_runtime/tool_call_id"].(string)
+	if strings.TrimSpace(callID) == "" {
+		return ""
+	}
+	return runID + "\x00" + callID
+}
+
 func (h *Host) jobsMCP() http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		botID := strings.TrimPrefix(r.URL.Path, "/mcp/jobs/")
@@ -306,7 +329,7 @@ func (h *Host) jobsMCP() http.Handler {
 			if err != nil {
 				return toolError(err), nil
 			}
-			view, err := h.StartJob(ctx, *bot, input)
+			view, err := h.StartJob(ctx, *bot, input, jobRequestKey(request.Params.Meta))
 			if err != nil {
 				return toolError(err), nil
 			}
@@ -366,7 +389,9 @@ func (h *Host) botJob(ctx context.Context, botID, jobID string) (*JobRecord, err
 // StartJob creates a runtime work job whose workers are runs of bot, with
 // the same model, tools and logins as the bot's own turns, minus the job and
 // delegation tools: a worker processes items, it does not start jobs.
-func (h *Host) StartJob(ctx context.Context, bot Bot, input startJobInput) (*JobView, error) {
+// requestKey identifies the request that starts a job: the same request
+// retried maps to the same job, a deliberate rerun to a new one.
+func (h *Host) StartJob(ctx context.Context, bot Bot, input startJobInput, requestKey string) (*JobView, error) {
 	if !h.WorkJobsAvailable(ctx) {
 		return nil, errors.New("the bot engine does not support batch jobs yet")
 	}
@@ -408,10 +433,12 @@ func (h *Host) StartJob(ctx context.Context, bot Bot, input startJobInput) (*Job
 		ExceptionKinds: input.ExceptionKinds, RetryableExceptionKinds: input.RetryableExceptionKinds, BatchSize: input.BatchSize,
 		MaxConcurrency: workers, SerializeBrowser: true,
 	}
-	digest := sha256.New()
-	_ = json.NewEncoder(digest).Encode([]any{bot.ID, input.Title, input.Objective, items})
+	// The key binds the job to the starting request and everything it
+	// asked for; without a request identity every start is a new job, so a
+	// rerun never returns an earlier job's results.
+	idempotencyKey := jobIdempotencyKey(bot.ID, requestKey, input, items)
 	job, err := h.Runtime.CreateWorkJob(ctx, sdk.CreateWorkJobRequest{
-		IdempotencyKey: "rex-" + hex.EncodeToString(digest.Sum(nil))[:32], Spec: spec, Items: items,
+		IdempotencyKey: idempotencyKey, Spec: spec, Items: items,
 		Worker: sdk.WorkJobWorker{
 			AgentID: bot.ID, Target: sdk.TargetRef{Type: "conversation", ID: conversation.ID},
 			Model: model, ModelCredential: credential, MCPServers: workerServers, ExternalActorID: LocalActorID,

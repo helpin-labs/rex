@@ -4,6 +4,8 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	sdk "github.com/helpin-ai/agent-runtime-go"
+	protocol "github.com/modelcontextprotocol/go-sdk/mcp"
 	"net/http"
 	"net/http/httptest"
 	"os"
@@ -216,5 +218,32 @@ func TestFailedJobDeliveryIsRetried(t *testing.T) {
 	}
 	if _, ok := host.jobRetries.Load("workjob_1"); !ok {
 		t.Fatal("failed report not scheduled for retry")
+	}
+}
+
+// A retried start returns the same job; a deliberate rerun, changed
+// instructions or a start without a request identity make a new one.
+func TestJobIdempotencyFollowsTheStartingRequest(t *testing.T) {
+	input := startJobInput{Title: "Schools", Objective: "Find forums", Instructions: "Check the school site."}
+	items := []sdk.WorkItemInput{{ID: "a"}, {ID: "b"}}
+	call := jobRequestKey(protocol.Meta{"agent_runtime/run_id": "run-1", "agent_runtime/tool_call_id": "call-1"})
+	if call == "" {
+		t.Fatal("request identity not read from _meta")
+	}
+	first := jobIdempotencyKey("bot", call, input, items)
+	if again := jobIdempotencyKey("bot", call, input, items); again != first {
+		t.Fatal("a retried start must return the same job")
+	}
+	rerun := jobRequestKey(protocol.Meta{"agent_runtime/run_id": "run-1", "agent_runtime/tool_call_id": "call-2"})
+	if jobIdempotencyKey("bot", rerun, input, items) == first {
+		t.Fatal("a deliberate rerun returned the earlier job")
+	}
+	changed := input
+	changed.Instructions = "Check the school site and its social pages."
+	if jobIdempotencyKey("bot", call, changed, items) == first {
+		t.Fatal("changed instructions returned the earlier job")
+	}
+	if jobRequestKey(protocol.Meta{}) != "" || jobIdempotencyKey("bot", "", input, items) == jobIdempotencyKey("bot", "", input, items) {
+		t.Fatal("starts without a request identity must never match")
 	}
 }
