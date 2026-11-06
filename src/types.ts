@@ -379,6 +379,8 @@ export type JobView = {
   /** Running workers: their batch and latest steps, newest first. */
   workers?: JobWorker[];
   items_per_minute: number;
+  /** A limit the bot's browser mode puts on workers. */
+  browser_note?: string;
   error?: string;
 };
 export type JobWorker = {

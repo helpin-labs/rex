@@ -65,7 +65,9 @@ type JobView struct {
 	Workers []JobWorker `json:"workers"`
 	// ItemsPerMinute is the recent throughput; zero until measurable.
 	ItemsPerMinute float64 `json:"items_per_minute"`
-	Error          string  `json:"error,omitempty"`
+	// BrowserNote explains a limit the bot's browser mode puts on workers.
+	BrowserNote string `json:"browser_note,omitempty"`
+	Error       string `json:"error,omitempty"`
 }
 
 // JobWorker is one running worker: its batch, how far it got and what it
@@ -581,8 +583,23 @@ func (h *Host) jobView(ctx context.Context, record JobRecord, detail bool) JobVi
 		}
 	}
 	view.Workers = h.jobWorkers(ctx, record.ID, labels)
+	view.BrowserNote = h.jobBrowserNote(ctx, record.BotID)
 	view.ItemsPerMinute = h.jobThroughput(ctx, record.ID)
 	return view
+}
+
+// jobBrowserNote says why a bot's browser work runs one worker at a time:
+// the standard local browser is one Chrome per bot profile.
+func (h *Host) jobBrowserNote(ctx context.Context, botID string) string {
+	bot, err := h.Store.GetBot(ctx, botID)
+	if err != nil || bot == nil || !bot.Capabilities.Browser {
+		return ""
+	}
+	settings, _ := h.Settings.Get(ctx)
+	if bot.browserMode(settings) != "standard" {
+		return ""
+	}
+	return "Standard browser: browser work runs one worker at a time. Extension mode gives each worker its own tab."
 }
 
 // jobWorkers describes the batches still running and each worker's latest

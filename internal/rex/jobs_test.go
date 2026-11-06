@@ -1,7 +1,9 @@
 package rex
 
 import (
+	"context"
 	"encoding/json"
+	"fmt"
 	"os"
 	"path/filepath"
 	"strings"
@@ -88,5 +90,24 @@ func TestResultColumnsSpreadsFields(t *testing.T) {
 	columns, cells = resultColumns([]json.RawMessage{json.RawMessage(`{"a":1}`), json.RawMessage(`"plain"`)})
 	if len(columns) != 1 || columns[0] != "result" || cells[1]["result"] != `"plain"` {
 		t.Fatalf("mixed results = %v %v", columns, cells)
+	}
+}
+
+func TestJobBrowserNoteForStandardBrowser(t *testing.T) {
+	store := openTestStore(t)
+	host := &Host{Store: store, Settings: NewSettingsManager(store, &MemorySecrets{})}
+	ctx := context.Background()
+	for _, tc := range []struct {
+		backend string
+		browser bool
+		want    bool
+	}{{"standard", true, true}, {"extension", true, false}, {"standard", false, false}} {
+		bot := Bot{ID: "bot-" + tc.backend + fmt.Sprint(tc.browser), Name: "Bot", BrowserBackend: tc.backend, Capabilities: Capabilities{Browser: tc.browser}}
+		if err := host.Store.SaveBot(ctx, &bot); err != nil {
+			t.Fatal(err)
+		}
+		if got := host.jobBrowserNote(ctx, bot.ID) != ""; got != tc.want {
+			t.Errorf("%s browser=%v: note shown = %v, want %v", tc.backend, tc.browser, got, tc.want)
+		}
 	}
 }

@@ -121,6 +121,7 @@ export function JobCard({ view, bot, onChanged, showBot }: { view: JobView; bot?
     {(view.workers?.length ?? 0) > 0 && job?.state === "running" ? <JobWorkers workers={view.workers!} /> : current.length > 0 && job?.state === "running" && <p className="job-current">
       <span className="muted">Working on</span> {current.slice(0, 3).map(item => item.label).join(", ")}{current.length > 3 ? ` and ${current.length - 3} more` : ""}
     </p>}
+    {view.browser_note && active && <p className="job-note muted">{view.browser_note}</p>}
     {job?.state === "waiting" && job.waiting_reason && <p className="job-note">{waitingText[job.waiting_reason] || "Waiting."}</p>}
     {job?.error && <p className="job-note danger-text">{job.error}</p>}
     {error && <p className="job-note danger-text">{error}</p>}
