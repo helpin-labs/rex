@@ -794,21 +794,98 @@ func (h *Host) saveJobResults(ctx context.Context, record JobRecord, job *sdk.Wo
 	if err := os.WriteFile(filepath.Join(bot.WorkspaceDir, rel+".json"), raw, 0o644); err != nil {
 		return "", err
 	}
+	results := make([]json.RawMessage, len(rows))
+	for i, r := range rows {
+		results[i] = r.Result
+	}
+	columns, cells := resultColumns(results)
 	var csvBuf bytes.Buffer
 	writer := csv.NewWriter(&csvBuf)
-	_ = writer.Write([]string{"id", "state", "outcome", "result", "exception_kind", "exception_detail", "error"})
-	for _, r := range rows {
+	_ = writer.Write(append(append([]string{"id", "state", "outcome"}, columns...), "exception_kind", "exception_detail", "error"))
+	for i, r := range rows {
 		kind, detail := "", ""
 		if r.Exception != nil {
 			kind, detail = r.Exception.Kind, r.Exception.Detail
 		}
-		_ = writer.Write([]string{r.ID, r.State, r.Outcome, string(r.Result), kind, detail, r.Error})
+		record := []string{r.ID, r.State, r.Outcome}
+		for _, column := range columns {
+			record = append(record, cells[i][column])
+		}
+		_ = writer.Write(append(record, kind, detail, r.Error))
 	}
 	writer.Flush()
 	if err := os.WriteFile(filepath.Join(bot.WorkspaceDir, rel+".csv"), csvBuf.Bytes(), 0o644); err != nil {
 		return "", err
 	}
 	return rel + ".json", nil
+}
+
+// resultColumns spreads object results over one CSV column per field, in
+// the order fields first appear. Lists of plain values are joined with
+// "; "; anything nested stays JSON. Results that are not all objects keep
+// a single "result" column.
+func resultColumns(results []json.RawMessage) ([]string, []map[string]string) {
+	cells := make([]map[string]string, len(results))
+	var columns []string
+	seen := map[string]bool{}
+	for i, raw := range results {
+		cells[i] = map[string]string{}
+		if len(raw) == 0 {
+			continue
+		}
+		decoder := json.NewDecoder(bytes.NewReader(raw))
+		if token, err := decoder.Token(); err != nil || token != json.Delim('{') {
+			return []string{"result"}, wholeResults(results)
+		}
+		for decoder.More() {
+			token, err := decoder.Token()
+			if err != nil {
+				return []string{"result"}, wholeResults(results)
+			}
+			key, _ := token.(string)
+			var value json.RawMessage
+			if err := decoder.Decode(&value); err != nil {
+				return []string{"result"}, wholeResults(results)
+			}
+			if !seen[key] {
+				seen[key] = true
+				columns = append(columns, key)
+			}
+			cells[i][key] = cellText(value)
+		}
+	}
+	return columns, cells
+}
+
+func wholeResults(results []json.RawMessage) []map[string]string {
+	cells := make([]map[string]string, len(results))
+	for i, raw := range results {
+		cells[i] = map[string]string{"result": string(raw)}
+	}
+	return cells
+}
+
+func cellText(value json.RawMessage) string {
+	var text string
+	if json.Unmarshal(value, &text) == nil {
+		return text
+	}
+	var list []any
+	if json.Unmarshal(value, &list) == nil {
+		parts := make([]string, 0, len(list))
+		for _, entry := range list {
+			switch entry.(type) {
+			case map[string]any, []any:
+				return string(value)
+			}
+			parts = append(parts, fmt.Sprint(entry))
+		}
+		return strings.Join(parts, "; ")
+	}
+	if string(value) == "null" {
+		return ""
+	}
+	return string(value)
 }
 
 func defaultString(value, fallback string) string {

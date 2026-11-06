@@ -69,3 +69,24 @@ func TestItemLabel(t *testing.T) {
 		}
 	}
 }
+
+func TestResultColumnsSpreadsFields(t *testing.T) {
+	columns, cells := resultColumns([]json.RawMessage{
+		json.RawMessage(`{"language":"Go","year":2009,"creators":["Griesemer","Pike","Thompson"],"meta":{"a":1}}`),
+		nil,
+		json.RawMessage(`{"language":"Zig","notes":null,"extra":true}`),
+	})
+	if got := strings.Join(columns, ","); got != "language,year,creators,meta,notes,extra" {
+		t.Fatalf("columns = %s", got)
+	}
+	if cells[0]["creators"] != "Griesemer; Pike; Thompson" || cells[0]["year"] != "2009" || cells[0]["meta"] != `{"a":1}` {
+		t.Fatalf("row 0 = %v", cells[0])
+	}
+	if len(cells[1]) != 0 || cells[2]["notes"] != "" || cells[2]["extra"] != "true" {
+		t.Fatalf("rows = %v", cells)
+	}
+	columns, cells = resultColumns([]json.RawMessage{json.RawMessage(`{"a":1}`), json.RawMessage(`"plain"`)})
+	if len(columns) != 1 || columns[0] != "result" || cells[1]["result"] != `"plain"` {
+		t.Fatalf("mixed results = %v %v", columns, cells)
+	}
+}
