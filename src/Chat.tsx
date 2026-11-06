@@ -24,7 +24,7 @@ function intro(instructions: string): string {
   return sentence > 80 ? cut.slice(0, sentence + 1) : `${cut.slice(0, cut.lastIndexOf(" "))}…`;
 }
 
-function ApprovalCard({ interaction, onRespond }: { interaction: Interaction; onRespond: (intent: string, content?: string) => Promise<void> }) {
+export function ApprovalCard({ interaction, onRespond }: { interaction: Interaction; onRespond: (intent: string, content?: string) => Promise<void> }) {
   const [busy, setBusy] = useState(false);
   const payload = interaction.request_payload || {};
   const toolName = String(payload.tool_name || "");
@@ -46,7 +46,7 @@ type Question = { question?: string; header?: string; options?: { label?: string
 
 // QuestionCard shows the bot's question with lettered options and a field
 // for the user's own answer.
-function QuestionCard({ interaction, onAnswer }: { interaction: Interaction; onAnswer: (text: string) => void }) {
+export function QuestionCard({ interaction, onAnswer }: { interaction: Interaction; onAnswer: (text: string) => void }) {
   const questions = (interaction.request_payload?.questions as Question[] | undefined) || [];
   const [own, setOwn] = useState("");
   const submitOwn = () => { if (own.trim()) { onAnswer(own.trim()); setOwn(""); } };

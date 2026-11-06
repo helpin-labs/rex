@@ -65,6 +65,9 @@ type JobView struct {
 	Workers []JobWorker `json:"workers"`
 	// ItemsPerMinute is the recent throughput; zero until measurable.
 	ItemsPerMinute float64 `json:"items_per_minute"`
+	// Pending lists questions and approvals workers are waiting on; each
+	// is answered on the worker's own run.
+	Pending []JobInteraction `json:"pending"`
 	// BrowserNote explains a limit the bot's browser mode puts on workers.
 	BrowserNote string `json:"browser_note,omitempty"`
 	Error       string `json:"error,omitempty"`
@@ -89,6 +92,12 @@ type JobWorkerStep struct {
 }
 
 const jobWorkerSteps = 6
+
+// JobInteraction is a worker's pending question, approval or sign-in.
+type JobInteraction struct {
+	RunID       string      `json:"run_id"`
+	Interaction Interaction `json:"interaction"`
+}
 
 // JobItemRef names an item for people: its id and a readable label.
 type JobItemRef struct {
@@ -559,7 +568,7 @@ func pathInWorkspace(workspace, rel string) (string, error) {
 // jobView joins Rex's record with the runtime's live job. With detail it
 // also reports which items workers are on and the recent throughput.
 func (h *Host) jobView(ctx context.Context, record JobRecord, detail bool) JobView {
-	view := JobView{JobRecord: record, Current: []JobItemRef{}, Workers: []JobWorker{}}
+	view := JobView{JobRecord: record, Current: []JobItemRef{}, Workers: []JobWorker{}, Pending: []JobInteraction{}}
 	job, err := h.Runtime.GetWorkJob(ctx, record.ID)
 	if err != nil {
 		view.Error = "the bot engine is not reachable"
@@ -569,6 +578,7 @@ func (h *Host) jobView(ctx context.Context, record JobRecord, detail bool) JobVi
 		return view
 	}
 	view.Job, view.State = job, job.State
+	view.Pending = h.jobPending(ctx, job)
 	if !detail {
 		return view
 	}
@@ -586,6 +596,23 @@ func (h *Host) jobView(ctx context.Context, record JobRecord, detail bool) JobVi
 	view.BrowserNote = h.jobBrowserNote(ctx, record.BotID)
 	view.ItemsPerMinute = h.jobThroughput(ctx, record.ID)
 	return view
+}
+
+// jobPending collects what the job's workers are waiting on from the user.
+func (h *Host) jobPending(ctx context.Context, job *sdk.WorkJob) []JobInteraction {
+	pending := []JobInteraction{}
+	for _, runID := range job.ActiveRuns {
+		interactions, err := h.Runtime.ListInteractions(ctx, runID)
+		if err != nil {
+			continue
+		}
+		for _, interaction := range interactions {
+			if interaction.Status == "pending" {
+				pending = append(pending, JobInteraction{RunID: runID, Interaction: interaction})
+			}
+		}
+	}
+	return pending
 }
 
 // jobBrowserNote says why a bot's browser work runs one worker at a time:

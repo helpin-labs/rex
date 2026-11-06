@@ -2,7 +2,8 @@ import { useCallback, useEffect, useState } from "react";
 import { ChevronDown, ChevronRight, FolderOpen, ListChecks, LoaderCircle, Pause, Play, Square } from "lucide-react";
 import { api } from "./api";
 import { isControlTool, stepLabel } from "./steps";
-import type { Bot, JobView, JobWorker, RunToolCall, WorkItem } from "./types";
+import { ApprovalCard, QuestionCard } from "./Chat";
+import type { Bot, Interaction, JobView, JobWorker, RunToolCall, WorkItem } from "./types";
 import { Avatar, Empty, Modal, PageHeader, errorMessage, relativeTime } from "./ui";
 
 // A batch job runs one task over a long list in the bot engine. These views
@@ -23,7 +24,7 @@ const waitingText: Record<string, string> = {
   no_progress: "Workers keep failing to finish items. Check the latest results, then resume or change the approach.",
   exceptions: "More items ended as exceptions than the job allows. Review them, then resume to accept them.",
   budget: "The job reached its token budget.",
-  worker_input: "A worker is waiting for your answer in the bot's conversation.",
+  worker_input: "Workers are waiting for your answer below.",
   worker_auth: "A worker needs the AI connection to be signed in again.",
   dependencies: "The remaining items wait for others to finish.",
   unavailable: "The bot engine cannot run this job right now.",
@@ -121,6 +122,7 @@ export function JobCard({ view, bot, onChanged, showBot }: { view: JobView; bot?
     {(view.workers?.length ?? 0) > 0 && job?.state === "running" ? <JobWorkers workers={view.workers!} /> : current.length > 0 && job?.state === "running" && <p className="job-current">
       <span className="muted">Working on</span> {current.slice(0, 3).map(item => item.label).join(", ")}{current.length > 3 ? ` and ${current.length - 3} more` : ""}
     </p>}
+    {(view.pending?.length ?? 0) > 0 && <JobPending view={view} onChanged={onChanged} />}
     {view.browser_note && active && <p className="job-note muted">{view.browser_note}</p>}
     {job?.state === "waiting" && job.waiting_reason && <p className="job-note">{waitingText[job.waiting_reason] || "Waiting."}</p>}
     {job?.error && <p className="job-note danger-text">{job.error}</p>}
@@ -138,6 +140,28 @@ export function JobCard({ view, bot, onChanged, showBot }: { view: JobView; bot?
     </footer>
     {itemsOpen && <JobItemsModal view={view} onClose={() => setItemsOpen(false)} />}
   </section>;
+}
+
+/** Questions and approvals from workers, answered on each worker's run. */
+function JobPending({ view, onChanged }: { view: JobView; onChanged: (view: JobView) => void }) {
+  const [error, setError] = useState("");
+  const answer = async (runId: string, interaction: Interaction, intent: string, content: string) => {
+    setError("");
+    try {
+      await api.respond(runId, interaction.id, intent, content);
+      onChanged(await api.job(view.id));
+    } catch (caught) { setError(errorMessage(caught)); }
+  };
+  return <div className="job-pending" aria-label="Workers waiting for you">
+    {view.pending!.map(({ run_id, interaction }) => <div key={interaction.id} className="job-pending-item">
+      {interaction.interaction_kind === "request_user_input"
+        ? <QuestionCard interaction={interaction} onAnswer={text => void answer(run_id, interaction, "reply", text)} />
+        : interaction.interaction_kind === "approval_request"
+          ? <ApprovalCard interaction={interaction} onRespond={(intent, content) => answer(run_id, interaction, intent, content || "")} />
+          : <p className="job-note">{interaction.title || "A worker needs you"}{interaction.summary ? `: ${interaction.summary}` : ""}</p>}
+    </div>)}
+    {error && <p className="job-note danger-text">{error}</p>}
+  </div>;
 }
 
 /** A worker's step in the same words the chat uses. */

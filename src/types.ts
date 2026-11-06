@@ -381,6 +381,8 @@ export type JobView = {
   items_per_minute: number;
   /** A limit the bot's browser mode puts on workers. */
   browser_note?: string;
+  /** Questions and approvals workers are waiting on, per worker run. */
+  pending?: { run_id: string; interaction: Interaction }[];
   error?: string;
 };
 export type JobWorker = {

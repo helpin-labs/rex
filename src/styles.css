@@ -1056,6 +1056,7 @@ textarea { resize: vertical; line-height: 1.5; }
 .job-stats .stat.failed::before { background: var(--danger); }
 .job-current, .job-note { margin: 0; font-size: 12.5px; overflow: hidden; text-overflow: ellipsis; }
 .job-current { white-space: nowrap; }
+.job-pending { display: flex; flex-direction: column; gap: 8px; }
 .job-workers { display: flex; flex-direction: column; gap: 2px; margin: 0; padding: 0; list-style: none; font-size: 12.5px; }
 .job-worker-row { display: flex; align-items: center; gap: 6px; width: 100%; min-width: 0; padding: 4px 2px; border: 0; border-radius: 6px; background: none; color: var(--text); text-align: left; }
 .job-worker-row:hover { background: var(--surface-2); }

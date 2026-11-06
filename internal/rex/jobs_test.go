@@ -4,6 +4,8 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"net/http"
+	"net/http/httptest"
 	"os"
 	"path/filepath"
 	"strings"
@@ -109,5 +111,49 @@ func TestJobBrowserNoteForStandardBrowser(t *testing.T) {
 		if got := host.jobBrowserNote(ctx, bot.ID) != ""; got != tc.want {
 			t.Errorf("%s browser=%v: note shown = %v, want %v", tc.backend, tc.browser, got, tc.want)
 		}
+	}
+}
+
+// A batch job worker's question is outside every conversation: it still
+// reaches attention, pointing at the job's conversation, and the job view
+// lists it for answering on the worker's run.
+func TestJobWorkerQuestionsReachAttention(t *testing.T) {
+	runtime := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		switch r.URL.Path {
+		case "/v1/work-jobs/workjob_1":
+			_, _ = w.Write([]byte(`{"id":"workjob_1","state":"waiting","waiting_reason":"worker_input","active_runs":["run_a","run_b"],"counts":{},"usage":{},"spec":{"objective":"o"}}`))
+		case "/v1/runs/run_a/interactions", "/v1/runs/run_b/interactions":
+			run := strings.Split(r.URL.Path, "/")[3]
+			_, _ = w.Write([]byte(`[{"id":"ask-` + run + `","run_id":"` + run + `","interaction_kind":"request_user_input","status":"pending","title":"Which source?","summary":"Pick one"}]`))
+		default:
+			http.NotFound(w, r)
+		}
+	}))
+	defer runtime.Close()
+	store := openTestStore(t)
+	host := &Host{Store: store, Runtime: newTestRuntimeClient(t, runtime.URL, "")}
+	host.runtimeReady.Store(true)
+	ctx := context.Background()
+	if err := store.CreateJob(ctx, JobRecord{ID: "workjob_1", BotID: "bot-1", ConversationID: "conv-1", Title: "Schools", State: "running"}); err != nil {
+		t.Fatal(err)
+	}
+	items, err := host.Attention(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var questions []AttentionItem
+	for _, item := range items {
+		if item.Kind == "question" {
+			questions = append(questions, item)
+		}
+	}
+	if len(questions) != 2 || questions[0].ConversationID != "conv-1" || questions[0].JobID != "workjob_1" || questions[0].RunID == "" {
+		t.Fatalf("attention = %+v", items)
+	}
+	record, _ := store.GetJob(ctx, "workjob_1")
+	view := host.jobView(ctx, *record, true)
+	if len(view.Pending) != 2 || view.Pending[0].RunID != "run_a" || view.Pending[0].Interaction.ID != "ask-run_a" {
+		t.Fatalf("job pending = %+v", view.Pending)
 	}
 }

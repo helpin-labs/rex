@@ -2,6 +2,7 @@ package rex
 
 import (
 	"context"
+	sdk "github.com/helpin-ai/agent-runtime-go"
 	"net/http"
 	"time"
 )
@@ -20,6 +21,9 @@ type AttentionItem struct {
 	Title          string    `json:"title"`
 	Detail         string    `json:"detail,omitempty"`
 	At             time.Time `json:"at"`
+	// RunID and JobID identify a batch job worker that is waiting.
+	RunID string `json:"run_id,omitempty"`
+	JobID string `json:"job_id,omitempty"`
 }
 
 // attentionScope bounds how many recent conversations are checked for
@@ -68,6 +72,7 @@ func (h *Host) Attention(ctx context.Context) ([]AttentionItem, error) {
 					Title: interaction.Title, Detail: interaction.Summary, At: interaction.CreatedAt})
 			}
 		}
+		items = append(items, h.jobAttention(ctx)...)
 	}
 
 	finished, err := h.Store.db.QueryContext(ctx, `SELECT rr.id,rr.status,rr.error,rr.finished_at,r.title,r.bot_id,r.conversation_id
@@ -144,4 +149,37 @@ func (h *Host) Attention(ctx context.Context) ([]AttentionItem, error) {
 func (h *Host) attention(w http.ResponseWriter, r *http.Request) {
 	items, err := h.Attention(r.Context())
 	writeResult(w, items, err)
+}
+
+// jobAttention lists what batch job workers are waiting on. Workers are
+// runs of their own, outside any conversation, so their questions and
+// approvals point at the conversation that started the job.
+func (h *Host) jobAttention(ctx context.Context) []AttentionItem {
+	var items []AttentionItem
+	records, err := h.Store.ListJobs(ctx, "", attentionScope)
+	if err != nil {
+		return nil
+	}
+	for _, record := range records {
+		if record.NotifiedState == sdk.WorkJobStateCompleted || record.NotifiedState == sdk.WorkJobStateCancelled || record.NotifiedState == sdk.WorkJobStateFailed {
+			continue
+		}
+		job, err := h.Runtime.GetWorkJob(ctx, record.ID)
+		if err != nil || job.State == sdk.WorkJobStateCompleted || job.State == sdk.WorkJobStateCancelled || job.State == sdk.WorkJobStateFailed {
+			continue
+		}
+		for _, pending := range h.jobPending(ctx, job) {
+			kind := "approval"
+			switch pending.Interaction.InteractionKind {
+			case "request_user_input":
+				kind = "question"
+			case "authentication":
+				kind = "reconnect"
+			}
+			items = append(items, AttentionItem{ID: pending.Interaction.ID, Kind: kind, ConversationID: record.ConversationID, BotID: record.BotID,
+				Title: "Batch job \u201c" + record.Title + "\u201d: " + pending.Interaction.Title, Detail: pending.Interaction.Summary,
+				At: pending.Interaction.CreatedAt, RunID: pending.RunID, JobID: record.ID})
+		}
+	}
+	return items
 }
