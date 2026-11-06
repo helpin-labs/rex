@@ -39,6 +39,8 @@ export type Bot = {
 export type Status = {
   status: string;
   runtime_ready: boolean;
+  /** Set while a new bot engine waits for the previous one to exit. */
+  runtime_waiting?: string;
   data_dir: string;
   workspace_root: string;
   memory: { available: boolean; status: string };
@@ -343,3 +345,63 @@ export type HistoryPage = { entries: HistoryEntry[]; next_cursor?: number };
 export type HistoryExcerpt = HistoryEntry & { offset: number; truncated: boolean; next_offset?: number };
 
 export type CommandSandboxStatus = { supported: boolean; state: string; message: string; busy: boolean };
+
+/** A runtime work job: one contract run over a list of items. */
+export type WorkJobCounts = { total: number; pending: number; running: number; retry_wait: number; blocked: number; completed: number; found: number; no_result: number; exceptions: number; failed: number; cancelled: number };
+export type WorkJob = {
+  id: string;
+  state: "queued" | "running" | "waiting" | "paused" | "verifying" | "completed" | "failed" | "cancelled";
+  waiting_reason?: string;
+  blocked_run_id?: string;
+  error?: string;
+  spec: { objective: string; batch_size: number; max_concurrency: number };
+  counts: WorkJobCounts;
+  usage: { input_tokens: number; output_tokens: number; cached_input_tokens: number; reserved_tokens: number };
+  active_runs: string[];
+  dataset_revision: number;
+  created_at: string;
+  updated_at: string;
+  completed_at?: string;
+};
+/** Rex's record of a job plus the engine's live view. */
+export type JobView = {
+  id: string;
+  bot_id: string;
+  conversation_id: string;
+  title: string;
+  state: string;
+  dataset_path?: string;
+  created_at: string;
+  updated_at: string;
+  job?: WorkJob;
+  /** Items workers are on right now. */
+  current: { id: string; label: string }[];
+  /** Running workers: their batch and latest steps, newest first. */
+  workers?: JobWorker[];
+  items_per_minute: number;
+  /** A limit the bot's browser mode puts on workers. */
+  browser_note?: string;
+  /** Questions and approvals workers are waiting on, per worker run. */
+  pending?: { run_id: string; interaction: Interaction }[];
+  error?: string;
+};
+export type JobWorker = {
+  run_id: string;
+  started_at: string;
+  items: { id: string; label: string }[];
+  done: number;
+  steps: { tool_name: string; args_text: string; status: string; error?: string; created_at: string }[];
+};
+export type WorkItem = {
+  id: string;
+  state: string;
+  input: unknown;
+  attempts: number;
+  outcome?: "completed" | "no_result" | "exception";
+  result?: unknown;
+  exception?: { kind: string; detail: string };
+  run_id?: string;
+  last_error?: string;
+  updated_at: string;
+};
+export type WorkItemPage = { items: WorkItem[]; next_after?: string };

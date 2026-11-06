@@ -338,7 +338,7 @@ export function SettingsView({ status, initialTab, onSaved }: { status: Status |
         <div className="card">
           <h3 className="section-title">About Rex</h3>
           <dl className="facts-list">
-            <dt>Bot engine</dt><dd><span className={`chip ${status?.runtime_ready ? "ok" : "warn"}`}>{status?.runtime_ready ? "Running" : "Starting"}</span></dd>
+            <dt>Bot engine</dt><dd><span className={`chip ${status?.runtime_ready ? "ok" : "warn"}`}>{status?.runtime_ready ? "Running" : status?.runtime_waiting ? "Waiting for the previous engine" : "Starting"}</span></dd>
             <dt>Data folder</dt><dd><code>{status?.data_dir}</code></dd>
             <dt>Bot workspaces</dt><dd><code>{status?.workspace_root}</code></dd>
             <dt>Credentials</dt><dd>System credential store</dd>

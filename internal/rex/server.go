@@ -44,6 +44,7 @@ func (h *Host) Handler() http.Handler {
 	mux.Handle("/mcp/retro/", h.retroMCP())
 	mux.Handle("/mcp/catalog/", h.catalogMCP())
 	mux.Handle("/mcp/logins/", h.loginsMCP())
+	mux.Handle("/mcp/jobs/", h.jobsMCP())
 	mux.HandleFunc("GET "+oauthCallbackPath, h.oauthCallback)
 
 	api := http.NewServeMux()
@@ -78,6 +79,11 @@ func (h *Host) Handler() http.Handler {
 	api.HandleFunc("PUT /api/bots/{id}/logins/{login}", h.saveLogin)
 	api.HandleFunc("DELETE /api/bots/{id}/logins/{login}", h.deleteLogin)
 	api.HandleFunc("GET /api/proposals", h.proposals)
+	api.HandleFunc("GET /api/jobs", h.listJobs)
+	api.HandleFunc("GET /api/jobs/{id}", h.getJob)
+	api.HandleFunc("GET /api/jobs/{id}/items", h.listJobItems)
+	api.HandleFunc("POST /api/jobs/{id}/reveal", h.revealJobResults)
+	api.HandleFunc("POST /api/jobs/{id}/{action}", h.jobAction)
 	api.HandleFunc("POST /api/proposals/{id}", h.answerProposal)
 	api.HandleFunc("PUT /api/bots/{id}", h.saveBot)
 	api.HandleFunc("DELETE /api/bots/{id}", h.deleteBot)
@@ -202,7 +208,7 @@ func recoverer(next http.Handler) http.Handler {
 func (h *Host) status(w http.ResponseWriter, r *http.Request) {
 	settings, _ := h.Settings.Get(r.Context())
 	writeJSON(w, http.StatusOK, map[string]any{
-		"status": "ok", "runtime_ready": h.RuntimeReady(), "app_id": AppID,
+		"status": "ok", "runtime_ready": h.RuntimeReady(), "runtime_waiting": h.RuntimeWaiting(), "app_id": AppID,
 		"data_dir": h.cfg.DataDir, "workspace_root": h.cfg.WorkspaceRoot,
 		"memory":    map[string]any{"available": h.Memory.Available(), "status": h.Memory.Status()},
 		"onboarded": settings.Onboarded, "active_runs": h.ActiveRuns(), "write_tools": h.WriteTools(),
@@ -316,6 +322,15 @@ func (h *Host) deleteBot(w http.ResponseWriter, r *http.Request) {
 		for _, login := range logins {
 			_ = h.DeleteLogin(r.Context(), login.BotID, login.ID)
 		}
+	}
+	// A deleted bot's jobs stop; their results stay in the bot's folder.
+	if jobs, err := h.Store.ListJobs(r.Context(), r.PathValue("id"), 1000); err == nil {
+		for _, job := range jobs {
+			if _, err := h.Runtime.CancelWorkJob(r.Context(), job.ID); err != nil && h.RuntimeReady() {
+				slog.Warn("could not cancel a deleted bot's batch job", "job", job.ID, "error", err)
+			}
+		}
+		_ = h.Store.DeleteJobsForBot(r.Context(), r.PathValue("id"))
 	}
 	if err := h.Store.DeleteBot(r.Context(), r.PathValue("id")); err != nil {
 		writeError(w, http.StatusBadRequest, err)

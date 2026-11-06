@@ -48,7 +48,13 @@ func ReapOrphan(pidFile, name string) {
 	slog.Warn("stopping an owned process left behind by a previous run", "pid", pid, "name", name)
 	_ = syscall.Kill(-pid, syscall.SIGTERM)
 	_ = syscall.Kill(pid, syscall.SIGTERM)
-	time.Sleep(time.Second)
+	// Give it time to shut down cleanly; a new runtime waits for its store
+	// lock in the meantime instead of racing it.
+	for deadline := time.Now().Add(15 * time.Second); time.Now().Before(deadline); time.Sleep(100 * time.Millisecond) {
+		if syscall.Kill(pid, 0) != nil {
+			return
+		}
+	}
 	_ = syscall.Kill(-pid, syscall.SIGKILL)
 	_ = syscall.Kill(pid, syscall.SIGKILL)
 }

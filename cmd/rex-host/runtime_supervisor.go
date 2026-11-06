@@ -2,10 +2,20 @@ package main
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"log/slog"
 	"time"
 )
+
+// runtimeWaitingError is a health answer from a runtime that is alive but
+// waiting for the previous runtime to release the store. Rex keeps waiting
+// instead of restarting it: a restart would only start another waiter.
+type runtimeWaitingError struct{ owner string }
+
+func (e *runtimeWaitingError) Error() string {
+	return "agent runtime is waiting for the previous engine to exit (" + e.owner + ")"
+}
 
 // Rex owns process recovery. A live PID alone does not establish readiness,
 // especially after suspend/resume interrupts a local connection or startup.
@@ -14,6 +24,9 @@ type runtimeSupervisor struct {
 	stop     func() error
 	health   func(context.Context) error
 	setReady func(context.Context, bool)
+	// setWaiting reports the store owner a starting runtime waits for, or ""
+	// when it no longer waits.
+	setWaiting func(string)
 
 	checkInterval time.Duration
 	readyTimeout  time.Duration
@@ -93,6 +106,18 @@ func (s runtimeSupervisor) run(ctx context.Context, parentClosed, restart <-chan
 			cancelProbe()
 			if ctx.Err() != nil {
 				return nil
+			}
+			var waiting *runtimeWaitingError
+			if errors.As(err, &waiting) && !ready {
+				// Waiting does not count toward the startup timeout.
+				started = time.Now()
+				if s.setWaiting != nil {
+					s.setWaiting(waiting.owner)
+				}
+				continue
+			}
+			if s.setWaiting != nil {
+				s.setWaiting("")
 			}
 			if err != nil {
 				healthySince = time.Time{}

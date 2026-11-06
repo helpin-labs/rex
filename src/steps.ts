@@ -66,6 +66,12 @@ export function stepLabel(tool: RunToolCall): string {
     case "mcp__logins__list_logins": return "Check its logins";
     case "mcp__logins__sign_in": return "Sign in with a saved login";
     case "mcp__logins__fill_2fa_code": return "Enter the sign-in code";
+    case "submit_item_result": {
+      const item = str(args.item_id);
+      if (args.outcome === "exception") return item ? `Couldn't finish ${quoted(item)}` : "Report an item it couldn't finish";
+      if (args.outcome === "no_result") return item ? `Found nothing for ${quoted(item)}` : "Report an item with no result";
+      return item ? `Save the result for ${quoted(item)}` : "Save an item's result";
+    }
   }
   const mcp = /^mcp__(.+?)__(.+)$/.exec(name);
   if (mcp) return sentence(`${mcp[2].replace(/_/g, " ")} · ${mcp[1].replace(/_/g, " ")}`);

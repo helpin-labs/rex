@@ -39,17 +39,21 @@ var ErrWriteToolsUnavailable = errors.New("writing files and running commands ne
 
 // Host coordinates bots, conversations, the runtime, memory and routines.
 type Host struct {
-	cfg      Config
-	Store    *Store
-	Runtime  *RuntimeClient
-	Settings *SettingsManager
-	Memory   *MemoryService
-	Skills   *SkillLibrary
-	Routines *Scheduler
-	Browser  *BrowserControl
-	Sandbox  *CommandSandbox
+	// jobRetries backs off batch job deliveries (files and report) that
+	// failed, by job ID.
+	jobRetries sync.Map
+	cfg        Config
+	Store      *Store
+	Runtime    *RuntimeClient
+	Settings   *SettingsManager
+	Memory     *MemoryService
+	Skills     *SkillLibrary
+	Routines   *Scheduler
+	Browser    *BrowserControl
+	Sandbox    *CommandSandbox
 
-	runtimeReady atomic.Bool
+	runtimeReady   atomic.Bool
+	runtimeWaiting atomic.Value
 	// writeTools is true once the runtime reports that agent commands are
 	// confined with Seatbelt or verified WSL; only then are file writing and shell offered.
 	writeTools   atomic.Bool
@@ -93,7 +97,17 @@ func (h *Host) SetRuntimeReady(ready bool) {
 		h.writeTools.Store(false)
 	}
 }
-func (h *Host) RuntimeReady() bool     { return h.runtimeReady.Load() }
+func (h *Host) RuntimeReady() bool { return h.runtimeReady.Load() }
+
+// SetRuntimeWaiting records that a starting runtime waits for the previous
+// one to release the store ("" when it does not).
+func (h *Host) SetRuntimeWaiting(owner string) { h.runtimeWaiting.Store(owner) }
+
+// RuntimeWaiting returns the store owner a starting runtime waits for.
+func (h *Host) RuntimeWaiting() string {
+	owner, _ := h.runtimeWaiting.Load().(string)
+	return owner
+}
 func (h *Host) touch()                 { h.lastActivity.Store(time.Now().UnixNano()) }
 func (h *Host) IdleFor() time.Duration { return time.Since(time.Unix(0, h.lastActivity.Load())) }
 func (h *Host) RequestRuntimeRestart() {
@@ -143,6 +157,8 @@ func (h *Host) Bootstrap(ctx context.Context) error {
 		slog.Error("could not give each bot one conversation", "error", err)
 	}
 	h.recoverTurns(ctx)
+	resetWorkJobsAvailability()
+	h.startJobWatcher()
 	return nil
 }
 
@@ -569,6 +585,9 @@ func (h *Host) runMCPServers(ctx context.Context, bot Bot) ([]RunMCPServer, erro
 	// Every bot can search the skill catalog and suggest a skill for
 	// itself; the user installs it from the suggestion.
 	servers = append(servers, h.catalogMCPServer(bot.ID, true))
+	if !bot.Setup && h.WorkJobsAvailable(ctx) {
+		servers = append(servers, h.jobsMCPServer(bot))
+	}
 	if bot.Capabilities.Browser && !bot.Setup {
 		servers = append(servers, h.loginsMCPServer(bot))
 	}

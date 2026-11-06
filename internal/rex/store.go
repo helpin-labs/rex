@@ -194,6 +194,11 @@ ALTER TABLE instruction_proposals ADD COLUMN catalog_id TEXT NOT NULL DEFAULT ''
 	`UPDATE bots SET approval_mode='allow_all' WHERE approval_mode='auto';
     UPDATE bots SET approval_mode='auto' WHERE approval_mode='ask' AND setup=0
         AND COALESCE((SELECT json_extract(value,'$.typesafe_auto_approve') FROM settings WHERE key='settings.v1'),0)=1;`,
+	// Batch jobs: which bot and conversation a runtime work job belongs to.
+	`CREATE TABLE IF NOT EXISTS work_jobs (id TEXT PRIMARY KEY, bot_id TEXT NOT NULL, conversation_id TEXT NOT NULL, title TEXT NOT NULL,
+		state TEXT NOT NULL DEFAULT 'queued', dataset_path TEXT NOT NULL DEFAULT '', notified_state TEXT NOT NULL DEFAULT '',
+		created_at DATETIME NOT NULL, updated_at DATETIME NOT NULL);
+	CREATE INDEX IF NOT EXISTS work_jobs_bot ON work_jobs(bot_id, created_at);`,
 }
 
 func (s *Store) migrate(ctx context.Context) error {

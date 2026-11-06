@@ -1,3 +1,4 @@
+import { ConversationJobs } from "./Jobs";
 import { Fragment, type KeyboardEvent, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { JsonBlock, TextWithJson } from "./JsonBlock";
 import { AlarmClock, ArrowDown, ArrowUp, Search, BookOpen, Brain, CircleAlert, ExternalLink, Eye, FileCode2, FileText, FolderOpen, Hand, KeyRound, MousePointerClick, Paperclip, RotateCcw, ShieldCheck, SlidersHorizontal, Square, X } from "lucide-react";
@@ -23,7 +24,7 @@ function intro(instructions: string): string {
   return sentence > 80 ? cut.slice(0, sentence + 1) : `${cut.slice(0, cut.lastIndexOf(" "))}…`;
 }
 
-function ApprovalCard({ interaction, onRespond }: { interaction: Interaction; onRespond: (intent: string, content?: string) => Promise<void> }) {
+export function ApprovalCard({ interaction, onRespond }: { interaction: Interaction; onRespond: (intent: string, content?: string) => Promise<void> }) {
   const [busy, setBusy] = useState(false);
   const payload = interaction.request_payload || {};
   const toolName = String(payload.tool_name || "");
@@ -45,7 +46,7 @@ type Question = { question?: string; header?: string; options?: { label?: string
 
 // QuestionCard shows the bot's question with lettered options and a field
 // for the user's own answer.
-function QuestionCard({ interaction, onAnswer }: { interaction: Interaction; onAnswer: (text: string) => void }) {
+export function QuestionCard({ interaction, onAnswer }: { interaction: Interaction; onAnswer: (text: string) => void }) {
   const questions = (interaction.request_payload?.questions as Question[] | undefined) || [];
   const [own, setOwn] = useState("");
   const submitOwn = () => { if (own.trim()) { onAnswer(own.trim()); setOwn(""); } };
@@ -517,7 +518,7 @@ export function Chat({ bot, bots, conversationId, status, pending: waiting, defa
         </div>
       </header>
       {searching && <ChatSearch query={query} onQuery={setQuery} matches={matches} current={matchIndex} onMove={moveMatch} onClose={closeSearch} container={contentRef.current} renderKey={`${shown}:${turns.length}`} />}
-      {status && !status.runtime_ready && <div className="banner">Starting the bot engine…</div>}
+      {status && !status.runtime_ready && <div className="banner">{status.runtime_waiting ? "Waiting for the previous bot engine to exit…" : "Starting the bot engine…"}</div>}
       {browserHeld && <div className="banner warning">You have control of {bot.name}'s browser. The bot waits until you hand it back.</div>}
       <div className="transcript" ref={scrollRef} onScroll={onScroll} onPointerDown={() => { clicked.current = Date.now(); }}><div className="transcript-content" ref={contentRef}>
         {detail && turns.length === 0 && <div className="chat-empty">
@@ -544,6 +545,7 @@ export function Chat({ bot, bots, conversationId, status, pending: waiting, defa
       </div></div>
       {showJump && <button type="button" className="jump-latest" onClick={jumpToLatest}><ArrowDown size={14} />Jump to latest</button>}
       <footer className="composer-wrap">
+        <ConversationJobs bot={bot} />
         {error && <div className="inline-error"><CircleAlert size={14} /><span>{error}</span><button type="button" className="icon-button ghost tiny" onClick={() => setError("")}><X size={12} /></button></div>}
         {attachments.length > 0 && <div className="attachments">{attachments.map((item, index) => <span className="attachment" key={index}><Paperclip size={12} />{item.name}<button type="button" onClick={() => setAttachments(current => current.filter((_, i) => i !== index))} aria-label={`Remove ${item.name}`}><X size={11} /></button></span>)}</div>}
         <div className="composer">

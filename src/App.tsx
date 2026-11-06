@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useRef, useState } from "react";
-import { AlarmClock, Blocks, BookOpen, LoaderCircle, MessagesSquare, Plus } from "lucide-react";
+import { AlarmClock, Blocks, BookOpen, ListChecks, LoaderCircle, MessagesSquare, Plus } from "lucide-react";
 import { api } from "./api";
 import { useAttention, waitingConversations } from "./attention";
 import { BotEditor, newBot } from "./BotEditor";
@@ -10,7 +10,8 @@ import { RoutinesView } from "./RoutinesView";
 import { SettingsView } from "./SettingsView";
 import { SideSlot } from "./SideList";
 import { SkillsView } from "./SkillsView";
-import type { Bot, Conversation, Settings, Status } from "./types";
+import type { Bot, Conversation, JobView, Settings, Status } from "./types";
+import { JobProgress, JobsView, jobActive, jobFraction, jobPhase } from "./Jobs";
 import { Avatar, Empty, errorMessage, relativeTime } from "./ui";
 import { AppLogo } from "./AppLogo";
 import { AppsView } from "./AppsView";
@@ -21,8 +22,8 @@ import { ProfileMenu } from "./ProfileMenu";
 
 // Memory lives in each bot's conversation (the memory panel), so there is
 // no separate Memory page.
-type View = { kind: "bot"; botId: string; conversationId?: string } | { kind: "routines" } | { kind: "skills" } | { kind: "apps"; appId?: string } | { kind: "settings"; tab?: "models" | "tools" | "memory" | "about" };
-const viewKinds = ["bot", "routines", "skills", "apps", "settings"];
+type View = { kind: "bot"; botId: string; conversationId?: string } | { kind: "routines" } | { kind: "jobs" } | { kind: "skills" } | { kind: "apps"; appId?: string } | { kind: "settings"; tab?: "models" | "tools" | "memory" | "about" };
+const viewKinds = ["bot", "routines", "jobs", "skills", "apps", "settings"];
 
 function loadView(): View | null {
   try { const raw = localStorage.getItem("rex.view"); const view = raw ? JSON.parse(raw) as View : null; return view && viewKinds.includes(view.kind) ? view : null; } catch { return null; }
@@ -35,6 +36,8 @@ export default function App() {
   const [settings, setSettings] = useState<Settings | null>(null);
   const [bots, setBots] = useState<Bot[]>([]);
   const [threads, setThreads] = useState<Conversation[]>([]);
+  // Batch jobs, for the progress badges in the sidebar.
+  const [jobs, setJobs] = useState<JobView[]>([]);
   const [view, setView] = useState<View | null>(loadView);
   const [editing, setEditing] = useState<Bot | null>(null);
   const [naming, setNaming] = useState(false);
@@ -52,6 +55,7 @@ export default function App() {
     return list;
   }, []);
   const refreshThreads = useCallback(() => api.conversations().then(setThreads).catch(() => undefined), []);
+  const refreshJobs = useCallback(() => api.jobs().then(list => setJobs(list.filter(jobActive))).catch(() => undefined), []);
 
   useEffect(() => {
     (async () => {
@@ -68,9 +72,10 @@ export default function App() {
   useEffect(() => {
     // Bots also change outside this window: Rex creates them from chat, and
     // a new bot renames and sets itself up in its own conversation.
-    const timer = window.setInterval(() => { void refreshStatus(); void refreshThreads(); void refreshBots().catch(() => undefined); }, 5000);
+    const timer = window.setInterval(() => { void refreshStatus(); void refreshThreads(); void refreshJobs(); void refreshBots().catch(() => undefined); }, 5000);
+    void refreshJobs();
     return () => window.clearInterval(timer);
-  }, [refreshStatus, refreshThreads, refreshBots]);
+  }, [refreshStatus, refreshThreads, refreshBots, refreshJobs]);
 
   // Going anywhere else closes a bot's settings.
   useEffect(() => { setEditing(null); }, [view]);
@@ -116,6 +121,16 @@ export default function App() {
   const mainWaiting = !!mainThread && waiting.has(mainThread.id);
   const proposalFor = (botId: string) => attention.find(item => item.kind === "proposal" && item.bot_id === botId);
   const missedFor = (botId: string) => attention.find(item => item.kind === "missed" && item.bot_id === botId);
+  const jobOf = (botId: string) => jobs.find(item => item.bot_id === botId);
+  const jobBadge = (botId: string) => {
+    const job = jobOf(botId);
+    if (!job) return null;
+    const phase = jobPhase(job);
+    return <span className="bot-row-job" title={`${job.title}: ${phase.label}`}>
+      <span className={`job-badge ${phase.tone === "warn" ? "warn" : ""}`}><ListChecks size={11} />{phase.tone === "warn" ? "Job needs you" : `Job ${jobFraction(job)}`}</span>
+      <JobProgress view={job} thin />
+    </span>;
+  };
   const ordered = bots.filter(item => item.role !== "main")
     .sort((a, b) => (threadOf(b.id)?.last_at || "").localeCompare(threadOf(a.id)?.last_at || "") || a.position - b.position);
 
@@ -137,7 +152,7 @@ export default function App() {
         {main ? <button type="button" className={`main-bot ${bot?.id === main.id ? "active" : ""}`} onClick={() => setView({ kind: "bot", botId: main.id })} title="Your main assistant">
           <span className="main-bot-logo"><Avatar bot={main} size={84} working={!!threadOf(main.id)?.working} typing={typingBot === main.id} />{mainWaiting && <span className="waiting-dot corner" title="Needs you" />}</span>
           <strong>{main.name}</strong>
-          <small>{threadOf(main.id)?.working ? "Working…" : "Main assistant"}</small>
+          <small>{threadOf(main.id)?.working ? "Working…" : jobOf(main.id) ? `Job ${jobFraction(jobOf(main.id)!)}` : "Main assistant"}</small>
         </button> : <div className="brand"><AppLogo size={84} /><strong>Rex</strong></div>}
       </header>
       {view?.kind !== "bot" ? <div className="side-slot" ref={setSideSlot} /> : <div className="bot-rows">
@@ -149,7 +164,7 @@ export default function App() {
             <span className="bot-row-text">
               <span className="bot-row-top"><strong>{item.name}</strong>{itemThread?.last_at && <small>{relativeTime(itemThread.last_at)}</small>}</span>
               <span className="bot-row-preview">
-                {itemThread?.working ? <><LoaderCircle className="spin" size={11} /> Working…</>
+                {jobOf(item.id) && !itemThread?.working ? jobBadge(item.id) : itemThread?.working ? <><LoaderCircle className="spin" size={11} /> Working…</>
                   : itemThread?.preview ? `${itemThread.preview_from === "user" ? "You: " : ""}${itemThread.preview}` : needsYou ? (missedFor(item.id) ? `Missed “${missedFor(item.id)!.title}”` : proposalFor(item.id) ? "Suggests new instructions" : "Has a question for you") : <span className="muted">Say hello</span>}
               </span>
             </span>
@@ -160,6 +175,7 @@ export default function App() {
       <footer className="bot-list-footer">
         {tab("bot", "Bots", <MessagesSquare size={18} />)}
         {tab("routines", "Routines", <AlarmClock size={18} />)}
+        <span className="side-tool-wrap">{tab("jobs", jobs.length ? `Batch jobs (${jobs.length} running)` : "Batch jobs", <ListChecks size={18} />)}{jobs.length > 0 && <span className="side-tool-count">{jobs.length}</span>}</span>
         {tab("skills", "Skills", <BookOpen size={18} />)}
         <span className="spacer" />
         {tab("apps", "Connect apps", <Blocks size={18} />)}
@@ -181,6 +197,7 @@ export default function App() {
           : <Empty icon={<LoaderCircle className="spin" size={20} />} title={`Opening ${bot.name}…`} />}
       </main>}
       {view?.kind === "routines" && <main className="main wide"><RoutinesView bots={bots} onOpenConversation={async id => { await refreshThreads(); await openConversation(id); }} /></main>}
+      {view?.kind === "jobs" && <main className="main wide"><JobsView bots={bots} onOpenBot={botId => setView({ kind: "bot", botId })} /></main>}
       {view?.kind === "skills" && <main className="main wide"><SkillsView bots={bots} workspaceRoot={status?.workspace_root || "~/Rex"} onBotsChanged={() => void refreshBots()} /></main>}
       {view?.kind === "apps" && <main className="main wide"><AppsView focusApp={view.appId} bots={bots} onBotsChanged={() => void refreshBots()} /></main>}
       {view?.kind === "settings" && <main className="main wide"><SettingsView key={view.tab || "models"} initialTab={view.tab} status={status} onSaved={saved => { setSettings(saved); void refreshStatus(); }} /></main>}

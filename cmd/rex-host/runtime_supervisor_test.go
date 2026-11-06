@@ -3,6 +3,7 @@ package main
 import (
 	"context"
 	"errors"
+	sdk "github.com/helpin-ai/agent-runtime-go"
 	"os"
 	"os/exec"
 	"sync/atomic"
@@ -238,3 +239,50 @@ func TestStopProcessAcceptsPreviouslyObservedExit(t *testing.T) {
 }
 
 func TestRuntimeExitedChild(t *testing.T) {}
+
+// A new runtime waiting for its predecessor to release the store is alive:
+// restarting it would only start another waiter, so the wait never counts
+// toward the startup timeout.
+func TestRuntimeSupervisorWaitsForStoreOwnerWithoutRestarting(t *testing.T) {
+	var starts atomic.Int32
+	var waitingUntil atomic.Int64
+	waitingUntil.Store(time.Now().Add(200 * time.Millisecond).UnixNano())
+	var lastOwner atomic.Value
+	lastOwner.Store("unset")
+	_, ready, _ := superviseForTest(t, runtimeSupervisor{
+		start: func(context.Context) (<-chan error, error) {
+			starts.Add(1)
+			return make(chan error), nil
+		},
+		health: func(context.Context) error {
+			if time.Now().UnixNano() < waitingUntil.Load() {
+				return &runtimeWaitingError{owner: "pid 42"}
+			}
+			return nil
+		},
+		setWaiting: func(owner string) { lastOwner.Store(owner) },
+	})
+	time.Sleep(100 * time.Millisecond)
+	if owner := lastOwner.Load(); owner != "pid 42" {
+		t.Fatalf("waiting state not reported: %v", owner)
+	}
+	waitRuntimeReady(t, ready)
+	if starts.Load() != 1 {
+		t.Fatalf("runtime restarted %d times while waiting for the store owner", starts.Load()-1)
+	}
+	if owner := lastOwner.Load(); owner != "" {
+		t.Fatalf("waiting state not cleared: %v", owner)
+	}
+}
+
+func TestRuntimeHealthErrorRecognizesWaitingRuntime(t *testing.T) {
+	waiting := runtimeHealthError(&sdk.HTTPStatusError{StatusCode: 503, Body: `{"status":"waiting_for_store_owner","owner":"pid 7 since x"}`})
+	var target *runtimeWaitingError
+	if !errors.As(waiting, &target) || target.owner != "pid 7 since x" {
+		t.Fatalf("waiting = %v", waiting)
+	}
+	other := &sdk.HTTPStatusError{StatusCode: 503, Body: `{"status":"starting"}`}
+	if errors.As(runtimeHealthError(other), &target) {
+		t.Fatal("a starting runtime is not waiting for the store owner")
+	}
+}
