@@ -284,7 +284,7 @@ func (h *Host) jobsMCP() http.Handler {
 				}}},
 				"items_file": map[string]any{"type": "string", "description": "Path inside your folder to a JSON array, JSONL or CSV file of items."},
 				"batch_size": map[string]any{"type": "integer", "minimum": 1, "maximum": 50, "description": "Items per worker; default 10."},
-				"workers":    map[string]any{"type": "integer", "minimum": 1, "maximum": 4, "description": "Workers at once; default 3. Browser work always runs one at a time."},
+				"workers":    map[string]any{"type": "integer", "minimum": 1, "maximum": 4, "description": "Workers at once; default 3. In Extension browser mode each worker gets its own tab (up to 3); the standard local browser runs one worker at a time."},
 			}},
 		}, func(ctx context.Context, request *protocol.CallToolRequest) (*protocol.CallToolResult, error) {
 			var input startJobInput
