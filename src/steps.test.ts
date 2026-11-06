@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { describeApproval, instructionChanges, looksLikePassword } from "./steps";
+import { describeApproval, instructionChanges, looksLikePassword, stepLabel } from "./steps";
 
 describe("setup approvals", () => {
   it("describe tools and routines in plain language", () => {
@@ -32,5 +32,14 @@ describe("passwords typed in chat", () => {
     expect(looksLikePassword("Password: Tr0ub4dor&3")).toBe(true);
     expect(looksLikePassword("can you reset my password?")).toBe(false);
     expect(looksLikePassword("find flights to Madrid")).toBe(false);
+  });
+});
+
+describe("batch worker steps", () => {
+  const step = (args: object) => stepLabel({ kind: "tool", id: "", tool_name: "submit_item_result", args_text: JSON.stringify(args), result: "", error: "", status: "completed", started_at: "", order: 0 });
+  it("names the item each submission is for", () => {
+    expect(step({ item_id: "redis", outcome: "completed" })).toBe("Save the result for “redis”");
+    expect(step({ item_id: "vite", outcome: "exception" })).toBe("Couldn't finish “vite”");
+    expect(step({ item_id: "bun", outcome: "no_result" })).toBe("Found nothing for “bun”");
   });
 });

@@ -1,7 +1,8 @@
 import { useCallback, useEffect, useState } from "react";
 import { ChevronDown, ChevronRight, FolderOpen, ListChecks, LoaderCircle, Pause, Play, Square } from "lucide-react";
 import { api } from "./api";
-import type { Bot, JobView, WorkItem } from "./types";
+import { isControlTool, stepLabel } from "./steps";
+import type { Bot, JobView, JobWorker, RunToolCall, WorkItem } from "./types";
 import { Avatar, Empty, Modal, PageHeader, errorMessage, relativeTime } from "./ui";
 
 // A batch job runs one task over a long list in the bot engine. These views
@@ -117,7 +118,7 @@ export function JobCard({ view, bot, onChanged, showBot }: { view: JobView; bot?
         {eta(view) && <span className="muted">{eta(view)}</span>}
       </div>
     </>}
-    {current.length > 0 && job?.state === "running" && <p className="job-current">
+    {(view.workers?.length ?? 0) > 0 && job?.state === "running" ? <JobWorkers workers={view.workers!} /> : current.length > 0 && job?.state === "running" && <p className="job-current">
       <span className="muted">Working on</span> {current.slice(0, 3).map(item => item.label).join(", ")}{current.length > 3 ? ` and ${current.length - 3} more` : ""}
     </p>}
     {job?.state === "waiting" && job.waiting_reason && <p className="job-note">{waitingText[job.waiting_reason] || "Waiting."}</p>}
@@ -136,6 +137,41 @@ export function JobCard({ view, bot, onChanged, showBot }: { view: JobView; bot?
     </footer>
     {itemsOpen && <JobItemsModal view={view} onClose={() => setItemsOpen(false)} />}
   </section>;
+}
+
+/** A worker's step in the same words the chat uses. */
+function workerStepLabel(step: JobWorker["steps"][number]): string {
+  return stepLabel({ kind: "tool", id: "", tool_name: step.tool_name, args_text: step.args_text, result: "", error: step.error || "", status: "completed", started_at: step.created_at, order: 0 } as RunToolCall);
+}
+
+/** One row per running worker: its batch, progress and latest step. */
+export function JobWorkers({ workers }: { workers: JobWorker[] }) {
+  const [open, setOpen] = useState<string>("");
+  return <ul className="job-workers" aria-label="Workers">
+    {workers.map((worker, index) => {
+      const steps = worker.steps.filter(step => !isControlTool(step.tool_name));
+      const latest = steps[0];
+      const expanded = open === worker.run_id;
+      return <li key={worker.run_id} className="job-worker">
+        <button type="button" className="job-worker-row" aria-expanded={expanded} onClick={() => setOpen(expanded ? "" : worker.run_id)}>
+          {expanded ? <ChevronDown size={13} /> : <ChevronRight size={13} />}
+          <LoaderCircle className="spin" size={12} />
+          <strong>Worker {index + 1}</strong>
+          <span className="muted">{worker.done}/{worker.items.length}</span>
+          <span className="job-worker-step">{latest ? workerStepLabel(latest) : "Starting…"}</span>
+          <small className="muted">{relativeTime(latest?.created_at || worker.started_at)}</small>
+        </button>
+        {expanded && <div className="job-worker-detail">
+          <p className="muted small">Batch: {worker.items.map(item => item.label).join(", ")}</p>
+          {steps.length > 0 && <ol className="job-worker-steps">
+            {steps.map((step, stepIndex) => <li key={stepIndex} className={step.status === "failed" ? "danger-text" : ""}>
+              {workerStepLabel(step)} <small className="muted">{relativeTime(step.created_at)}</small>
+            </li>)}
+          </ol>}
+        </div>}
+      </li>;
+    })}
+  </ul>;
 }
 
 const itemTabs: { key: string; label: string }[] = [

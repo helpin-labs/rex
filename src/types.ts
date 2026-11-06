@@ -376,8 +376,17 @@ export type JobView = {
   job?: WorkJob;
   /** Items workers are on right now. */
   current: { id: string; label: string }[];
+  /** Running workers: their batch and latest steps, newest first. */
+  workers?: JobWorker[];
   items_per_minute: number;
   error?: string;
+};
+export type JobWorker = {
+  run_id: string;
+  started_at: string;
+  items: { id: string; label: string }[];
+  done: number;
+  steps: { tool_name: string; args_text: string; status: string; error?: string; created_at: string }[];
 };
 export type WorkItem = {
   id: string;

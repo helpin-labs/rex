@@ -36,6 +36,7 @@ import (
 
 const (
 	jobsServerID      = "rex-jobs"
+	defaultJobWorkers = 3
 	maxInlineJobItems = 500
 	maxJobItems       = 10000
 	jobWatchInterval  = 3 * time.Second
@@ -60,10 +61,32 @@ type JobView struct {
 	Job *sdk.WorkJob `json:"job,omitempty"`
 	// Current lists the items workers are processing right now.
 	Current []JobItemRef `json:"current"`
+	// Workers shows each running worker's batch and latest steps.
+	Workers []JobWorker `json:"workers"`
 	// ItemsPerMinute is the recent throughput; zero until measurable.
 	ItemsPerMinute float64 `json:"items_per_minute"`
 	Error          string  `json:"error,omitempty"`
 }
+
+// JobWorker is one running worker: its batch, how far it got and what it
+// did last, newest step first.
+type JobWorker struct {
+	RunID     string          `json:"run_id"`
+	StartedAt time.Time       `json:"started_at"`
+	Items     []JobItemRef    `json:"items"`
+	Done      int             `json:"done"`
+	Steps     []JobWorkerStep `json:"steps"`
+}
+
+type JobWorkerStep struct {
+	ToolName  string    `json:"tool_name"`
+	Args      string    `json:"args_text"`
+	Status    string    `json:"status"`
+	Error     string    `json:"error,omitempty"`
+	CreatedAt time.Time `json:"created_at"`
+}
+
+const jobWorkerSteps = 6
 
 // JobItemRef names an item for people: its id and a readable label.
 type JobItemRef struct {
@@ -261,7 +284,7 @@ func (h *Host) jobsMCP() http.Handler {
 				}}},
 				"items_file": map[string]any{"type": "string", "description": "Path inside your folder to a JSON array, JSONL or CSV file of items."},
 				"batch_size": map[string]any{"type": "integer", "minimum": 1, "maximum": 50, "description": "Items per worker; default 10."},
-				"workers":    map[string]any{"type": "integer", "minimum": 1, "maximum": 4, "description": "Workers at once; default 1. Browser work always runs one at a time."},
+				"workers":    map[string]any{"type": "integer", "minimum": 1, "maximum": 4, "description": "Workers at once; default 3. Browser work always runs one at a time."},
 			}},
 		}, func(ctx context.Context, request *protocol.CallToolRequest) (*protocol.CallToolResult, error) {
 			var input startJobInput
@@ -365,7 +388,10 @@ func (h *Host) StartJob(ctx context.Context, bot Bot, input startJobInput) (*Job
 			workerServers = append(workerServers, server)
 		}
 	}
-	workers := max(1, min(input.Workers, 4))
+	workers := defaultJobWorkers
+	if input.Workers > 0 {
+		workers = min(input.Workers, 4)
+	}
 	spec := sdk.WorkJobSpec{
 		Objective: input.Objective, Instructions: input.Instructions, ResultSchema: input.ResultSchema, NoResultSchema: input.NoResultSchema,
 		ExceptionKinds: input.ExceptionKinds, RetryableExceptionKinds: input.RetryableExceptionKinds, BatchSize: input.BatchSize,
@@ -531,7 +557,7 @@ func pathInWorkspace(workspace, rel string) (string, error) {
 // jobView joins Rex's record with the runtime's live job. With detail it
 // also reports which items workers are on and the recent throughput.
 func (h *Host) jobView(ctx context.Context, record JobRecord, detail bool) JobView {
-	view := JobView{JobRecord: record, Current: []JobItemRef{}}
+	view := JobView{JobRecord: record, Current: []JobItemRef{}, Workers: []JobWorker{}}
 	job, err := h.Runtime.GetWorkJob(ctx, record.ID)
 	if err != nil {
 		view.Error = "the bot engine is not reachable"
@@ -544,15 +570,46 @@ func (h *Host) jobView(ctx context.Context, record JobRecord, detail bool) JobVi
 	if !detail {
 		return view
 	}
+	labels := map[string]string{}
 	if job.Counts.Running > 0 {
 		if page, err := h.Runtime.ListWorkItems(ctx, record.ID, sdk.WorkItemStateRunning, "", 50); err == nil {
 			for _, item := range page.Items {
-				view.Current = append(view.Current, JobItemRef{ID: item.ID, Label: itemLabel(item.ID, item.Input)})
+				label := itemLabel(item.ID, item.Input)
+				labels[item.ID] = label
+				view.Current = append(view.Current, JobItemRef{ID: item.ID, Label: label})
 			}
 		}
 	}
+	view.Workers = h.jobWorkers(ctx, record.ID, labels)
 	view.ItemsPerMinute = h.jobThroughput(ctx, record.ID)
 	return view
+}
+
+// jobWorkers describes the batches still running and each worker's latest
+// tool calls.
+func (h *Host) jobWorkers(ctx context.Context, jobID string, labels map[string]string) []JobWorker {
+	workers := []JobWorker{}
+	attempts, err := h.Runtime.ListWorkAttempts(ctx, jobID)
+	if err != nil {
+		return workers
+	}
+	for _, attempt := range attempts {
+		if attempt.EndedAt != nil || attempt.RunID == "" {
+			continue
+		}
+		worker := JobWorker{RunID: attempt.RunID, StartedAt: attempt.StartedAt, Done: attempt.Accepted, Items: []JobItemRef{}, Steps: []JobWorkerStep{}}
+		for _, id := range attempt.ItemIDs {
+			worker.Items = append(worker.Items, JobItemRef{ID: id, Label: defaultString(labels[id], id)})
+		}
+		if calls, err := h.Runtime.ListToolCalls(ctx, attempt.RunID); err == nil {
+			for i := len(calls) - 1; i >= 0 && len(worker.Steps) < jobWorkerSteps; i-- {
+				call := calls[i]
+				worker.Steps = append(worker.Steps, JobWorkerStep{ToolName: call.ToolName, Args: string(call.Input), Status: call.Status, Error: call.Error, CreatedAt: call.CreatedAt})
+			}
+		}
+		workers = append(workers, worker)
+	}
+	return workers
 }
 
 // jobThroughput measures accepted items per minute over the last 50
