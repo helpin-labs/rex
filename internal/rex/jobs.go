@@ -821,20 +821,54 @@ func (h *Host) checkJobs(ctx context.Context) {
 			}
 			continue
 		}
+		if !h.jobRetryDue(record.ID) {
+			continue
+		}
+		// Files first, then the report; the job counts as delivered only
+		// when both worked, so a failure is retried on later checks.
 		datasetPath, err := h.saveJobResults(ctx, record, job)
 		if err != nil {
-			slog.Warn("could not save batch job results", "job", record.ID, "error", err)
+			slog.Warn("could not save batch job results; retrying", "job", record.ID, "error", err)
+			h.jobRetryLater(record.ID)
+			_ = h.Store.UpdateJob(ctx, record.ID, job.State, "", "")
+			continue
 		}
 		if err := h.reportJob(ctx, record, job, datasetPath); err != nil {
-			if errors.Is(err, ErrBusy) {
-				// The bot is mid-turn; report on the next check.
-				_ = h.Store.UpdateJob(ctx, record.ID, job.State, datasetPath, "")
-				continue
+			if !errors.Is(err, ErrBusy) {
+				// The bot mid-turn is retried on the next check; anything
+				// else after a growing delay.
+				slog.Warn("could not report batch job; retrying", "job", record.ID, "error", err)
+				h.jobRetryLater(record.ID)
 			}
-			slog.Warn("could not report batch job", "job", record.ID, "error", err)
+			_ = h.Store.UpdateJob(ctx, record.ID, job.State, datasetPath, "")
+			continue
 		}
+		h.jobRetries.Delete(record.ID)
 		_ = h.Store.UpdateJob(ctx, record.ID, job.State, datasetPath, notify)
 	}
+}
+
+// jobRetry is a failed delivery's next attempt and how many came before.
+type jobRetry struct {
+	at       time.Time
+	failures int
+}
+
+func (h *Host) jobRetryDue(jobID string) bool {
+	value, ok := h.jobRetries.Load(jobID)
+	return !ok || !time.Now().Before(value.(jobRetry).at)
+}
+
+// jobRetryLater backs a failed delivery off: 10s, doubling, at most 5 min.
+func (h *Host) jobRetryLater(jobID string) {
+	retry := jobRetry{}
+	if value, ok := h.jobRetries.Load(jobID); ok {
+		retry = value.(jobRetry)
+	}
+	retry.failures++
+	delay := min(10*time.Second<<min(retry.failures-1, 5), 5*time.Minute)
+	retry.at = time.Now().Add(delay)
+	h.jobRetries.Store(jobID, retry)
 }
 
 func userDecision(reason string) bool {

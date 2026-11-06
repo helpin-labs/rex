@@ -39,15 +39,18 @@ var ErrWriteToolsUnavailable = errors.New("writing files and running commands ne
 
 // Host coordinates bots, conversations, the runtime, memory and routines.
 type Host struct {
-	cfg      Config
-	Store    *Store
-	Runtime  *RuntimeClient
-	Settings *SettingsManager
-	Memory   *MemoryService
-	Skills   *SkillLibrary
-	Routines *Scheduler
-	Browser  *BrowserControl
-	Sandbox  *CommandSandbox
+	// jobRetries backs off batch job deliveries (files and report) that
+	// failed, by job ID.
+	jobRetries sync.Map
+	cfg        Config
+	Store      *Store
+	Runtime    *RuntimeClient
+	Settings   *SettingsManager
+	Memory     *MemoryService
+	Skills     *SkillLibrary
+	Routines   *Scheduler
+	Browser    *BrowserControl
+	Sandbox    *CommandSandbox
 
 	runtimeReady   atomic.Bool
 	runtimeWaiting atomic.Value

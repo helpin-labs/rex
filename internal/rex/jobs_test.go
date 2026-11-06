@@ -9,6 +9,7 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"sync/atomic"
 	"testing"
 )
 
@@ -155,5 +156,65 @@ func TestJobWorkerQuestionsReachAttention(t *testing.T) {
 	view := host.jobView(ctx, *record, true)
 	if len(view.Pending) != 2 || view.Pending[0].RunID != "run_a" || view.Pending[0].Interaction.ID != "ask-run_a" {
 		t.Fatalf("job pending = %+v", view.Pending)
+	}
+}
+
+// A finished job whose files or report could not be delivered is not
+// marked delivered: later checks retry until both work.
+func TestFailedJobDeliveryIsRetried(t *testing.T) {
+	var itemCalls atomic.Int32
+	runtime := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		switch r.URL.Path {
+		case "/v1/work-jobs/workjob_1":
+			_, _ = w.Write([]byte(`{"id":"workjob_1","state":"completed","active_runs":[],"counts":{"total":1,"completed":1,"found":1},"usage":{},"spec":{"objective":"o"}}`))
+		case "/v1/work-jobs/workjob_1/items":
+			if itemCalls.Add(1) == 1 {
+				http.Error(w, "unavailable", http.StatusServiceUnavailable)
+				return
+			}
+			_, _ = w.Write([]byte(`{"items":[{"id":"a","state":"completed","outcome":"completed","result":{"v":1}}],"next_after":""}`))
+		default:
+			http.Error(w, "unavailable", http.StatusServiceUnavailable)
+		}
+	}))
+	defer runtime.Close()
+	store := openTestStore(t)
+	host := &Host{Store: store, Runtime: newTestRuntimeClient(t, runtime.URL, "")}
+	ctx := context.Background()
+	bot := Bot{ID: "bot-1", Name: "Bot", WorkspaceDir: t.TempDir()}
+	if err := store.SaveBot(ctx, &bot); err != nil {
+		t.Fatal(err)
+	}
+	if err := store.CreateJob(ctx, JobRecord{ID: "workjob_1", BotID: "bot-1", ConversationID: "missing-conversation", Title: "Schools", State: "running"}); err != nil {
+		t.Fatal(err)
+	}
+	delivered := func() (JobRecord, bool) {
+		t.Helper()
+		record, err := store.GetJob(ctx, "workjob_1")
+		if err != nil {
+			t.Fatal(err)
+		}
+		return *record, record.NotifiedState == "completed"
+	}
+	// The export fails: nothing is delivered.
+	host.checkJobs(ctx)
+	if _, done := delivered(); done {
+		t.Fatal("job marked delivered after its files failed to save")
+	}
+	// The next attempt waits for its backoff.
+	host.checkJobs(ctx)
+	if itemCalls.Load() != 1 {
+		t.Fatalf("retried before the backoff: %d export attempts", itemCalls.Load())
+	}
+	// Due again: the files save, but the report cannot be delivered.
+	host.jobRetries.Delete("workjob_1")
+	host.checkJobs(ctx)
+	record, done := delivered()
+	if done || record.DatasetPath == "" {
+		t.Fatalf("after a failed report: delivered=%v dataset=%q", done, record.DatasetPath)
+	}
+	if _, ok := host.jobRetries.Load("workjob_1"); !ok {
+		t.Fatal("failed report not scheduled for retry")
 	}
 }
