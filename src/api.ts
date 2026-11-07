@@ -73,6 +73,7 @@ export const api = {
   jobItems: (id: string, state = "", after = "", limit = 100) =>
     request<WorkItemPage>(`/api/jobs/${encodeURIComponent(id)}/items?state=${encodeURIComponent(state)}&after=${encodeURIComponent(after)}&limit=${limit}`),
   jobAction: (id: string, action: "pause" | "resume" | "cancel") => request<JobView>(`/api/jobs/${encodeURIComponent(id)}/${action}`, json("POST", {})),
+  steerJob: (id: string, expected_revision: number, content: string) => request<JobView>(`/api/jobs/${encodeURIComponent(id)}/steer`, json("POST", { expected_revision, content })),
   revealJobResults: (id: string) => request<void>(`/api/jobs/${encodeURIComponent(id)}/reveal`, json("POST", {})),
   lookBack: (botId: string) => request<void>(`/api/bots/${botId}/retrospective`, json("POST", {})),
   answerProposal: (id: string, action: "apply" | "discard" | "review") => request<void>(`/api/proposals/${id}`, json("POST", { action })),

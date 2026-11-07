@@ -76,12 +76,15 @@ type JobView struct {
 // JobWorker is one running worker: its batch, how far it got and what it
 // did last, newest step first.
 type JobWorker struct {
-	RecoveryReason string          `json:"recovery_reason,omitempty"`
-	RunID          string          `json:"run_id"`
-	StartedAt      time.Time       `json:"started_at"`
-	Items          []JobItemRef    `json:"items"`
-	Done           int             `json:"done"`
-	Steps          []JobWorkerStep `json:"steps"`
+	Status         string                   `json:"status,omitempty"`
+	PauseReason    string                   `json:"pause_reason,omitempty"`
+	Steering       []sdk.RunSteeringCommand `json:"steering,omitempty"`
+	RecoveryReason string                   `json:"recovery_reason,omitempty"`
+	RunID          string                   `json:"run_id"`
+	StartedAt      time.Time                `json:"started_at"`
+	Items          []JobItemRef             `json:"items"`
+	Done           int                      `json:"done"`
+	Steps          []JobWorkerStep          `json:"steps"`
 }
 
 type JobWorkerStep struct {
@@ -250,7 +253,7 @@ func (h *Host) jobsMCPServer(bot Bot) RunMCPServer {
 		URL: h.cfg.HostURL + "/mcp/jobs/" + bot.ID,
 		// Starting a job spends model quota on the user's behalf, so it is a
 		// write: approval-mode bots ask first.
-		Tools:      []RunMCPTool{{Name: "start_batch_job", Access: "write"}, {Name: "get_batch_job", Access: "read"}},
+		Tools:      []RunMCPTool{{Name: "start_batch_job", Access: "write"}, {Name: "get_batch_job", Access: "read"}, {Name: "manage_batch_job", Access: "write"}},
 		Credential: &RunMCPCredential{Type: "bearer_token", AccessToken: h.JobsToken(bot.ID)},
 	}
 }
@@ -356,7 +359,7 @@ func (h *Host) jobsMCP() http.Handler {
 			}
 			exceptions, _ := h.Runtime.ListWorkItems(ctx, record.ID, "", "", 0)
 			summary := map[string]any{"job_id": record.ID, "title": record.Title, "state": view.Job.State, "waiting_reason": view.Job.WaitingReason, "counts": view.Job.Counts,
-				"results_file": record.DatasetPath}
+				"results_file": record.DatasetPath, "blockers": jobBlockers(view.Pending), "active_runs": view.Job.ActiveRuns, "spec_revision": view.Job.SpecRevision, "spec": view.Job.Spec, "progress_note": "Running item counts include assigned items whose workers may be paused; inspect blockers before claiming execution."}
 			var notes []map[string]any
 			if exceptions != nil {
 				for _, item := range exceptions.Items {
@@ -368,6 +371,7 @@ func (h *Host) jobsMCP() http.Handler {
 			summary["exceptions_sample"] = notes
 			return toolResult(summary), nil
 		})
+		h.registerJobManagement(server, botID)
 		protocol.NewStreamableHTTPHandler(func(*http.Request) *protocol.Server { return server }, &protocol.StreamableHTTPOptions{Stateless: true, JSONResponse: true}).ServeHTTP(w, r)
 	})
 }
@@ -671,9 +675,13 @@ func (h *Host) jobWorkers(ctx context.Context, jobID string, labels map[string]s
 		}
 		worker := JobWorker{RunID: attempt.RunID, StartedAt: attempt.StartedAt, Done: attempt.Accepted, Items: []JobItemRef{}, Steps: []JobWorkerStep{}}
 		if run, err := h.Runtime.GetRun(ctx, attempt.RunID); err == nil && run != nil {
+			worker.Status, worker.PauseReason = run.Status, run.PauseReason
 			if recovery, ok := run.Input.Metadata["runtime_recovery"].(map[string]interface{}); ok {
 				worker.RecoveryReason, _ = recovery["reason"].(string)
 			}
+		}
+		if commands, err := h.Runtime.RunSteering(ctx, attempt.RunID); err == nil {
+			worker.Steering = commands
 		}
 		for _, id := range attempt.ItemIDs {
 			worker.Items = append(worker.Items, JobItemRef{ID: id, Label: defaultString(labels[id], id)})
@@ -759,6 +767,26 @@ func (h *Host) jobAction(w http.ResponseWriter, r *http.Request) {
 	}
 	var job *sdk.WorkJob
 	switch r.PathValue("action") {
+	case "steer":
+		var input struct {
+			ExpectedRevision int    `json:"expected_revision"`
+			Content          string `json:"content"`
+		}
+		r.Body = http.MaxBytesReader(w, r.Body, 40<<10)
+		if err = json.NewDecoder(r.Body).Decode(&input); err != nil || strings.TrimSpace(input.Content) == "" {
+			writeError(w, http.StatusBadRequest, errors.New("an instruction is required"))
+			return
+		}
+		job, err = h.Runtime.GetWorkJob(r.Context(), record.ID)
+		if err == nil {
+			spec := job.Spec
+			steering := sdk.WorkJobSteering{Content: input.Content}
+			if spec.Steering != nil {
+				steering.DeniedTools = append([]string(nil), spec.Steering.DeniedTools...)
+			}
+			spec.Steering = &steering
+			job, err = h.Runtime.ReviseWorkJob(r.Context(), record.ID, sdk.ReviseWorkJobRequest{ExpectedRevision: input.ExpectedRevision, Spec: spec})
+		}
 	case "pause":
 		job, err = h.Runtime.PauseWorkJob(r.Context(), record.ID)
 	case "resume":
@@ -834,6 +862,10 @@ func (h *Host) checkJobs(ctx context.Context) {
 	for _, record := range records {
 		job, err := h.Runtime.GetWorkJob(ctx, record.ID)
 		if err != nil {
+			continue
+		}
+		if h.recoverJobAuthentication(ctx, record, job) {
+			h.wakeJobs()
 			continue
 		}
 		notify := ""
@@ -1085,10 +1117,14 @@ func (h *Host) reportJob(ctx context.Context, record JobRecord, job *sdk.WorkJob
 			sdk.WorkJobWaitingNoProgress:       "several workers in a row could not complete any item",
 			sdk.WorkJobWaitingExceptions:       "more items ended as exceptions than the job allows",
 			sdk.WorkJobWaitingBudget:           "it reached its token budget",
-			sdk.WorkJobWaitingWorkerAuth:       "a worker needs the AI connection to be signed in again",
+			sdk.WorkJobWaitingWorkerAuth:       jobAuthExplanation(h.jobPending(ctx, job)),
 			sdk.WorkJobWaitingUncertainEffects: "a worker made changes (for example sent or updated something) and stopped before finishing its items, so retrying them could repeat those changes",
 		}[job.WaitingReason]
 		model = fmt.Sprintf("Your batch job %q (%s) paused because %s. Progress: %s. Results so far are in %s. Explain this to the user with examples from get_batch_job and ask whether to continue (they can press Resume on the job card) or change the approach.", record.Title, record.ID, reason, counts, datasetPath)
+		if job.WaitingReason == sdk.WorkJobWaitingWorkerAuth {
+			model = fmt.Sprintf("Your batch job %q (%s) is waiting because %s. Progress: %s. Inspect get_batch_job blockers and identify the exact connection. Ask the user to reconnect that connection; Rex will attempt worker recovery automatically. Job-level Resume does not resolve authentication. Assigned items are not evidence of active execution. Preserve this job and its results at %s; do not create a replacement solely for an authentication failure.", record.Title, record.ID, reason, counts, datasetPath)
+		}
+
 	}
 	_, _, err := h.deliver(ctx, record.ConversationID, delivery{UserText: shown, ModelText: model, Origin: "job"})
 	return err
