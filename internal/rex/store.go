@@ -199,6 +199,7 @@ ALTER TABLE instruction_proposals ADD COLUMN catalog_id TEXT NOT NULL DEFAULT ''
 		state TEXT NOT NULL DEFAULT 'queued', dataset_path TEXT NOT NULL DEFAULT '', notified_state TEXT NOT NULL DEFAULT '',
 		created_at DATETIME NOT NULL, updated_at DATETIME NOT NULL);
 	CREATE INDEX IF NOT EXISTS work_jobs_bot ON work_jobs(bot_id, created_at);`,
+	`CREATE TABLE IF NOT EXISTS work_job_auth_recovery (job_id TEXT NOT NULL, connection_id TEXT NOT NULL, interaction_id TEXT NOT NULL, fingerprint TEXT NOT NULL, PRIMARY KEY(job_id, connection_id));`,
 }
 
 func (s *Store) migrate(ctx context.Context) error {

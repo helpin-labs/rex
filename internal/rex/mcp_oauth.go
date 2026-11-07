@@ -242,6 +242,7 @@ func (h *Host) CompleteOAuth(ctx context.Context, state, code, providerError str
 		return nil, err
 	}
 	go h.resumeRunsWaitingFor(context.Background(), connection.ID)
+	h.wakeJobs()
 	return saved, nil
 }
 

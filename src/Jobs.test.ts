@@ -5,7 +5,7 @@ import type { JobView, WorkJob } from "./types";
 const counts = { total: 1000, pending: 840, running: 10, retry_wait: 3, blocked: 0, completed: 142, found: 120, no_result: 15, exceptions: 7, failed: 5, cancelled: 0 };
 const view = (job: Partial<WorkJob>): JobView => ({
   id: "j", bot_id: "b", conversation_id: "c", title: "Schools", state: job.state || "running", created_at: "", updated_at: "", current: [], items_per_minute: 0,
-  job: { id: "j", state: "running", spec: { objective: "", batch_size: 10, max_concurrency: 1 }, counts, usage: { input_tokens: 0, output_tokens: 0, cached_input_tokens: 0, reserved_tokens: 0 }, active_runs: ["r1"], dataset_revision: 0, created_at: "", updated_at: "", ...job },
+  job: { spec_revision: 1, id: "j", state: "running", spec: { objective: "", batch_size: 10, max_concurrency: 1 }, counts, usage: { input_tokens: 0, output_tokens: 0, cached_input_tokens: 0, reserved_tokens: 0 }, active_runs: ["r1"], dataset_revision: 0, created_at: "", updated_at: "", ...job },
 });
 
 describe("batch job display", () => {

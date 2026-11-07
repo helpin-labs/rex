@@ -357,7 +357,8 @@ export type WorkJob = {
   waiting_reason?: string;
   blocked_run_id?: string;
   error?: string;
-  spec: { objective: string; batch_size: number; max_concurrency: number };
+  spec_revision: number;
+  spec: { objective: string; batch_size: number; max_concurrency: number; steering?: { content: string; denied_tools?: string[] } };
   counts: WorkJobCounts;
   usage: { input_tokens: number; output_tokens: number; cached_input_tokens: number; reserved_tokens: number };
   active_runs: string[];
@@ -389,6 +390,9 @@ export type JobView = {
   error?: string;
 };
 export type JobWorker = {
+  status?: string;
+  pause_reason?: string;
+  steering?: { command_id: string; revision: number; state: string; content: string }[];
   recovery_reason?: string;
   run_id: string;
   started_at: string;

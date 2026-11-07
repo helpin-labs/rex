@@ -25,7 +25,7 @@ const waitingText: Record<string, string> = {
   exceptions: "More items ended as exceptions than the job allows. Review them, then resume to accept them.",
   budget: "The job reached its token budget.",
   worker_input: "Workers are waiting for your answer below.",
-  worker_auth: "A worker needs the AI connection to be signed in again.",
+  worker_auth: "A worker needs a connection to be signed in again. Open its details to identify the connection.",
   dependencies: "The remaining items wait for others to finish.",
   unavailable: "The bot engine cannot run this job right now.",
   retry_backoff: "Waiting to retry items whose sites did not answer.",
@@ -88,6 +88,8 @@ export function JobCard({ view, bot, onChanged, showBot }: { view: JobView; bot?
   const [busy, setBusy] = useState("");
   const [error, setError] = useState("");
   const [itemsOpen, setItemsOpen] = useState(false);
+  const [steeringOpen, setSteeringOpen] = useState(false);
+  const [instruction, setInstruction] = useState("");
   const job = view.job;
   const phase = jobPhase(view);
   const act = async (action: "pause" | "resume") => {
@@ -127,7 +129,17 @@ export function JobCard({ view, bot, onChanged, showBot }: { view: JobView; bot?
     {job?.state === "paused" && <p className="job-note muted">Paused. Workers finish their current batch; no new batches start.</p>}
     {job?.error && <p className="job-note danger-text">{job.error}</p>}
     {error && <p className="job-note danger-text">{error}</p>}
+    {steeringOpen && job && <form className="job-note" onSubmit={async event => {
+      event.preventDefault(); setBusy("steer"); setError("");
+      try { onChanged(await api.steerJob(view.id, job.spec_revision, instruction)); setInstruction(""); setSteeringOpen(false); }
+      catch (caught) { setError(errorMessage(caught)); } finally { setBusy(""); }
+    }}>
+      <label>Instructions for workers<textarea value={instruction} onChange={event => setInstruction(event.target.value)} maxLength={32768} required /></label>
+      <p className="muted small">Applied at the next safe boundary. Completed results stay saved; work already in progress may finish.</p>
+      <button className="button small primary" disabled={!!busy || !instruction.trim()}>Send instructions</button>
+    </form>}
     <footer className="job-actions">
+      {active && <button type="button" className="button small ghost" aria-expanded={steeringOpen} onClick={() => setSteeringOpen(!steeringOpen)}>Steer workers</button>}
       <button type="button" className="button small ghost" onClick={() => setItemsOpen(true)}><ListChecks size={13} />Items</button>
       {view.dataset_path && <button type="button" className="button small ghost" onClick={() => void api.revealJobResults(view.id).catch(caught => setError(errorMessage(caught)))}><FolderOpen size={13} />Results</button>}
       <span className="spacer" />
@@ -180,14 +192,15 @@ export function JobWorkers({ workers }: { workers: JobWorker[] }) {
       return <li key={worker.run_id} className="job-worker">
         <button type="button" className="job-worker-row" aria-expanded={expanded} onClick={() => setOpen(expanded ? "" : worker.run_id)}>
           {expanded ? <ChevronDown size={13} /> : <ChevronRight size={13} />}
-          <LoaderCircle className={worker.recovery_reason ? "" : "spin"} size={12} />
+          <LoaderCircle className={worker.recovery_reason || worker.status === "paused" ? "" : "spin"} size={12} />
           <strong>Worker {index + 1}</strong>
           <span className="muted">{worker.done}/{worker.items.length}</span>
-          <span className="job-worker-step">{worker.recovery_reason ? (worker.recovery_reason === "provider_busy" ? "Provider busy. Retrying automatically…" : "Waiting to reconnect. Will resume automatically…") : latest ? workerStepLabel(latest) : "Starting…"}</span>
+          <span className="job-worker-step">{worker.status === "paused" ? (worker.pause_reason === "authentication" ? "Waiting for connection sign-in" : "Waiting for input") : worker.recovery_reason ? (worker.recovery_reason === "provider_busy" ? "Provider busy. Retrying automatically…" : "Waiting to reconnect. Will resume automatically…") : latest ? workerStepLabel(latest) : "Starting…"}</span>
           <small className="muted">{relativeTime(latest?.created_at || worker.started_at)}</small>
         </button>
         {expanded && <div className="job-worker-detail">
           <p className="muted small">Batch: {worker.items.map(item => item.label).join(", ")}</p>
+          {worker.steering?.map(command => <p key={command.command_id} className="muted small">Instruction {command.revision}: {command.state === "accepted" ? "waiting for a safe boundary" : command.state === "applied" ? "applied" : "not applied"}</p>)}
           {steps.length > 0 && <ol className="job-worker-steps">
             {steps.map((step, stepIndex) => <li key={stepIndex} className={step.status === "failed" ? "danger-text" : ""}>
               {workerStepLabel(step)} <small className="muted">{relativeTime(step.created_at)}</small>
