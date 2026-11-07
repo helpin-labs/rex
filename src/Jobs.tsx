@@ -1,5 +1,5 @@
-import { useCallback, useEffect, useState } from "react";
-import { ChevronDown, ChevronRight, FolderOpen, ListChecks, LoaderCircle, Pause, Play, Square } from "lucide-react";
+import { useCallback, useEffect, useRef, useState } from "react";
+import { ChevronDown, ChevronRight, FolderOpen, ListChecks, LoaderCircle, Pause, Play } from "lucide-react";
 import { api } from "./api";
 import { isControlTool, stepLabel } from "./steps";
 import { ApprovalCard, QuestionCard } from "./Chat";
@@ -90,8 +90,7 @@ export function JobCard({ view, bot, onChanged, showBot }: { view: JobView; bot?
   const [itemsOpen, setItemsOpen] = useState(false);
   const job = view.job;
   const phase = jobPhase(view);
-  const act = async (action: "pause" | "resume" | "cancel") => {
-    if (action === "cancel" && !window.confirm(`Cancel “${view.title}”? Finished items are kept.`)) return;
+  const act = async (action: "pause" | "resume") => {
     setBusy(action); setError("");
     try { onChanged(await api.jobAction(view.id, action)); } catch (caught) { setError(errorMessage(caught)); } finally { setBusy(""); }
   };
@@ -125,6 +124,7 @@ export function JobCard({ view, bot, onChanged, showBot }: { view: JobView; bot?
     {(view.pending?.length ?? 0) > 0 && <JobPending view={view} onChanged={onChanged} />}
     {view.browser_note && active && <p className="job-note muted">{view.browser_note}</p>}
     {job?.state === "waiting" && job.waiting_reason && <p className="job-note">{waitingText[job.waiting_reason] || "Waiting."}</p>}
+    {job?.state === "paused" && <p className="job-note muted">Paused. Workers finish their current batch; no new batches start.</p>}
     {job?.error && <p className="job-note danger-text">{job.error}</p>}
     {error && <p className="job-note danger-text">{error}</p>}
     <footer className="job-actions">
@@ -136,7 +136,7 @@ export function JobCard({ view, bot, onChanged, showBot }: { view: JobView; bot?
         <button type="button" className="button small ghost" disabled={!!busy} onClick={() => void act("pause")}><Pause size={13} />Pause</button>}
       {(job?.state === "paused" || (job?.state === "waiting" && decisionReasons.includes(job.waiting_reason || ""))) &&
         <button type="button" className="button small primary" disabled={!!busy} onClick={() => void act("resume")}><Play size={13} />{job.state === "paused" ? "Resume" : "Continue"}</button>}
-      {active && <button type="button" className="button small ghost danger-text" disabled={!!busy} onClick={() => void act("cancel")}><Square size={12} />Cancel</button>}
+
     </footer>
     {itemsOpen && <JobItemsModal view={view} onClose={() => setItemsOpen(false)} />}
   </section>;
@@ -304,32 +304,104 @@ export function JobItemsModal({ view, onClose }: { view: JobView; onClose: () =>
 
 /** Jobs of one bot, polled while the conversation is open. */
 export function useBotJobs(botId: string): [JobView[], (view: JobView) => void] {
-  const [jobs, setJobs] = useState<JobView[]>([]);
+  const [snapshot, setSnapshot] = useState<{ botId: string; jobs: JobView[] }>({ botId, jobs: [] });
+  const revision = useRef(0);
   useEffect(() => {
     let stopped = false;
-    const load = () => api.jobs(botId).then(list => { if (!stopped) setJobs(list); }).catch(() => undefined);
+    const load = () => {
+      const version = revision.current;
+      return api.jobs(botId).then(jobs => {
+        if (!stopped && version === revision.current) setSnapshot({ botId, jobs });
+      }).catch(() => undefined);
+    };
     void load();
     const timer = window.setInterval(load, 3000);
     return () => { stopped = true; window.clearInterval(timer); };
   }, [botId]);
-  const replace = (view: JobView) => setJobs(current => current.map(item => item.id === view.id ? { ...item, ...view } : item));
-  return [jobs, replace];
+  const replace = (view: JobView) => {
+    revision.current++;
+    setSnapshot(current => current.botId !== view.bot_id ? current : {
+      ...current, jobs: current.jobs.map(item => item.id === view.id ? { ...item, ...view } : item),
+    });
+  };
+  return [snapshot.botId === botId ? snapshot.jobs : [], replace];
 }
 
-/** Jobs pinned in a bot's conversation: running ones, plus ones that finished in the last day. */
-export function ConversationJobs({ bot }: { bot: Bot }) {
-  const [jobs, replace] = useBotJobs(bot.id);
-  const [showDone, setShowDone] = useState(false);
-  const dayAgo = Date.now() - 24 * 3600 * 1000;
-  const active = jobs.filter(jobActive);
-  const recent = jobs.filter(view => !jobActive(view) && new Date(view.updated_at).getTime() > dayAgo);
-  if (active.length === 0 && recent.length === 0) return null;
-  return <div className="conversation-jobs">
-    {active.map(view => <JobCard key={view.id} view={view} bot={bot} onChanged={replace} />)}
-    {recent.length > 0 && (showDone || active.length === 0
-      ? recent.slice(0, 3).map(view => <JobCard key={view.id} view={view} bot={bot} onChanged={replace} />)
-      : <button type="button" className="link-button small" onClick={() => setShowDone(true)}>{recent.length} finished job{recent.length > 1 ? "s" : ""}</button>)}
+export function jobPausable(view: JobView): boolean {
+  return jobActive(view) && (view.job?.state || view.state) !== "paused";
+}
+
+/** Pause each job independently so one failure does not hide other successful pauses. */
+export function PauseJobsButton({ jobs, onChanged }: { jobs: JobView[]; onChanged: (view: JobView) => void }) {
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState("");
+  const active = jobs.filter(jobPausable);
+  const pause = async () => {
+    setBusy(true); setError("");
+    const results = await Promise.allSettled(active.map(async view => onChanged(await api.jobAction(view.id, "pause"))));
+    const failures = results.flatMap((result, i) => result.status === "rejected" ? [`${active[i].title}: ${errorMessage(result.reason)}`] : []);
+    setError(failures.join("; ")); setBusy(false);
+  };
+  if (!active.length && !error) return null;
+  return <div className="pause-jobs-control">
+    {!!active.length && <button type="button" className="button small ghost" disabled={busy} onClick={() => void pause()} title="Pause jobs after their current batches finish">
+      <Pause size={14} />{busy ? "Pausing…" : active.length === 1 ? "Pause job" : "Pause jobs"}
+    </button>}
+    {error && <span role="alert" className="danger-text small">{error}</span>}
   </div>;
+}
+
+function CompactJob({ view, bot, onChanged }: { view: JobView; bot: Bot; onChanged: (view: JobView) => void }) {
+  const [open, setOpen] = useState(false);
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState("");
+  const phase = jobPhase(view);
+  const paused = (view.job?.state || view.state) === "paused";
+  const actionable = paused || jobPausable(view);
+  const act = async () => {
+    setBusy(true); setError("");
+    try { onChanged(await api.jobAction(view.id, paused ? "resume" : "pause")); }
+    catch (caught) { setError(errorMessage(caught)); } finally { setBusy(false); }
+  };
+  return <section className="job-compact" aria-label={`Job ${view.title}`}>
+    <div className="job-compact-row">
+      <button type="button" className="job-compact-details" onClick={() => setOpen(true)} aria-label={`View ${view.title}`}>
+        <ListChecks size={15} />
+        <strong title={view.title}>{view.title}</strong>
+        <span className={`job-compact-phase ${phase.tone}`}>{phase.label}</span>
+        <span className="job-compact-count">{jobFraction(view)}</span>
+        <ChevronRight size={14} />
+      </button>
+      {actionable && <button type="button" className="button small ghost" disabled={busy} onClick={() => void act()} aria-label={`${paused ? "Resume" : "Pause"} ${view.title}`} title={paused ? "Resume job" : "Pause after the current batch"}>
+        {busy ? <LoaderCircle size={13} className="spin" /> : paused ? <Play size={13} /> : <Pause size={13} />}{paused ? "Resume" : "Pause"}
+      </button>}
+    </div>
+    <JobProgress view={view} thin />
+    {error && <p role="alert" className="danger-text small">{error}</p>}
+    {open && <Modal title={view.title} onClose={() => setOpen(false)}><JobCard view={view} bot={bot} onChanged={onChanged} /></Modal>}
+  </section>;
+}
+
+type ConversationJobProps = { bot: Bot; jobs: JobView[]; onChanged: (view: JobView) => void };
+
+/** Only executing jobs occupy the bounded composer area. */
+export function ConversationJobs({ bot, jobs, onChanged }: ConversationJobProps) {
+  const active = jobs.filter(jobPausable);
+  if (!active.length) return null;
+  return <div className="conversation-jobs" aria-label="Active jobs">
+    {active.map(view => <CompactJob key={view.id} view={view} bot={bot} onChanged={onChanged} />)}
+  </div>;
+}
+
+/** Paused and finished jobs stay accessible in the scrolling transcript. */
+export function ConversationJobHistory({ bot, jobs, onChanged }: ConversationJobProps) {
+  const history = jobs.filter(view => !jobPausable(view));
+  const paused = history.filter(jobActive).length;
+  if (!history.length) return null;
+  return <details className="conversation-job-history">
+    <summary>Earlier jobs · {history.length}{paused > 0 ? ` · ${paused} paused` : ""}</summary>
+    {history.map(view => <CompactJob key={view.id} view={view} bot={bot} onChanged={onChanged} />)}
+  </details>;
 }
 
 /** Every job, newest first, from the Jobs tab. */

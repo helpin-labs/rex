@@ -1,4 +1,4 @@
-import { ConversationJobs } from "./Jobs";
+import { ConversationJobs, ConversationJobHistory, PauseJobsButton, jobPausable, useBotJobs } from "./Jobs";
 import { Fragment, type KeyboardEvent, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { JsonBlock, TextWithJson } from "./JsonBlock";
 import { AlarmClock, ArrowDown, ArrowUp, Search, BookOpen, Brain, CircleAlert, ExternalLink, Eye, FileCode2, FileText, FolderOpen, Hand, KeyRound, MousePointerClick, Paperclip, RotateCcw, ShieldCheck, SlidersHorizontal, Square, X } from "lucide-react";
@@ -260,6 +260,8 @@ function useTurnEvents(turns: Turn[], timelines: Record<string, { events: RunEve
 const TURNS_SHOWN = 30;
 
 export function Chat({ bot, bots, conversationId, status, pending: waiting, defaultModel, onChanged, onEdit, onOpenSettings, onOpenApps, onTyping }: { bot: Bot; bots: Bot[]; conversationId: string; status: Status | null; pending: AttentionItem[]; defaultModel?: string; onChanged: () => void; onEdit: () => void; onOpenSettings?: (tab: "memory") => void; onOpenApps?: (appId: string) => void; onTyping?: (botId: string | null) => void }) {
+  const [jobs, replaceJob] = useBotJobs(bot.id);
+  const hasRunningJobs = jobs.some(jobPausable);
   const missed = waiting.filter(item => item.kind === "missed");
   const proposalKey = waiting.filter(item => item.kind === "proposal").map(item => item.id).join(",");
   const [proposals, setProposals] = useState<InstructionProposal[]>([]);
@@ -537,6 +539,7 @@ export function Chat({ bot, bots, conversationId, status, pending: waiting, defa
             onEditMessage={index === turns.length - 1 && !working && pending.length === 0 && !turn.origin && turn.user_text ? editMessage : undefined} />
         </Fragment>)}
         {detail?.conversation.context_start && lastTurn && lastTurn.started_at < detail.conversation.context_start && <p className="fresh-note">Fresh start. {bot.name} won't carry the conversation above into new messages; memories still apply.</p>}
+        <ConversationJobHistory key={bot.id} bot={bot} jobs={jobs} onChanged={replaceJob} />
         {proposals.map(proposal => <ProposalCard key={proposal.id} bot={bot} proposal={proposal} onOpenApps={onOpenApps} onAnswered={() => { setProposals(current => current.filter(item => item.id !== proposal.id)); onChanged(); }} />)}
         {missed.map(item => <MissedCard key={item.id} item={item} onAnswered={() => { void load(); onChanged(); }} />)}
         {signIns.map(interaction => <ReconnectCard key={interaction.id} interaction={interaction} />)}
@@ -545,7 +548,7 @@ export function Chat({ bot, bots, conversationId, status, pending: waiting, defa
       </div></div>
       {showJump && <button type="button" className="jump-latest" onClick={jumpToLatest}><ArrowDown size={14} />Jump to latest</button>}
       <footer className="composer-wrap">
-        <ConversationJobs bot={bot} />
+        <ConversationJobs key={bot.id} bot={bot} jobs={jobs} onChanged={replaceJob} />
         {error && <div className="inline-error"><CircleAlert size={14} /><span>{error}</span><button type="button" className="icon-button ghost tiny" onClick={() => setError("")}><X size={12} /></button></div>}
         {attachments.length > 0 && <div className="attachments">{attachments.map((item, index) => <span className="attachment" key={index}><Paperclip size={12} />{item.name}<button type="button" onClick={() => setAttachments(current => current.filter((_, i) => i !== index))} aria-label={`Remove ${item.name}`}><X size={11} /></button></span>)}</div>}
         <div className="composer">
@@ -554,8 +557,9 @@ export function Chat({ bot, bots, conversationId, status, pending: waiting, defa
           <textarea ref={composerRef} value={draft} onChange={event => setDraft(event.target.value)} onKeyDown={onKeyDown} rows={1}
             placeholder={questions.length ? "Answer the bot…" : approvals.length ? "Answer the approval above first" : `Message ${bot.name}`}
             disabled={approvals.length > 0} />
-          {working ? <button type="button" className="send stop" title="Stop" onClick={() => activeRun && api.cancel(activeRun.id).then(load)}><Square size={14} /></button>
-            : <button type="button" className="send" title="Send" disabled={sending || (!draft.trim() && !attachments.length) || approvals.length > 0} onClick={() => void send()}><ArrowUp size={17} /></button>}
+          <PauseJobsButton key={bot.id} jobs={jobs} onChanged={replaceJob} />
+          {working && !hasRunningJobs ? <button type="button" className="send stop" title="Stop" onClick={() => activeRun && api.cancel(activeRun.id).then(load).catch(caught => setError(errorMessage(caught)))}><Square size={14} /></button>
+            : <button type="button" className="send" title="Send" disabled={working || sending || (!draft.trim() && !attachments.length) || approvals.length > 0} onClick={() => void send()}><ArrowUp size={17} /></button>}
         </div>
         <div className="composer-hint"><span className="model-name">{bot.model || defaultModel || "provider default"}</span> · Enter to send, Shift+Enter for a new line · drop files to attach</div>
       </footer>
