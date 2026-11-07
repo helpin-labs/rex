@@ -164,16 +164,18 @@ export const TurnView = memo(function TurnView({ turn, bot, events, working, mem
     onTyping(typing);
     return () => onTyping(false);
   }, [onTyping, typing]);
-  const elapsedMs = (turn.settled_at ? Date.parse(turn.settled_at) : now) - Date.parse(turn.started_at);
+  const endedAt = turn.settled_at ? Date.parse(turn.settled_at) : now;
+  const waitMs = (state.recovery_wait_ms || 0) + (state.recovery_started_at ? Math.max(0, endedAt - Date.parse(state.recovery_started_at)) : 0);
+  const elapsedMs = Math.max(0, endedAt - Date.parse(turn.started_at) - waitMs);
   const latest = [...tools].reverse()[0];
   const thinking = state.reasoning.some(item => item.status !== "completed");
 
   let workRow = null;
   if (working) {
-    const label = latest && latest.status === "running" ? stepLabel(latest) : thinking ? "Thinking" : answer ? "Writing" : latest ? stepLabel(latest) : "Working";
+    const label = state.recovery_reason ? (state.recovery_reason === "provider_busy" ? "Provider busy. Retrying automatically…" : "Waiting for connection. Will resume automatically…") : latest && latest.status === "running" ? stepLabel(latest) : thinking ? "Thinking" : answer ? "Writing" : latest ? stepLabel(latest) : "Working";
     workRow = <div className="work-group active">
       <button type="button" className="work-head" onClick={() => setOpen(value => !value)} aria-expanded={open}>
-        <LoaderCircle className="spin work-icon" size={13} />
+        <LoaderCircle className={state.recovery_reason ? "work-icon" : "spin work-icon"} size={13} />
         <span className="work-label">{label}</span>
         <span className="spacer" />
         <span className="work-meta">{formatElapsed(elapsedMs)}{tools.length > 1 ? ` · ${tools.length - 1} earlier ${tools.length === 2 ? "step" : "steps"}` : ""}</span>

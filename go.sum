@@ -160,6 +160,8 @@ github.com/grpc-ecosystem/go-grpc-middleware/v2 v2.3.2 h1:sGm2vDRFUrQJO/Veii4h4z
 github.com/grpc-ecosystem/go-grpc-middleware/v2 v2.3.2/go.mod h1:wd1YpapPLivG6nQgbf7ZkG1hhSOXDhhn4MLTknx2aAc=
 github.com/grpc-ecosystem/grpc-gateway/v2 v2.22.0 h1:asbCHRVmodnJTuQ3qamDwqVOIjwqUPTYmYuemVOx+Ys=
 github.com/grpc-ecosystem/grpc-gateway/v2 v2.22.0/go.mod h1:ggCgvZ2r7uOoQjOyu2Y1NhHmEPPzzuhWgcza5M1Ji1I=
+github.com/helpin-ai/agent-runtime v0.14.0-rc.1.0.20261107071253-0b04b2b4c91f h1:0Pw0oUkWKClh/5L843A/8447hVFUCQ1eia7hCnGz80A=
+github.com/helpin-ai/agent-runtime v0.14.0-rc.1.0.20261107071253-0b04b2b4c91f/go.mod h1:fuYNhAlg+JXiUQwzaebecSLowtpLypJUExa4jQC5OE8=
 github.com/helpin-ai/agent-runtime v0.14.0 h1:cvV/oKULgInF9SGVS/4oDIQUz62Z6K78wDTV5KXmZjw=
 github.com/helpin-ai/agent-runtime v0.14.0/go.mod h1:fuYNhAlg+JXiUQwzaebecSLowtpLypJUExa4jQC5OE8=
 github.com/helpin-ai/agent-runtime-go v0.10.0 h1:ycwu2zWLwL/aOBVx9aKyV1SmkYygCR7rRJLmrenEUlc=

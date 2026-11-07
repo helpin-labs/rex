@@ -76,11 +76,12 @@ type JobView struct {
 // JobWorker is one running worker: its batch, how far it got and what it
 // did last, newest step first.
 type JobWorker struct {
-	RunID     string          `json:"run_id"`
-	StartedAt time.Time       `json:"started_at"`
-	Items     []JobItemRef    `json:"items"`
-	Done      int             `json:"done"`
-	Steps     []JobWorkerStep `json:"steps"`
+	RecoveryReason string          `json:"recovery_reason,omitempty"`
+	RunID          string          `json:"run_id"`
+	StartedAt      time.Time       `json:"started_at"`
+	Items          []JobItemRef    `json:"items"`
+	Done           int             `json:"done"`
+	Steps          []JobWorkerStep `json:"steps"`
 }
 
 type JobWorkerStep struct {
@@ -669,6 +670,11 @@ func (h *Host) jobWorkers(ctx context.Context, jobID string, labels map[string]s
 			continue
 		}
 		worker := JobWorker{RunID: attempt.RunID, StartedAt: attempt.StartedAt, Done: attempt.Accepted, Items: []JobItemRef{}, Steps: []JobWorkerStep{}}
+		if run, err := h.Runtime.GetRun(ctx, attempt.RunID); err == nil && run != nil {
+			if recovery, ok := run.Input.Metadata["runtime_recovery"].(map[string]interface{}); ok {
+				worker.RecoveryReason, _ = recovery["reason"].(string)
+			}
+		}
 		for _, id := range attempt.ItemIDs {
 			worker.Items = append(worker.Items, JobItemRef{ID: id, Label: defaultString(labels[id], id)})
 		}

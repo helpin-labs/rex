@@ -237,6 +237,9 @@ export type RunStreamState = {
   plan_note: string;
   timeline: RunTimelineSegment[];
   run_status?: string;
+  recovery_reason?: string;
+  recovery_started_at?: string;
+  recovery_wait_ms?: number;
   pause_reason?: string;
   error?: string;
   seen_event_ids: string[];
@@ -386,6 +389,7 @@ export type JobView = {
   error?: string;
 };
 export type JobWorker = {
+  recovery_reason?: string;
   run_id: string;
   started_at: string;
   items: { id: string; label: string }[];

@@ -382,6 +382,7 @@ func (l runtimeLaunch) start(ctx context.Context) (*exec.Cmd, <-chan error, <-ch
 		// Rex owns this runtime alone, so runs cut off by a quit, crash or
 		// settings restart are continued from their checkpoints.
 		"AGENT_RUNTIME_RECOVER_INTERRUPTED_RUNS=true",
+		"AGENT_RUNTIME_AUTOMATIC_RECOVERY=true",
 	)
 	command.Env = append(command.Env,
 		"AGENT_RUNTIME_BROWSER_PROFILE_ROOT="+filepath.Join(l.dataDir, "browser-profiles"),

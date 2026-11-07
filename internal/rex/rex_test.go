@@ -153,50 +153,36 @@ func TestRoutineSlotIsClaimedOnce(t *testing.T) {
 	}
 }
 
-func TestOnlyTheLatestMissedSlotIsOffered(t *testing.T) {
+func TestOnlyLatestOverdueSlotIsClaimedAutomatically(t *testing.T) {
 	ctx := context.Background()
 	store := openTestStore(t)
 	bot := Bot{Name: "R"}
 	_ = bot.Normalize(t.TempDir())
 	_ = store.SaveBot(ctx, &bot)
-	// A daily routine whose slot was three hours ago, last run ten days ago.
 	today := time.Now().Add(-3 * time.Hour).Truncate(time.Minute)
-	tenDaysAgo := today.AddDate(0, 0, -10).UTC()
-	routine := Routine{BotID: bot.ID, Title: "News", Prompt: "p", ScheduleKind: "daily", DailyTime: today.Local().Format("15:04"), Enabled: true, NextRunAt: &tenDaysAgo}
+	old := today.AddDate(0, 0, -10).UTC()
+	routine := Routine{BotID: bot.ID, Title: "News", Prompt: "p", ScheduleKind: "daily", DailyTime: today.Local().Format("15:04"), Enabled: true, NextRunAt: &old}
 	if err := store.SaveRoutine(ctx, &routine); err != nil {
 		t.Fatal(err)
 	}
-	scheduler := NewScheduler(&Host{Store: store})
-	scheduler.Tick(ctx)
+	// Claiming is atomic and does not require model or browser access.
+	claim, err := store.ClaimDueRoutine(ctx, routine.ID, old, routine.LatestDue(old, time.Now()), routine.NextSlot(time.Now()))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !claim.ScheduledFor.Equal(today.UTC()) {
+		t.Fatalf("wrong occurrence: %+v", claim)
+	}
+	if _, err := store.ClaimDueRoutine(ctx, routine.ID, old, today, routine.NextSlot(time.Now())); err == nil {
+		t.Fatal("duplicate claim accepted")
+	}
 	runs, _ := store.RoutineRuns(ctx, routine.ID, 20)
-	if len(runs) != 1 || runs[0].Status != "missed" || !runs[0].ScheduledFor.Equal(today.UTC()) {
-		t.Fatalf("ten skipped days are one missed run for the latest day, got %+v", runs)
+	if len(runs) != 1 || runs[0].Status != "claimed" {
+		t.Fatalf("wrong claims: %+v", runs)
 	}
 	updated, _ := store.GetRoutine(ctx, routine.ID)
 	if updated.NextRunAt == nil || !updated.NextRunAt.After(time.Now()) {
-		t.Fatalf("next run should move to the future, got %v", updated.NextRunAt)
-	}
-
-	// A later miss replaces the unanswered one.
-	later := time.Now().UTC().Add(-2 * time.Hour).Truncate(time.Minute)
-	if err := store.RecordMissedRoutine(ctx, routine.ID, *updated.NextRunAt, later, later.Add(24*time.Hour)); err != nil {
-		t.Fatal(err)
-	}
-	runs, _ = store.RoutineRuns(ctx, routine.ID, 20)
-	pending := 0
-	for _, run := range runs {
-		if run.Status == "missed" {
-			pending++
-		}
-	}
-	if pending != 1 {
-		t.Fatalf("only the latest miss waits for an answer, got %+v", runs)
-	}
-	if _, err := store.ResolveMissed(ctx, runs[0].ID, "skipped"); err != nil {
-		t.Fatal(err)
-	}
-	if _, err := store.ResolveMissed(ctx, runs[0].ID, "skipped"); err == nil {
-		t.Fatal("a miss is answered once")
+		t.Fatal("schedule not advanced")
 	}
 }
 

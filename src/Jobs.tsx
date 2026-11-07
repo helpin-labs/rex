@@ -180,10 +180,10 @@ export function JobWorkers({ workers }: { workers: JobWorker[] }) {
       return <li key={worker.run_id} className="job-worker">
         <button type="button" className="job-worker-row" aria-expanded={expanded} onClick={() => setOpen(expanded ? "" : worker.run_id)}>
           {expanded ? <ChevronDown size={13} /> : <ChevronRight size={13} />}
-          <LoaderCircle className="spin" size={12} />
+          <LoaderCircle className={worker.recovery_reason ? "" : "spin"} size={12} />
           <strong>Worker {index + 1}</strong>
           <span className="muted">{worker.done}/{worker.items.length}</span>
-          <span className="job-worker-step">{latest ? workerStepLabel(latest) : "Starting…"}</span>
+          <span className="job-worker-step">{worker.recovery_reason ? (worker.recovery_reason === "provider_busy" ? "Provider busy. Retrying automatically…" : "Waiting to reconnect. Will resume automatically…") : latest ? workerStepLabel(latest) : "Starting…"}</span>
           <small className="muted">{relativeTime(latest?.created_at || worker.started_at)}</small>
         </button>
         {expanded && <div className="job-worker-detail">

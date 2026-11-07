@@ -364,7 +364,7 @@ func (h *Host) SignOut(ctx context.Context, connectionID string) error {
 	}
 	if connection.Auth == "google" {
 		if secrets, err := h.oauthSecretsFor(connectionID); err == nil {
-			go revokeGoogle(firstNonEmpty(secrets.RefreshToken, secrets.AccessToken))
+			go revokeGoogle(googleRevokeURL, firstNonEmpty(secrets.RefreshToken, secrets.AccessToken))
 		}
 	}
 	if err := h.Settings.secrets.Delete(mcpOAuthKey(connectionID)); err != nil {
