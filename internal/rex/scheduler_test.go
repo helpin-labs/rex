@@ -160,3 +160,61 @@ func TestExplicitlyDisabledRoutineDoesNotResumeAtNextSlot(t *testing.T) {
 		t.Fatal("explicitly disabled routine resumed")
 	}
 }
+
+func TestDueRoutineClaimRollsBackScheduleOnConflict(t *testing.T) {
+	store, routine, now := routineRecoveryFixture(t)
+	expected := *routine.NextRunAt
+	if _, err := store.ClaimRoutineRun(t.Context(), routine.ID, expected, 1); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := store.ClaimDueRoutine(t.Context(), routine.ID, expected, expected, routine.NextSlot(expected)); err == nil {
+		t.Fatal("duplicate occurrence accepted")
+	}
+	saved, err := store.GetRoutine(t.Context(), routine.ID)
+	if err != nil || !saved.NextRunAt.Equal(expected) || saved.NextRunAt.Before(now) {
+		t.Fatalf("schedule advanced despite failed claim: %+v %v", saved, err)
+	}
+}
+
+func TestRoutineRecoveryKeepsClaimsWhenRuntimeUnavailable(t *testing.T) {
+	store, routine, now := routineRecoveryFixture(t)
+	claim, err := store.ClaimRoutineRun(t.Context(), routine.ID, now, 1)
+	if err != nil {
+		t.Fatal(err)
+	}
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		http.Error(w, "temporarily unavailable", http.StatusServiceUnavailable)
+	}))
+	defer server.Close()
+	scheduler := NewScheduler(&Host{Store: store, Runtime: newTestRuntimeClient(t, server.URL, "")})
+	scheduler.Recover(t.Context())
+	claims, err := store.OpenRoutineRuns(t.Context())
+	if err != nil || len(claims) != 1 || claims[0].ID != claim.ID || claims[0].Status != "claimed" {
+		t.Fatalf("lost pending claim: %+v %v", claims, err)
+	}
+}
+
+func TestRoutineAdmissionReusesTurnAfterRestart(t *testing.T) {
+	store, routine, now := routineRecoveryFixture(t)
+	claim, err := store.ClaimRoutineRun(t.Context(), routine.ID, now, 1)
+	if err != nil {
+		t.Fatal(err)
+	}
+	thread, err := store.ThreadForBot(t.Context(), Bot{ID: routine.BotID})
+	if err != nil {
+		t.Fatal(err)
+	}
+	scheduler := NewScheduler(&Host{Store: store})
+	first, err := scheduler.routineTurn(t.Context(), *routine, claim, thread)
+	if err != nil {
+		t.Fatal(err)
+	}
+	second, err := NewScheduler(scheduler.host).routineTurn(t.Context(), *routine, claim, thread)
+	if err != nil || first.ID != second.ID {
+		t.Fatalf("turn changed: %+v %v", second, err)
+	}
+	turns, err := store.TurnsForConversation(t.Context(), thread.ID)
+	if err != nil || len(turns) != 1 {
+		t.Fatalf("duplicate turns: %+v %v", turns, err)
+	}
+}

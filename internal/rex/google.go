@@ -287,13 +287,13 @@ func (h *Host) refreshGoogleToken(ctx context.Context, connection *MCPConnection
 
 // revokeGoogle tells Google to forget a sign-in, so signing out also
 // removes Rex from the user's Google account. It is best effort.
-func revokeGoogle(token string) {
+func revokeGoogle(endpoint, token string) {
 	if token == "" {
 		return
 	}
 	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 	defer cancel()
-	request, err := http.NewRequestWithContext(ctx, http.MethodPost, googleRevokeURL, strings.NewReader(url.Values{"token": {token}}.Encode()))
+	request, err := http.NewRequestWithContext(ctx, http.MethodPost, endpoint, strings.NewReader(url.Values{"token": {token}}.Encode()))
 	if err != nil {
 		return
 	}

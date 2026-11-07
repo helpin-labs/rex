@@ -20,7 +20,7 @@ Windows support is in development; see the [Windows preview instructions and ver
   - Browse curated GitHub collections (Anthropic's skills, marketing, sales, coding) and install a skill for a bot at a pinned version.
   - Bots can search the catalog and suggest a skill themselves.
 - **Self-improvement.** After corrections, failures, or every few tasks, a bot looks back at its recent work and suggests better instructions or a skill. Nothing changes until you apply it.
-- **Routines.** Daily, weekly or repeating tasks. Retries are bounded, and a restart never runs a task twice. A routine missed while the Mac was off is offered to you, not run late.
+- **Routines.** Daily, weekly or repeating tasks. Temporary connection failures resume automatically from saved progress. After sleep or a restart, the latest missed occurrence runs once.
 - **MCP connections.** Connect Streamable HTTP MCP servers (signing in with OAuth where they need it), pick their tools, and attach them to bots.
 - **Private by design.** Keys, ChatGPT sign-in and logins live in the macOS Keychain, and the app talks to its backend over loopback with a per-launch token.
 

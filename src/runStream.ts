@@ -11,6 +11,7 @@ import type {
 
 /** Event names the runtime's live stream (SSE) sends. */
 export const runEventTypes = [
+  "run.recovery_wait", "run.recovery_started",
   "run.queued", "run.started", "run.resumed", "run.paused", "run.completed", "run.failed", "run.cancelled",
   "assistant_message_started", "assistant_message_delta", "assistant_message_completed",
   "reasoning_message_started", "reasoning_message_delta", "reasoning_message_completed",
@@ -121,8 +122,22 @@ export function applyRunEvent(current: RunStreamState, event: RunEventEnvelope, 
   const data = event.data || {};
   const at = eventTime(event, receivedAt);
 
+  if (event.type === "run.recovery_wait") {
+    state.recovery_reason = text(data.reason);
+    state.recovery_started_at ||= at;
+    return state;
+  }
+  if ((event.type === "run.recovery_started" || event.type === "run.started" || terminalRunStatuses.has(event.type.slice(4))) && state.recovery_started_at) {
+    state.recovery_wait_ms = (state.recovery_wait_ms || 0) + Math.max(0, Date.parse(at) - Date.parse(state.recovery_started_at));
+    state.recovery_started_at = undefined;
+  }
+  if (event.type === "run.recovery_started") {
+    state.recovery_reason = undefined;
+    return state;
+  }
   if (event.type.startsWith("run.")) {
     state.run_status = event.type.slice(4);
+    state.recovery_reason = undefined;
     state.pause_reason = text(data.pause_reason) || state.pause_reason;
     if (event.type === "run.failed") state.error = text(data.error) || text(data.error_message) || "The run failed.";
   }

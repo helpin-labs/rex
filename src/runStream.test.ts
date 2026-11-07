@@ -56,3 +56,26 @@ describe("run stream projection", () => {
     expect(latestActivityLabel(state)).toBe("Using Web Search…");
   });
 });
+
+it("preserves running status and completed tools across recovery events", () => {
+ const waiting=applyRunEvents(emptyRunStreamState(),[
+ event("run.started",{},1),
+ event("tool_call_finished",{tool_call_id:"saved",tool_name:"web_search",output_summary:"saved result"},2),
+ event("run.recovery_wait",{reason:"connection_lost"},3),
+ ]);
+ expect(waiting.run_status).toBe("started");
+ expect(waiting.recovery_reason).toBe("connection_lost");
+ expect(waiting.tools[0].status).toBe("completed");
+ const resumed=applyRunEvent(waiting,event("run.recovery_started",{},4));
+ expect(resumed.recovery_reason).toBeUndefined();
+ expect(resumed.tools[0]).toEqual(waiting.tools[0]);
+});
+
+it("records retry waiting time separately from active work", () => {
+ const state=applyRunEvents(emptyRunStreamState(),[
+ event("run.recovery_wait",{reason:"connection_lost"},1),
+ event("run.recovery_started",{},6),
+ ]);
+ expect(state.recovery_wait_ms).toBe(5000);
+ expect(state.recovery_started_at).toBeUndefined();
+});

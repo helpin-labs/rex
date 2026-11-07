@@ -14,11 +14,8 @@ import (
 	"github.com/robfig/cron/v3"
 )
 
-// Routine is a recurring task for one bot. Routines only run while the Mac
-// is awake and Rex is running. A slot found less than MissedGrace late
-// still runs; a later one is recorded as missed and the user decides
-// whether to run it. However many slots passed, only the latest counts: a
-// daily routine skipped for ten days asks once, not ten times.
+// Routine is a recurring task for one bot. On wake/startup only the latest
+// unstarted occurrence catches up, avoiding a burst after a long absence.
 type Routine struct {
 	ID              string `json:"id"`
 	BotID           string `json:"bot_id"`
@@ -169,12 +166,25 @@ func (s *Scheduler) Loop(ctx context.Context) {
 
 // Tick handles every routine whose slot or retry is due.
 func (s *Scheduler) Tick(ctx context.Context) {
+	s.Recover(ctx)
+	open, err := s.host.Store.OpenRoutineRuns(ctx)
+	if err != nil {
+		return
+	}
+	active := map[string]bool{}
+	for _, claim := range open {
+		active[claim.RoutineID] = true
+	}
+
 	routines, err := s.host.Store.ListRoutines(ctx)
 	if err != nil {
 		return
 	}
 	now := s.now().UTC()
 	for _, routine := range routines {
+		if active[routine.ID] {
+			continue
+		}
 		// Older versions disabled failure-paused routines but retained their next slot.
 		if !routine.Enabled && !(routine.PausedReason != "" && routine.NextRunAt != nil) {
 			continue
@@ -200,16 +210,12 @@ func (s *Scheduler) Tick(ctx context.Context) {
 		next := routine.NextSlot(now)
 		// After sleep only the latest passed slot matters.
 		latest := routine.LatestDue(slot, now)
-		if now.Sub(latest) > MissedGrace {
-			// The Mac was asleep or Rex was closed. Ask the user instead
-			// of running a stale task late, and move to the next slot.
-			_ = s.host.Store.RecordMissedRoutine(ctx, routine.ID, slot, latest, next)
+		claim, err := s.host.Store.ClaimDueRoutine(ctx, routine.ID, slot, latest, next)
+		if err != nil {
 			continue
 		}
-		if err := s.host.Store.AdvanceRoutine(ctx, routine.ID, slot, next); err != nil {
-			continue
-		}
-		s.fire(ctx, routine, latest, 1)
+		s.fireClaim(ctx, routine, claim)
+
 	}
 }
 
@@ -228,6 +234,11 @@ func (s *Scheduler) fire(ctx context.Context, routine Routine, slot time.Time, a
 		// Already claimed by an earlier tick or before a restart.
 		return nil, err
 	}
+	return s.fireClaim(ctx, routine, claim)
+}
+
+func (s *Scheduler) fireClaim(ctx context.Context, routine Routine, claim *RoutineRun) (*RoutineRun, error) {
+	slot, attempt := claim.ScheduledFor, claim.Attempt
 	run, err := s.start(ctx, routine, claim)
 	if err != nil {
 		slog.Warn("routine failed to start", "routine", routine.ID, "error", err)
@@ -259,8 +270,8 @@ func (s *Scheduler) start(ctx context.Context, routine Routine, claim *RoutineRu
 			return nil, errors.New("the bot was busy in its conversation; the routine retries shortly")
 		}
 	}
-	turn := &Turn{ConversationID: conversation.ID, BotID: bot.ID, UserText: routine.Prompt, MemoryStatus: "skipped", Section: "⏰ " + routine.Title}
-	if err := s.host.Store.CreateTurn(ctx, turn); err != nil {
+	turn, err := s.routineTurn(ctx, routine, claim, conversation)
+	if err != nil {
 		return nil, err
 	}
 	instructions := fmt.Sprintf("This is a scheduled routine (%q), run at %s. Nobody is watching live, so finish the task without asking questions unless it is impossible, and save any output files under outputs/.\n\n%s",
@@ -316,16 +327,22 @@ func (s *Scheduler) afterFailure(ctx context.Context, routineID string, slot tim
 	}
 }
 
-// Recover reconciles claims left behind by a crash or quit. A claim that
-// never reached the runtime is marked interrupted and is not re-run.
+// Recover reconciles existing claims before creating another occurrence.
+// Lookup failures preserve pending work until the runtime responds again.
 func (s *Scheduler) Recover(ctx context.Context) {
 	claims, err := s.host.Store.OpenRoutineRuns(ctx)
 	if err != nil {
 		return
 	}
 	var runs []Run
-	if len(claims) > 0 {
-		runs, _ = s.host.Runtime.ListRuns(ctx)
+	for _, claim := range claims {
+		if claim.RunID == "" {
+			runs, err = s.host.Runtime.ListRuns(ctx)
+			if err != nil {
+				return
+			}
+			break
+		}
 	}
 	for _, claim := range claims {
 		runID := claim.RunID
@@ -337,8 +354,32 @@ func (s *Scheduler) Recover(ctx context.Context) {
 			}
 		}
 		if runID == "" {
-			_ = s.host.Store.FinishRoutineRun(ctx, claim.ID, "interrupted", "Rex stopped before this run started. It was not retried automatically.")
+			routine, err := s.host.Store.GetRoutine(ctx, claim.RoutineID)
+			if err == nil && routine.Enabled {
+				s.fireClaim(ctx, *routine, &claim)
+			}
 			continue
+		}
+		if claim.RunID == "" {
+			routine, err := s.host.Store.GetRoutine(ctx, claim.RoutineID)
+			if err != nil {
+				continue
+			}
+			bot, err := s.host.Store.GetBot(ctx, routine.BotID)
+			if err != nil {
+				continue
+			}
+			conversation, err := s.host.Store.ThreadForBot(ctx, *bot)
+			if err != nil {
+				continue
+			}
+			turn, err := s.routineTurn(ctx, *routine, &claim, conversation)
+			if err != nil {
+				continue
+			}
+			if err := s.host.Store.SetTurnRun(ctx, turn.ID, runID); err != nil {
+				continue
+			}
 		}
 		if claim.RunID == "" {
 			_ = s.host.Store.SetRoutineRunStarted(ctx, claim.ID, runID)
@@ -604,4 +645,46 @@ func (h *Host) answerMissed(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 	w.WriteHeader(http.StatusNoContent)
+}
+
+// ClaimDueRoutine advances the schedule and records its occurrence atomically.
+func (s *Store) ClaimDueRoutine(ctx context.Context, routineID string, expected, slot, next time.Time) (*RoutineRun, error) {
+	claim := &RoutineRun{ID: uuid.NewString(), RoutineID: routineID, ScheduledFor: slot, Attempt: 1, Status: "claimed", CreatedAt: time.Now().UTC()}
+	err := withTx(ctx, s.db, func(tx *sql.Tx) error {
+		result, err := tx.ExecContext(ctx, `UPDATE routines SET next_run_at=?,last_run_at=?,updated_at=? WHERE id=? AND next_run_at=? AND enabled=1`, next, slot, claim.CreatedAt, routineID, expected)
+		if err != nil {
+			return err
+		}
+		count, err := result.RowsAffected()
+		if err != nil {
+			return err
+		}
+		if count != 1 {
+			return errors.New("slot already taken")
+		}
+		_, err = tx.ExecContext(ctx, `INSERT INTO routine_runs(id,routine_id,scheduled_for,attempt,status,created_at) VALUES(?,?,?,?,?,?)`, claim.ID, routineID, slot, 1, claim.Status, claim.CreatedAt)
+		return err
+	})
+	return claim, err
+}
+
+// A stable turn ID closes the crash window between runtime admission and linkage.
+func (s *Scheduler) routineTurn(ctx context.Context, routine Routine, claim *RoutineRun, conversation *Conversation) (*Turn, error) {
+	id := "routine-turn-" + claim.ID
+	if turn, err := s.host.Store.GetTurn(ctx, id); err == nil {
+		if turn.RunID == "" && turn.Status == "failed" && turn.AssistantText == "Rex stopped before this message reached the bot. Send it again." {
+			_, err = s.host.Store.db.ExecContext(ctx, `UPDATE turns SET status='working',assistant_text='',settled_at=NULL WHERE id=? AND run_id='' AND status='failed'`, id)
+			if err != nil {
+				return nil, err
+			}
+		}
+		return turn, nil
+	} else if !errors.Is(err, ErrNotFound) {
+		return nil, err
+	}
+	turn := &Turn{ID: id, ConversationID: conversation.ID, BotID: routine.BotID, UserText: routine.Prompt, MemoryStatus: "skipped", Section: "⏰ " + routine.Title}
+	if err := s.host.Store.CreateTurn(ctx, turn); err != nil {
+		return nil, err
+	}
+	return turn, nil
 }
