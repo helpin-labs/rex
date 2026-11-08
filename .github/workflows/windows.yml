@@ -175,6 +175,11 @@ jobs:
             src-tauri/target/release/build
             src-tauri/target/release/.fingerprint
           key: windows-x64-rust-${{ steps.rust.outputs.version }}-${{ hashFiles('src-tauri/Cargo.lock') }}
+      - name: Stage the NSIS toolset through the GitHub API
+        shell: pwsh
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: ./scripts/windows-stage-nsis.ps1
       - name: Bundle and sign the compiled desktop executable
         shell: pwsh
         run: |
