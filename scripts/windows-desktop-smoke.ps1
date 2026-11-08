@@ -51,9 +51,12 @@ try {
     $snapshot = Invoke-Browser 'snapshot -i'
     $snapshot | Set-Content (Join-Path $evidence 'onboarding.txt')
     if ($snapshot -notmatch 'Find models') { throw "Onboarding controls missing: $snapshot" }
-    Invoke-Browser 'find role button click --name "Hosted (Anthropic, OpenAI, OpenRouter)"' | Out-Null
+    Invoke-Browser 'find role button click --name "ChatGPT plan"' | Out-Null
     $snapshot = Invoke-Browser 'snapshot -i'
-    if ($snapshot -notmatch 'Anthropic API key' -or $snapshot -notmatch 'OpenAI API key') { throw "Hosted onboarding did not render: $snapshot" }
+    if ($snapshot -notmatch 'Sign in with ChatGPT') { throw "ChatGPT onboarding did not render: $snapshot" }
+    Invoke-Browser 'find role button click --name "API key (Anthropic, OpenAI, OpenRouter)"' | Out-Null
+    $snapshot = Invoke-Browser 'snapshot -i'
+    if ($snapshot -notmatch 'Anthropic API key' -or $snapshot -notmatch 'OpenAI API key') { throw "API key onboarding did not render: $snapshot" }
     Invoke-Browser 'eval "window.__TAURI_INTERNALS__.invoke(''set_attention'', {count: 12})"' | Out-Null
     Invoke-Browser 'eval "window.__TAURI_INTERNALS__.invoke(''set_attention'', {count: 0})"' | Out-Null
     Invoke-Browser "screenshot $evidence/installed-desktop.png" | Out-Null
