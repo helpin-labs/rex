@@ -44,7 +44,7 @@ it("opens a paused worker by itself, says why it stopped and offers a reply", as
  const question = { id: "q1", run_id: "w2", interaction_kind: "request_user_input", status: "pending", title: "Which founding year?", request_payload: { question: "Which founding year?" } };
  const waiting = job("Research", "waiting", [
   worker("w1"),
-  worker("w2", { status: "paused", pause_reason: "human_input", last_message: "The site lists 1998 and 2001.", pending: [question as never] }),
+  worker("w2", { status: "paused", pause_reason: "human_input", last_message: "The site lists **1998** and 2001.", pending: [question as never] }),
  ]);
  waiting.job!.waiting_reason = "worker_input";
  const onMessage = vi.fn();
@@ -54,7 +54,8 @@ it("opens a paused worker by itself, says why it stopped and offers a reply", as
  // Workers stay visible while the job waits on them.
  expect(screen.getByText("Worker 1")).toBeTruthy();
  expect(screen.getByText("Has a question for you")).toBeTruthy();
- expect(screen.getByText("The site lists 1998 and 2001.")).toBeTruthy();
+ // What the worker said renders as Markdown, like the chat.
+ expect(screen.getByText("1998").tagName).toBe("STRONG");
  fireEvent.click(screen.getByRole("button", { name: "Reply to worker 2" }));
  expect(onMessage).toHaveBeenCalledWith({ jobId: "Research", jobTitle: "Research", runId: "w2", worker: 2 });
  fireEvent.click(screen.getByRole("button", { name: "Message workers" }));
@@ -80,4 +81,25 @@ it("does not let an older poll overwrite a successful pause", async () => {
  fireEvent.click(screen.getByText("Set paused"));
  await act(async () => resolvePoll([job("Good")]));
  expect(screen.getByText("paused")).toBeTruthy();
+});
+
+it("offers a message button on every worker without opening it", () => {
+ const onMessage = vi.fn();
+ render(<JobCard view={job("Research", "running", [worker("w1"), worker("w2")])} bot={bot} onChanged={vi.fn()} onMessage={onMessage} />);
+ expect(screen.getByRole("button", { name: /^Worker 1/ }).getAttribute("aria-expanded")).toBe("false");
+ fireEvent.click(screen.getByRole("button", { name: "Message worker 2" }));
+ expect(onMessage).toHaveBeenCalledWith({ jobId: "Research", jobTitle: "Research", runId: "w2", worker: 2 });
+});
+
+it("cancels a job only after the user confirms", async () => {
+ const changed = vi.fn();
+ const action = vi.spyOn(api, "jobAction").mockResolvedValue(job("Research", "cancelled"));
+ const confirm = vi.spyOn(window, "confirm").mockReturnValueOnce(false).mockReturnValueOnce(true);
+ render(<JobCard view={job("Research")} bot={bot} onChanged={changed} />);
+ fireEvent.click(screen.getByRole("button", { name: "Cancel job" }));
+ expect(action).not.toHaveBeenCalled();
+ fireEvent.click(screen.getByRole("button", { name: "Cancel job" }));
+ await waitFor(() => expect(action).toHaveBeenCalledWith("Research", "cancel"));
+ expect(confirm).toHaveBeenCalledTimes(2);
+ expect(changed).toHaveBeenCalledWith(expect.objectContaining({ state: "cancelled" }));
 });

@@ -1118,10 +1118,15 @@ textarea { resize: vertical; line-height: 1.5; }
 .job-strip-main strong { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 12.5px; }
 .job-strip-main .job-bar { grid-column: 1 / -1; }
 /* Workers that need the user stand out and say why. */
-.job-worker.attention > .job-worker-row { background: var(--warn-soft, color-mix(in srgb, var(--warn) 12%, transparent)); }
 .job-worker-said { margin: 2px 0 8px; padding: 6px 10px; border-left: 2px solid var(--warn); border-radius: 0 6px 6px 0; background: var(--surface-2); }
-.job-worker-said p { margin: 2px 0 0; white-space: pre-wrap; }
-.job-worker-detail > .button { margin: 0 0 6px; }
+.job-worker-said .markdown { margin-top: 2px; font-size: 12.5px; }
+.job-worker-said .markdown > :first-child { margin-top: 0; }
+.job-worker-said .markdown > :last-child { margin-bottom: 0; }
+.job-worker-line { display: flex; align-items: center; gap: 4px; }
+.job-worker-line .job-worker-row { flex: 1; }
+.job-worker-message { flex: none; padding: 2px 8px; font-size: 11.5px; }
+.job-worker.attention .job-worker-line { border-radius: 6px; background: var(--warn-soft, color-mix(in srgb, var(--warn) 12%, transparent)); }
+.job-worker.attention .job-worker-line > .job-worker-row { background: none; }
 .warn-text { color: var(--warn); }
 /* Who the composer writes to when it is not the bot. */
 .composer-target { display: flex; align-items: center; gap: 6px; max-width: 760px; margin: 0 auto 6px; padding: 4px 6px 4px 10px; border-radius: 9px; background: var(--accent-soft); color: var(--accent-text); font-size: 12.5px; }

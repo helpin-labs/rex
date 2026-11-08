@@ -1,10 +1,10 @@
 import { useCallback, useEffect, useRef, useState } from "react";
-import { ChevronDown, ChevronRight, CircleAlert, FolderOpen, ListChecks, LoaderCircle, MessageSquare, Pause, Play } from "lucide-react";
+import { ChevronDown, ChevronRight, CircleAlert, FolderOpen, ListChecks, LoaderCircle, MessageSquare, Pause, Play, Square } from "lucide-react";
 import { api } from "./api";
 import { isControlTool, stepLabel } from "./steps";
 import { ApprovalCard, QuestionCard } from "./Chat";
 import type { Bot, Interaction, JobView, JobWorker, RunToolCall, WorkItem } from "./types";
-import { Avatar, Modal, errorMessage, relativeTime } from "./ui";
+import { Avatar, Markdown, Modal, errorMessage, relativeTime } from "./ui";
 
 // A batch job runs one task over a long list in the bot engine. These views
 // answer three questions at a glance: which jobs are running, how far along
@@ -96,7 +96,8 @@ export function JobCard({ view, bot, onChanged, onMessage, showBot }: { view: Jo
   const [itemsOpen, setItemsOpen] = useState(false);
   const job = view.job;
   const phase = jobPhase(view);
-  const act = async (action: "pause" | "resume") => {
+  const act = async (action: "pause" | "resume" | "cancel") => {
+    if (action === "cancel" && !window.confirm(`Cancel “${view.title}”?\n\nWorkers stop and no new items start. Results already found stay saved.`)) return;
     setBusy(action); setError("");
     try { onChanged(await api.jobAction(view.id, action)); } catch (caught) { setError(errorMessage(caught)); } finally { setBusy(""); }
   };
@@ -147,6 +148,7 @@ export function JobCard({ view, bot, onChanged, onMessage, showBot }: { view: Jo
         <button type="button" className="button small ghost" disabled={!!busy} onClick={() => void act("pause")}><Pause size={13} />Pause</button>}
       {(job?.state === "paused" || (job?.state === "waiting" && decisionReasons.includes(job.waiting_reason || ""))) &&
         <button type="button" className="button small primary" disabled={!!busy} onClick={() => void act("resume")}><Play size={13} />{job.state === "paused" ? "Resume" : "Continue"}</button>}
+      {active && <button type="button" className="button small ghost danger-text" disabled={!!busy} onClick={() => void act("cancel")}><Square size={12} />Cancel job</button>}
     </footer>
     {itemsOpen && <JobItemsModal view={view} onClose={() => setItemsOpen(false)} />}
   </section>;
@@ -211,20 +213,23 @@ export function JobWorkers({ view, onChanged, onMessage }: { view: JobView; onCh
       const latest = steps[0];
       const target = { jobId: view.id, jobTitle: view.title, runId: worker.run_id, worker: index + 1 };
       return <li key={worker.run_id} className={`job-worker ${status.attention ? "attention" : ""}`}>
-        <button type="button" className="job-worker-row" aria-expanded={expanded} onClick={() => setToggled(current => ({ ...current, [worker.run_id]: !expanded }))}>
-          {expanded ? <ChevronDown size={13} /> : <ChevronRight size={13} />}
-          {status.attention ? <CircleAlert size={12} className="warn-text" /> : <LoaderCircle className={worker.recovery_reason || worker.status === "paused" ? "" : "spin"} size={12} />}
-          <strong>Worker {index + 1}</strong>
-          <span className="muted">{worker.done}/{worker.items.length}</span>
-          <span className={`job-worker-step ${status.attention ? "warn-text" : ""}`}>{status.text}</span>
-          <small className="muted">{relativeTime(latest?.created_at || worker.started_at)}</small>
-        </button>
-        {expanded && <div className="job-worker-detail">
-          {worker.last_message && <blockquote className="job-worker-said"><small className="muted">Worker {index + 1} said</small><p>{worker.last_message}</p></blockquote>}
-          {(worker.pending?.length ?? 0) > 0 && <JobPending view={view} pending={worker.pending!.map(interaction => ({ run_id: worker.run_id, interaction }))} onChanged={onChanged} />}
-          {onMessage && status.canMessage && <button type="button" className="button small ghost" onClick={() => onMessage(target)}>
-            <MessageSquare size={13} />{worker.status === "paused" ? `Reply to worker ${index + 1}` : `Message worker ${index + 1}`}
+        <div className="job-worker-line">
+          <button type="button" className="job-worker-row" aria-expanded={expanded} onClick={() => setToggled(current => ({ ...current, [worker.run_id]: !expanded }))}>
+            {expanded ? <ChevronDown size={13} /> : <ChevronRight size={13} />}
+            {status.attention ? <CircleAlert size={12} className="warn-text" /> : <LoaderCircle className={worker.recovery_reason || worker.status === "paused" ? "" : "spin"} size={12} />}
+            <strong>Worker {index + 1}</strong>
+            <span className="muted">{worker.done}/{worker.items.length}</span>
+            <span className={`job-worker-step ${status.attention ? "warn-text" : ""}`}>{status.text}</span>
+            <small className="muted">{relativeTime(latest?.created_at || worker.started_at)}</small>
+          </button>
+          {onMessage && status.canMessage && <button type="button" className="button small ghost job-worker-message" onClick={() => onMessage(target)}
+            aria-label={worker.status === "paused" ? `Reply to worker ${index + 1}` : `Message worker ${index + 1}`} title={worker.status === "paused" ? "Answer this worker" : "Tell this worker something while it works"}>
+            <MessageSquare size={12} />{worker.status === "paused" ? "Reply" : "Message"}
           </button>}
+        </div>
+        {expanded && <div className="job-worker-detail">
+          {worker.last_message && <blockquote className="job-worker-said"><small className="muted">Worker {index + 1} said</small><Markdown>{worker.last_message}</Markdown></blockquote>}
+          {(worker.pending?.length ?? 0) > 0 && <JobPending view={view} pending={worker.pending!.map(interaction => ({ run_id: worker.run_id, interaction }))} onChanged={onChanged} />}
           <p className="muted small">Batch: {worker.items.map(item => item.label).join(", ")}</p>
           {worker.steering?.map(command => <p key={command.command_id} className="muted small">Your message {command.revision}: {steeringState(command.state)}</p>)}
           {steps.length > 0 && <ol className="job-worker-steps">
