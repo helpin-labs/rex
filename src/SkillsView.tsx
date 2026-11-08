@@ -6,6 +6,7 @@ import { CatalogDetail, SourcesPanel, gist } from "./SkillCatalog";
 import { composeSkillDoc, parseSkillDoc, skillSlug, titleFromName, type SkillDoc } from "./skillDoc";
 import type { Bot, CatalogSkill, Skill, SkillSource } from "./types";
 import { Avatar, Markdown, PageHeader, SearchBox, TileMark, errorMessage } from "./ui";
+import { confirm } from "./confirm";
 
 // Skills are folders in ~/Rex/skills with a SKILL.md and any files it uses
 // (scripts, reference notes), in the Agent Skills format. The page edits a
@@ -101,7 +102,7 @@ export function SkillsView({ bots: initialBots, workspaceRoot, onBotsChanged }: 
     } catch (caught) { setError(errorMessage(caught)); }
   };
   const remove = async () => {
-    if (!skill || !window.confirm(`Delete the skill “${skillTitle(skill)}” and its folder? Bots that use it stop using it.`)) return;
+    if (!skill || !(await confirm(`“${skillTitle(skill)}” and its folder are deleted. Bots that use it stop using it.`, { title: "Delete skill?", confirmLabel: "Delete", danger: true }))) return;
     try { await api.deleteSkill(skill.id); setSelected(null); setDoc(null); await load(); } catch (caught) { setError(errorMessage(caught)); }
   };
   const importZip = async (file: File | undefined) => {
@@ -122,12 +123,14 @@ export function SkillsView({ bots: initialBots, workspaceRoot, onBotsChanged }: 
   const selectable = useMemo(() => bots.filter(bot => !bot.setup), [bots]);
 
   // Leaving an edited skill asks first.
-  const close = () => {
-    if (dirty && !window.confirm("Discard your changes to this skill?")) return;
+  const discardSkill = "Your changes to this skill are not saved.";
+  const discardOptions = { title: "Discard changes?", confirmLabel: "Discard", danger: true };
+  const close = async () => {
+    if (dirty && !(await confirm(discardSkill, discardOptions))) return;
     setSelected(null); setDoc(null);
   };
-  const go = (next: "installed" | "browse" | "sources") => {
-    if (doc && dirty && !window.confirm("Discard your changes to this skill?")) return;
+  const go = async (next: "installed" | "browse" | "sources") => {
+    if (doc && dirty && !(await confirm(discardSkill, discardOptions))) return;
     setMode(next); setSelected(null); setDoc(null); setPicked(null);
   };
   const [filterText, setFilterText] = useState("");

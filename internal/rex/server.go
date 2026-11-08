@@ -83,6 +83,7 @@ func (h *Host) Handler() http.Handler {
 	api.HandleFunc("GET /api/jobs/{id}", h.getJob)
 	api.HandleFunc("GET /api/jobs/{id}/items", h.listJobItems)
 	api.HandleFunc("POST /api/jobs/{id}/reveal", h.revealJobResults)
+	api.HandleFunc("POST /api/jobs/{id}/workers/{run_id}/message", h.messageJobWorker)
 	api.HandleFunc("POST /api/jobs/{id}/{action}", h.jobAction)
 	api.HandleFunc("POST /api/proposals/{id}", h.answerProposal)
 	api.HandleFunc("PUT /api/bots/{id}", h.saveBot)
@@ -105,6 +106,8 @@ func (h *Host) Handler() http.Handler {
 	api.HandleFunc("POST /api/conversations/{id}/messages", h.sendMessage)
 	api.HandleFunc("POST /api/conversations/{id}/fresh", h.startFresh)
 	api.HandleFunc("POST /api/conversations/{id}/turns/{turn}/edit", h.editMessage)
+	api.HandleFunc("GET /api/conversations/{id}/runs/{run_id}/steering", h.runSteering)
+	api.HandleFunc("POST /api/conversations/{id}/runs/{run_id}/steering", h.runSteering)
 
 	api.HandleFunc("POST /api/runs/{run_id}/interactions/{interaction_id}", h.respondInteraction)
 	api.HandleFunc("GET /api/runs/{run_id}/events", h.streamRunEvents)

@@ -1,6 +1,6 @@
 import type { ChatGPTStatus,
   CommandSandboxStatus, AttentionItem, Bot, BotLogin, InstructionProposal, Conversation, ConversationDetail, GoogleStatus, MCPConnection, MemoryOverview, MemorySource, MemoryLearning, HistoryPage, HistoryExcerpt, ModelInfo, ProviderTest,
-  Routine, RoutineRun, Run, RunEventEnvelope, Settings, Skill, Status, Turn, WorkspaceFile, CatalogSkill, SkillSource, JobView, WorkItemPage,
+  Routine, RoutineRun, Run, RunEventEnvelope, RunSteeringCommand, Settings, Skill, Status, Turn, WorkspaceFile, CatalogSkill, SkillSource, JobView, WorkItemPage,
 } from "./types";
 
 type Connection = { url: string; token: string };
@@ -73,6 +73,7 @@ export const api = {
   jobItems: (id: string, state = "", after = "", limit = 100) =>
     request<WorkItemPage>(`/api/jobs/${encodeURIComponent(id)}/items?state=${encodeURIComponent(state)}&after=${encodeURIComponent(after)}&limit=${limit}`),
   jobAction: (id: string, action: "pause" | "resume" | "cancel") => request<JobView>(`/api/jobs/${encodeURIComponent(id)}/${action}`, json("POST", {})),
+  messageWorker: (id: string, runId: string, command_id: string, content: string) => request<JobView>(`/api/jobs/${encodeURIComponent(id)}/workers/${encodeURIComponent(runId)}/message`, json("POST", { command_id, content })),
   steerJob: (id: string, expected_revision: number, content: string) => request<JobView>(`/api/jobs/${encodeURIComponent(id)}/steer`, json("POST", { expected_revision, content })),
   revealJobResults: (id: string) => request<void>(`/api/jobs/${encodeURIComponent(id)}/reveal`, json("POST", {})),
   lookBack: (botId: string) => request<void>(`/api/bots/${botId}/retrospective`, json("POST", {})),
@@ -102,6 +103,9 @@ export const api = {
   deleteConversation: (id: string) => request<void>(`/api/conversations/${id}`, json("DELETE")),
   send: (id: string, content: string) => request<{ run: Run; turn: Turn }>(`/api/conversations/${id}/messages`, json("POST", { content })),
   editMessage: (id: string, turnId: string, content: string) => request<{ run: Run; turn: Turn }>(`/api/conversations/${id}/turns/${turnId}/edit`, json("POST", { content })),
+  runSteering: (id: string, runId: string) => request<RunSteeringCommand[]>(`/api/conversations/${id}/runs/${encodeURIComponent(runId)}/steering`),
+  steerRun: (id: string, runId: string, command: { command_id: string; expected_revision: number; content: string }) =>
+    request<RunSteeringCommand>(`/api/conversations/${id}/runs/${encodeURIComponent(runId)}/steering`, json("POST", command)),
   respond: (runId: string, interactionId: string, intent: string, content = "") => request<Run>(`/api/runs/${runId}/interactions/${interactionId}`, json("POST", { intent, content })),
   cancel: (runId: string) => request<Run>(`/api/runs/${encodeURIComponent(runId)}/cancel`, json("POST", {})),
   timeline: (runId: string, after = 0) => request<{ events: RunEventEnvelope[]; next_sequence_no: number }>(`/api/runs/${encodeURIComponent(runId)}/timeline?after_sequence=${after}`),

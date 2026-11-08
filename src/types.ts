@@ -120,6 +120,18 @@ export type Run = {
   updated_at: string;
 };
 
+// An instruction the user sent to a working run. The runtime applies it at
+// the next safe boundary, between model turns.
+export type RunSteeringCommand = {
+  command_id: string;
+  run_id: string;
+  revision: number;
+  state: "accepted" | "applied" | "rejected" | "not_applied" | string;
+  content: string;
+  created_at: string;
+  applied_at?: string;
+};
+
 export type Message = {
   id: string;
   run_id: string;
@@ -399,6 +411,10 @@ export type JobWorker = {
   items: { id: string; label: string }[];
   done: number;
   steps: { tool_name: string; args_text: string; status: string; error?: string; created_at: string }[];
+  /** What this worker waits on from the user: a question, approval or sign-in. */
+  pending?: Interaction[];
+  /** What a paused worker last said, usually why it stopped. */
+  last_message?: string;
 };
 export type WorkItem = {
   id: string;

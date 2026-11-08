@@ -11,6 +11,7 @@ import { AppMark } from "./AppsView";
 import { appFor } from "./apps";
 import { ModelPicker, ProviderPicker } from "./ModelPicker";
 import { modelName } from "./models";
+import { confirm } from "./confirm";
 const providerNames: Record<Provider, string> = { local: "Local model server", anthropic: "Anthropic", openai: "OpenAI", openrouter: "OpenRouter", chatgpt: "ChatGPT subscription" };
 
 // Whether a provider can be chosen, and what to do first if not.
@@ -114,7 +115,7 @@ export function BotEditor({ initial, settings, status, onClose, onSaved, onDelet
       onSaved(saved);
     } catch (caught) { setError(errorMessage(caught)); } finally { setSaving(false); }
   };
-  const leave = () => { if (!isNew && dirty && !window.confirm("Discard your changes to this bot?")) return; onClose(); };
+  const leave = async () => { if (!isNew && dirty && !(await confirm("Your changes to this bot are not saved.", { title: "Discard changes?", confirmLabel: "Discard", danger: true }))) return; onClose(); };
   const remove = async () => {
     try { await api.deleteBot(bot.id); onDeleted(bot.id); } catch (caught) { setError(errorMessage(caught)); setConfirmDelete(false); }
   };

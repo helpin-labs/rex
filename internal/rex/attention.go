@@ -168,7 +168,26 @@ func (h *Host) jobAttention(ctx context.Context) []AttentionItem {
 		if err != nil || job.State == sdk.WorkJobStateCompleted || job.State == sdk.WorkJobStateCancelled || job.State == sdk.WorkJobStateFailed {
 			continue
 		}
-		for _, pending := range h.jobPending(ctx, job) {
+		pending := h.jobPending(ctx, job)
+		asked := map[string]bool{}
+		for _, item := range pending {
+			asked[item.RunID] = true
+		}
+		// A worker that stopped to talk to the user without a formal
+		// question still needs them.
+		for _, runID := range job.ActiveRuns {
+			if asked[runID] {
+				continue
+			}
+			run, err := h.Runtime.GetRun(ctx, runID)
+			if err != nil || run.Status != "paused" || (run.PauseReason != sdk.PauseReasonUserMessage && run.PauseReason != sdk.PauseReasonNone) {
+				continue
+			}
+			items = append(items, AttentionItem{ID: "worker-" + runID, Kind: "question", ConversationID: record.ConversationID, BotID: record.BotID,
+				Title: "Batch job \u201c" + record.Title + "\u201d: a worker stopped and is waiting for you", Detail: h.lastAssistantText(ctx, runID),
+				At: run.UpdatedAt, RunID: runID, JobID: record.ID})
+		}
+		for _, pending := range pending {
 			kind := "approval"
 			switch pending.Interaction.InteractionKind {
 			case "request_user_input":

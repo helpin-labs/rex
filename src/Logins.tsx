@@ -3,6 +3,7 @@ import { KeyRound, Trash2 } from "lucide-react";
 import { api } from "./api";
 import type { Bot, BotLogin } from "./types";
 import { Field, errorMessage, relativeTime } from "./ui";
+import { confirm } from "./confirm";
 
 // Logins lets the user save sites a bot may sign in to. The bot never sees
 // the password: Rex types it into the bot's browser, only on that site.
@@ -23,7 +24,7 @@ export function Logins({ bot }: { bot: Bot }) {
     } catch (caught) { setError(errorMessage(caught)); }
   };
   const remove = async (login: BotLogin) => {
-    if (!window.confirm(`Remove the ${login.site} login?`)) return;
+    if (!(await confirm(`Rex forgets the saved sign-in for ${login.site}; ${bot.name} can no longer use it.`, { title: "Remove login?", confirmLabel: "Remove", danger: true }))) return;
     try { await api.deleteLogin(bot.id, login.id); await load(); } catch (caught) { setError(errorMessage(caught)); }
   };
 
