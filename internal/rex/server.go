@@ -105,6 +105,8 @@ func (h *Host) Handler() http.Handler {
 	api.HandleFunc("POST /api/conversations/{id}/messages", h.sendMessage)
 	api.HandleFunc("POST /api/conversations/{id}/fresh", h.startFresh)
 	api.HandleFunc("POST /api/conversations/{id}/turns/{turn}/edit", h.editMessage)
+	api.HandleFunc("GET /api/conversations/{id}/runs/{run_id}/steering", h.runSteering)
+	api.HandleFunc("POST /api/conversations/{id}/runs/{run_id}/steering", h.runSteering)
 
 	api.HandleFunc("POST /api/runs/{run_id}/interactions/{interaction_id}", h.respondInteraction)
 	api.HandleFunc("GET /api/runs/{run_id}/events", h.streamRunEvents)

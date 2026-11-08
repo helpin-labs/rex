@@ -254,6 +254,10 @@ textarea.code, .schedule-row .cron-input, .json-summary, .model-trigger-text sma
 .inline-error, .inline-ok { display: flex; align-items: center; gap: 8px; max-width: 760px; margin: 0 auto 8px; padding: 8px 12px; border-radius: 9px; background: var(--danger-soft); color: var(--danger); font-size: 12.5px; }
 .inline-ok { background: var(--ok-soft); color: var(--ok); }
 .inline-error span { flex: 1; }
+.steering-receipt { max-width: 760px; margin: 0 auto 8px; padding: 0 4px; font-size: 12.5px; }
+.steering-receipt details { margin-top: 2px; }
+.steering-receipt summary { cursor: pointer; }
+.steering-receipt details p { margin: 4px 0 0; white-space: pre-wrap; }
 .toast { position: fixed; z-index: 50; bottom: 18px; left: 50%; transform: translateX(-50%); display: flex; gap: 12px; align-items: center; padding: 10px 14px; border-radius: 10px; background: var(--text); color: var(--surface); box-shadow: var(--shadow); font-size: 13px; }
 .toast .link-button { color: var(--accent); }
 

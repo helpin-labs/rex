@@ -10,6 +10,7 @@ import { ChatSearch } from "./ChatSearch";
 import { describeApproval, instructionChanges, looksLikePassword } from "./steps";
 import { TurnView } from "./TurnView";
 import { useLiveEvents } from "./useLiveEvents";
+import { steeringReceiptText, useRunSteering } from "./useRunSteering";
 import type { AttentionItem, Bot, ConversationDetail, InstructionProposal, Interaction, MemoryOverview, RunEventEnvelope, Status, Turn, WorkspaceFile } from "./types";
 import { Avatar, Markdown, errorMessage, relativeTime, signInToConnection, openExternal } from "./ui";
 
@@ -369,6 +370,9 @@ export function Chat({ bot, bots, conversationId, status, pending: waiting, defa
   // The sidebar shows the bot's face, which talks while its reply is written.
   const reportTyping = useCallback((typing: boolean) => onTyping?.(typing ? bot.id : null), [onTyping, bot.id]);
   const working = !!lastTurn && lastTurn.status === "working" && (!activeRun || activeRun.status === "running" || activeRun.status === "queued");
+  // While the bot works, what the user sends steers the run it is on.
+  const steering = useRunSteering(conversationId, activeRun?.id, working && !!activeRun);
+  const steerable = working && steering.canSteer;
   const pending = detail?.interactions || [];
   const approvals = pending.filter(item => item.interaction_kind !== "request_user_input" && item.interaction_kind !== "authentication");
   const signIns = pending.filter(item => item.interaction_kind === "authentication");
@@ -425,6 +429,13 @@ export function Chat({ bot, bots, conversationId, status, pending: waiting, defa
     // Chat is not a safe place for passwords: they reach the model and stay
     // in the conversation. Logins keep them in the Keychain instead.
     if (looksLikePassword(body) && !window.confirm(`This looks like a password. Anything typed here reaches the model and stays in the conversation.\n\nTo let ${bot.name} sign in safely, cancel and add a login under Edit bot → Logins instead.\n\nSend it anyway?`)) return;
+    if (working) {
+      if (!steering.canSteer || !body) return;
+      if (attachments.length) { setError("While the bot works, send instructions as text. Remove the attachments, or send them after it finishes."); return; }
+      setSending(true); setError("");
+      try { await steering.send(body); setDraft(""); } catch (caught) { setError(errorMessage(caught)); } finally { setSending(false); }
+      return;
+    }
     const content = [body, ...attachments.map(item => item.note)].filter(Boolean).join("\n\n");
     setSending(true); setError(""); pinned.current = true;
     try {
@@ -549,17 +560,22 @@ export function Chat({ bot, bots, conversationId, status, pending: waiting, defa
       {showJump && <button type="button" className="jump-latest" onClick={jumpToLatest}><ArrowDown size={14} />Jump to latest</button>}
       <footer className="composer-wrap">
         <ConversationJobs key={bot.id} bot={bot} jobs={jobs} onChanged={replaceJob} />
+        {steering.receipt && (working || (steering.receipt.state !== "applied" && steering.receipt.state !== "accepted")) && <div className="steering-receipt muted small" role="status">
+          <span>{steeringReceiptText(steering.receipt)}</span>
+          <details><summary>Your instruction</summary><p>{steering.receipt.content}</p></details>
+        </div>}
         {error && <div className="inline-error"><CircleAlert size={14} /><span>{error}</span><button type="button" className="icon-button ghost tiny" onClick={() => setError("")}><X size={12} /></button></div>}
         {attachments.length > 0 && <div className="attachments">{attachments.map((item, index) => <span className="attachment" key={index}><Paperclip size={12} />{item.name}<button type="button" onClick={() => setAttachments(current => current.filter((_, i) => i !== index))} aria-label={`Remove ${item.name}`}><X size={11} /></button></span>)}</div>}
         <div className="composer">
           <button type="button" className="icon-button ghost" title="Attach files" onClick={() => fileInput.current?.click()}><Paperclip size={17} /></button>
           <input ref={fileInput} type="file" multiple hidden onChange={event => { void attach(event.target.files); event.target.value = ""; }} />
           <textarea ref={composerRef} value={draft} onChange={event => setDraft(event.target.value)} onKeyDown={onKeyDown} rows={1}
-            placeholder={questions.length ? "Answer the bot…" : approvals.length ? "Answer the approval above first" : `Message ${bot.name}`}
+            placeholder={questions.length ? "Answer the bot…" : approvals.length ? "Answer the approval above first" : steerable ? `Tell ${bot.name} something while it works…` : `Message ${bot.name}`}
             disabled={approvals.length > 0} />
           <PauseJobsButton key={bot.id} jobs={jobs} onChanged={replaceJob} />
-          {working && !hasRunningJobs ? <button type="button" className="send stop" title="Stop" onClick={() => activeRun && api.cancel(activeRun.id).then(load).catch(caught => setError(errorMessage(caught)))}><Square size={14} /></button>
-            : <button type="button" className="send" title="Send" disabled={working || sending || (!draft.trim() && !attachments.length) || approvals.length > 0} onClick={() => void send()}><ArrowUp size={17} /></button>}
+          {working && !hasRunningJobs && <button type="button" className="send stop" title="Stop" onClick={() => activeRun && api.cancel(activeRun.id).then(load).catch(caught => setError(errorMessage(caught)))}><Square size={14} /></button>}
+          {(!working || hasRunningJobs || steerable) && <button type="button" className="send" title={steerable ? "Send to the bot while it works" : "Send"}
+            disabled={(working && !steerable) || sending || (working ? !draft.trim() : !draft.trim() && !attachments.length) || approvals.length > 0} onClick={() => void send()}><ArrowUp size={17} /></button>}
         </div>
         <div className="composer-hint"><span className="model-name">{bot.model || defaultModel || "provider default"}</span> · Enter to send, Shift+Enter for a new line · drop files to attach</div>
       </footer>

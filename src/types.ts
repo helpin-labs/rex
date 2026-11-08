@@ -120,6 +120,18 @@ export type Run = {
   updated_at: string;
 };
 
+// An instruction the user sent to a working run. The runtime applies it at
+// the next safe boundary, between model turns.
+export type RunSteeringCommand = {
+  command_id: string;
+  run_id: string;
+  revision: number;
+  state: "accepted" | "applied" | "rejected" | "not_applied" | string;
+  content: string;
+  created_at: string;
+  applied_at?: string;
+};
+
 export type Message = {
   id: string;
   run_id: string;
