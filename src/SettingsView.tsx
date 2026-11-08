@@ -27,7 +27,7 @@ const hosted: { key: Exclude<Provider, "local" | "chatgpt">; label: string; plac
 // ChatGPTCard signs Rex in to the user's ChatGPT subscription with a device
 // code: Rex shows a code, the user enters it on ChatGPT's site, and Rex
 // checks until it is approved. Bots can then use ChatGPT models.
-function ChatGPTCard({ initial, onChange }: { initial?: ChatGPTStatus; onChange: (status: ChatGPTStatus) => void }) {
+export function ChatGPTCard({ initial, onChange }: { initial?: ChatGPTStatus; onChange: (status: ChatGPTStatus) => void }) {
   // The page re-renders often with a new onChange; timers below keep
   // running and read the latest one from this ref.
   const changedRef = useRef(onChange);
