@@ -94,12 +94,13 @@ export function JobCard({ view, bot, onChanged, onMessage, showBot }: { view: Jo
   const [busy, setBusy] = useState("");
   const [error, setError] = useState("");
   const [itemsOpen, setItemsOpen] = useState(false);
+  // Cancelling asks in place: the desktop webview shows no confirm dialogs.
+  const [confirmCancel, setConfirmCancel] = useState(false);
   const job = view.job;
   const phase = jobPhase(view);
   const act = async (action: "pause" | "resume" | "cancel") => {
-    if (action === "cancel" && !window.confirm(`Cancel “${view.title}”?\n\nWorkers stop and no new items start. Results already found stay saved.`)) return;
     setBusy(action); setError("");
-    try { onChanged(await api.jobAction(view.id, action)); } catch (caught) { setError(errorMessage(caught)); } finally { setBusy(""); }
+    try { onChanged(await api.jobAction(view.id, action)); setConfirmCancel(false); } catch (caught) { setError(errorMessage(caught)); } finally { setBusy(""); }
   };
   const counts = job?.counts;
   const active = jobActive(view);
@@ -148,8 +149,13 @@ export function JobCard({ view, bot, onChanged, onMessage, showBot }: { view: Jo
         <button type="button" className="button small ghost" disabled={!!busy} onClick={() => void act("pause")}><Pause size={13} />Pause</button>}
       {(job?.state === "paused" || (job?.state === "waiting" && decisionReasons.includes(job.waiting_reason || ""))) &&
         <button type="button" className="button small primary" disabled={!!busy} onClick={() => void act("resume")}><Play size={13} />{job.state === "paused" ? "Resume" : "Continue"}</button>}
-      {active && <button type="button" className="button small ghost danger-text" disabled={!!busy} onClick={() => void act("cancel")}><Square size={12} />Cancel job</button>}
+      {active && !confirmCancel && <button type="button" className="button small danger-ghost" disabled={!!busy} onClick={() => setConfirmCancel(true)}><Square size={12} />Cancel job</button>}
     </footer>
+    {active && confirmCancel && <div className="job-confirm" role="alertdialog" aria-label="Cancel this job?">
+      <span>Cancel this job? Workers stop and no new items start. Results already found stay saved.</span>
+      <button type="button" className="button small ghost" disabled={!!busy} onClick={() => setConfirmCancel(false)}>Keep running</button>
+      <button type="button" className="button small danger" disabled={!!busy} onClick={() => void act("cancel")}>{busy === "cancel" ? <LoaderCircle size={12} className="spin" /> : <Square size={12} />}Cancel job</button>
+    </div>}
     {itemsOpen && <JobItemsModal view={view} onClose={() => setItemsOpen(false)} />}
   </section>;
 }

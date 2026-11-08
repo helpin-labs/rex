@@ -91,15 +91,18 @@ it("offers a message button on every worker without opening it", () => {
  expect(onMessage).toHaveBeenCalledWith({ jobId: "Research", jobTitle: "Research", runId: "w2", worker: 2 });
 });
 
-it("cancels a job only after the user confirms", async () => {
+it("cancels a job only after the user confirms in the card", async () => {
  const changed = vi.fn();
  const action = vi.spyOn(api, "jobAction").mockResolvedValue(job("Research", "cancelled"));
- const confirm = vi.spyOn(window, "confirm").mockReturnValueOnce(false).mockReturnValueOnce(true);
  render(<JobCard view={job("Research")} bot={bot} onChanged={changed} />);
  fireEvent.click(screen.getByRole("button", { name: "Cancel job" }));
  expect(action).not.toHaveBeenCalled();
+ // The desktop webview shows no confirm dialogs, so the card asks itself.
+ expect(screen.getByRole("alertdialog", { name: "Cancel this job?" })).toBeTruthy();
+ fireEvent.click(screen.getByRole("button", { name: "Keep running" }));
+ expect(screen.queryByRole("alertdialog")).toBeNull();
+ fireEvent.click(screen.getByRole("button", { name: "Cancel job" }));
  fireEvent.click(screen.getByRole("button", { name: "Cancel job" }));
  await waitFor(() => expect(action).toHaveBeenCalledWith("Research", "cancel"));
- expect(confirm).toHaveBeenCalledTimes(2);
  expect(changed).toHaveBeenCalledWith(expect.objectContaining({ state: "cancelled" }));
 });
