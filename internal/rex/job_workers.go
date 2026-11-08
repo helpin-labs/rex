@@ -50,7 +50,7 @@ func (h *Host) deliverWorkerMessage(ctx context.Context, runID string, message W
 	h.touch()
 	switch run.Status {
 	case "queued", "running":
-		return h.steerWorker(ctx, runID, message)
+		return h.steerWorker(ctx, runID, message, LocalActorID)
 	case "paused":
 		interactionID := ""
 		if interactions, err := h.Runtime.ListInteractions(ctx, runID); err == nil {
@@ -80,9 +80,9 @@ func (h *Host) deliverWorkerMessage(ctx context.Context, runID string, message W
 	return ErrNotJobWorker
 }
 
-// steerWorker sends a steering instruction at the worker's latest revision,
-// retrying once when another instruction landed in between.
-func (h *Host) steerWorker(ctx context.Context, runID string, message WorkerMessage) error {
+// steerWorker sends a steering instruction from actor at the worker's latest
+// revision, retrying once when another instruction landed in between.
+func (h *Host) steerWorker(ctx context.Context, runID string, message WorkerMessage, actor string) error {
 	var err error
 	for attempt := 0; attempt < 2; attempt++ {
 		var commands []sdk.RunSteeringCommand
@@ -96,7 +96,7 @@ func (h *Host) steerWorker(ctx context.Context, runID string, message WorkerMess
 			}
 			revision = max(revision, command.Revision)
 		}
-		_, err = h.Runtime.SteerRun(ctx, runID, sdk.SteerRunRequest{CommandID: message.CommandID, ExpectedRevision: revision, Content: message.Content, ExternalActorID: LocalActorID})
+		_, err = h.Runtime.SteerRun(ctx, runID, sdk.SteerRunRequest{CommandID: message.CommandID, ExpectedRevision: revision, Content: message.Content, ExternalActorID: actor})
 		var upstream *sdk.HTTPStatusError
 		if err == nil || !errors.As(err, &upstream) || upstream.StatusCode != http.StatusConflict {
 			return err
