@@ -403,6 +403,8 @@ textarea { resize: vertical; line-height: 1.5; }
 .modal-header { display: flex; align-items: flex-start; justify-content: space-between; padding: 20px 22px 8px; }
 .modal-body { padding: 10px 22px 18px; overflow-y: auto; display: flex; flex-direction: column; gap: 12px; }
 .modal-footer { display: flex; align-items: center; gap: 8px; padding: 14px 22px; border-top: 1px solid var(--border); }
+.confirm-modal { width: min(440px, 100%); }
+.confirm-message { margin: 0; line-height: 1.5; }
 .picker-row { display: flex; flex-wrap: wrap; gap: 4px; }
 .emoji-choice { display: inline-grid; place-items: center; width: 34px; height: 34px; border: 1px solid transparent; border-radius: 9px; background: none; color: var(--text); }
 .emoji-choice:hover { background: var(--surface-2); }

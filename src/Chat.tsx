@@ -13,6 +13,7 @@ import { useLiveEvents } from "./useLiveEvents";
 import { steeringReceiptText, useRunSteering } from "./useRunSteering";
 import type { AttentionItem, Bot, ConversationDetail, InstructionProposal, Interaction, MemoryOverview, RunEventEnvelope, Status, Turn, WorkspaceFile } from "./types";
 import { Avatar, Markdown, errorMessage, relativeTime, signInToConnection, openExternal } from "./ui";
+import { confirm } from "./confirm";
 
 type Attachment = { name: string; note: string };
 
@@ -453,7 +454,7 @@ export function Chat({ bot, bots, conversationId, status, pending: waiting, defa
     if (!body && !attachments.length) return;
     // Chat is not a safe place for passwords: they reach the model and stay
     // in the conversation. Logins keep them in the Keychain instead.
-    if (looksLikePassword(body) && !window.confirm(`This looks like a password. Anything typed here reaches the model and stays in the conversation.\n\nTo let ${bot.name} sign in safely, cancel and add a login under Edit bot → Logins instead.\n\nSend it anyway?`)) return;
+    if (looksLikePassword(body) && !(await confirm(`Anything typed here reaches the model and stays in the conversation. To let ${bot.name} sign in safely, cancel and add a login under Edit bot → Logins instead.`, { title: "This looks like a password", confirmLabel: "Send anyway", cancelLabel: "Don't send", danger: true }))) return;
     // Answers to the bot's questions and retries always go to the bot.
     const to = text === undefined ? target : null;
     if (to) {

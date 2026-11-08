@@ -9,6 +9,7 @@ import { type Theme, loadTheme, saveTheme } from "./theme";
 import { siAnthropic, siBrave, siLmstudio, siOpenrouter } from "simple-icons";
 import { AppMark } from "./AppsView";
 import { ModelPicker, ProviderPicker } from "./ModelPicker";
+import { confirm } from "./confirm";
 
 // Web search providers, in the order the bot engine tries them.
 const searchProviders: { key: "tinyfish" | "exa" | "brave"; label: string; placeholder: string; hint: string }[] = [
@@ -64,7 +65,7 @@ function ChatGPTCard({ initial, onChange }: { initial?: ChatGPTStatus; onChange:
     } catch (caught) { setError(errorMessage(caught)); } finally { setBusy(false); }
   };
   const signOut = async () => {
-    if (!window.confirm("Sign out of ChatGPT? Bots set to ChatGPT stop working until you sign in again.")) return;
+    if (!(await confirm("Bots set to ChatGPT stop working until you sign in again.", { title: "Sign out of ChatGPT?", confirmLabel: "Sign out", danger: true }))) return;
     try { update(await api.chatgptSignOut()); } catch (caught) { setError(errorMessage(caught)); }
   };
   const copy = async () => {
