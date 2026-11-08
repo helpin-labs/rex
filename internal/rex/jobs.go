@@ -327,7 +327,9 @@ func (h *Host) jobsMCP() http.Handler {
 				}}},
 				"items_file": map[string]any{"type": "string", "description": "Path inside your folder to a JSON array, JSONL or CSV file of items."},
 				"batch_size": map[string]any{"type": "integer", "minimum": 1, "maximum": 50, "description": "Items per worker; default 10."},
-				"workers":    map[string]any{"type": "integer", "minimum": 1, "maximum": 4, "description": "Workers at once; default 3. In Extension browser mode each worker gets its own tab (up to 3); the standard local browser runs one worker at a time."},
+				"workers": map[string]any{"type": "integer", "minimum": 1, "maximum": 4, "description": "Workers at once. Leave it out for 3 in parallel, which suits independent items, the usual case. " +
+					"Set 1 only when items are strictly sequential: an item needs an earlier item's result, the order matters (such as posting one after another from one account), or the site allows only one session at a time. " +
+					"Use 2 for a site that limits request rates. In Extension browser mode each worker gets its own tab (up to 3); the standard local browser runs browser work one worker at a time."},
 			}},
 		}, func(ctx context.Context, request *protocol.CallToolRequest) (*protocol.CallToolResult, error) {
 			var input startJobInput

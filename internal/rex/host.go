@@ -46,15 +46,15 @@ type Host struct {
 	// command ID), so a retried send is not delivered again by another path:
 	// a reply that resumed a worker must not come back as a steering note.
 	workerMessages sync.Map
-	cfg        Config
-	Store      *Store
-	Runtime    *RuntimeClient
-	Settings   *SettingsManager
-	Memory     *MemoryService
-	Skills     *SkillLibrary
-	Routines   *Scheduler
-	Browser    *BrowserControl
-	Sandbox    *CommandSandbox
+	cfg            Config
+	Store          *Store
+	Runtime        *RuntimeClient
+	Settings       *SettingsManager
+	Memory         *MemoryService
+	Skills         *SkillLibrary
+	Routines       *Scheduler
+	Browser        *BrowserControl
+	Sandbox        *CommandSandbox
 
 	runtimeReady   atomic.Bool
 	runtimeWaiting atomic.Value
