@@ -11,7 +11,7 @@ import { SettingsView } from "./SettingsView";
 import { SideSlot } from "./SideList";
 import { SkillsView } from "./SkillsView";
 import type { Bot, Conversation, JobView, Settings, Status } from "./types";
-import { JobProgress, JobsView, jobActive, jobFraction, jobPhase } from "./Jobs";
+import { JobProgress, jobActive, jobFraction, jobPhase } from "./Jobs";
 import { Avatar, Empty, errorMessage, relativeTime } from "./ui";
 import { AppLogo } from "./AppLogo";
 import { AppsView } from "./AppsView";
@@ -22,8 +22,8 @@ import { ProfileMenu } from "./ProfileMenu";
 
 // Memory lives in each bot's conversation (the memory panel), so there is
 // no separate Memory page.
-type View = { kind: "bot"; botId: string; conversationId?: string } | { kind: "routines" } | { kind: "jobs" } | { kind: "skills" } | { kind: "apps"; appId?: string } | { kind: "settings"; tab?: "models" | "tools" | "memory" | "about" };
-const viewKinds = ["bot", "routines", "jobs", "skills", "apps", "settings"];
+type View = { kind: "bot"; botId: string; conversationId?: string } | { kind: "routines" } | { kind: "skills" } | { kind: "apps"; appId?: string } | { kind: "settings"; tab?: "models" | "tools" | "memory" | "about" };
+const viewKinds = ["bot", "routines", "skills", "apps", "settings"];
 
 function loadView(): View | null {
   try { const raw = localStorage.getItem("rex.view"); const view = raw ? JSON.parse(raw) as View : null; return view && viewKinds.includes(view.kind) ? view : null; } catch { return null; }
@@ -175,7 +175,6 @@ export default function App() {
       <footer className="bot-list-footer">
         {tab("bot", "Bots", <MessagesSquare size={18} />)}
         {tab("routines", "Routines", <AlarmClock size={18} />)}
-        <span className="side-tool-wrap">{tab("jobs", jobs.length ? `Batch jobs (${jobs.length} running)` : "Batch jobs", <ListChecks size={18} />)}{jobs.length > 0 && <span className="side-tool-count">{jobs.length}</span>}</span>
         {tab("skills", "Skills", <BookOpen size={18} />)}
         <span className="spacer" />
         {tab("apps", "Connect apps", <Blocks size={18} />)}
@@ -197,7 +196,6 @@ export default function App() {
           : <Empty icon={<LoaderCircle className="spin" size={20} />} title={`Opening ${bot.name}…`} />}
       </main>}
       {view?.kind === "routines" && <main className="main wide"><RoutinesView bots={bots} onOpenConversation={async id => { await refreshThreads(); await openConversation(id); }} /></main>}
-      {view?.kind === "jobs" && <main className="main wide"><JobsView bots={bots} onOpenBot={botId => setView({ kind: "bot", botId })} /></main>}
       {view?.kind === "skills" && <main className="main wide"><SkillsView bots={bots} workspaceRoot={status?.workspace_root || "~/Rex"} onBotsChanged={() => void refreshBots()} /></main>}
       {view?.kind === "apps" && <main className="main wide"><AppsView focusApp={view.appId} bots={bots} onBotsChanged={() => void refreshBots()} /></main>}
       {view?.kind === "settings" && <main className="main wide"><SettingsView key={view.tab || "models"} initialTab={view.tab} status={status} onSaved={saved => { setSettings(saved); void refreshStatus(); }} /></main>}

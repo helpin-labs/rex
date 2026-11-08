@@ -411,6 +411,10 @@ export type JobWorker = {
   items: { id: string; label: string }[];
   done: number;
   steps: { tool_name: string; args_text: string; status: string; error?: string; created_at: string }[];
+  /** What this worker waits on from the user: a question, approval or sign-in. */
+  pending?: Interaction[];
+  /** What a paused worker last said, usually why it stopped. */
+  last_message?: string;
 };
 export type WorkItem = {
   id: string;

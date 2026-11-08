@@ -1,4 +1,4 @@
-import { ConversationJobs, ConversationJobHistory, PauseJobsButton, jobPausable, useBotJobs } from "./Jobs";
+import { ConversationJobHistory, CurrentJobs, JobStrip, type MessageTarget, jobActive, jobPausable, useBotJobs } from "./Jobs";
 import { Fragment, type KeyboardEvent, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { JsonBlock, TextWithJson } from "./JsonBlock";
 import { AlarmClock, ArrowDown, ArrowUp, Search, BookOpen, Brain, CircleAlert, ExternalLink, Eye, FileCode2, FileText, FolderOpen, Hand, KeyRound, MousePointerClick, Paperclip, RotateCcw, ShieldCheck, SlidersHorizontal, Square, X } from "lucide-react";
@@ -15,6 +15,11 @@ import type { AttentionItem, Bot, ConversationDetail, InstructionProposal, Inter
 import { Avatar, Markdown, errorMessage, relativeTime, signInToConnection, openExternal } from "./ui";
 
 type Attachment = { name: string; note: string };
+
+/** "worker 2" or "every worker", for the composer and its notices. */
+function targetName(target: MessageTarget): string {
+  return target.runId ? `worker ${target.worker}` : "every worker";
+}
 
 // The opening of a bot's instructions, cut at a sentence or word.
 function intro(instructions: string): string {
@@ -262,7 +267,27 @@ const TURNS_SHOWN = 30;
 
 export function Chat({ bot, bots, conversationId, status, pending: waiting, defaultModel, onChanged, onEdit, onOpenSettings, onOpenApps, onTyping }: { bot: Bot; bots: Bot[]; conversationId: string; status: Status | null; pending: AttentionItem[]; defaultModel?: string; onChanged: () => void; onEdit: () => void; onOpenSettings?: (tab: "memory") => void; onOpenApps?: (appId: string) => void; onTyping?: (botId: string | null) => void }) {
   const [jobs, replaceJob] = useBotJobs(bot.id);
+  // Who the composer writes to: the bot, or a job's workers.
+  const [target, setTarget] = useState<MessageTarget | null>(null);
+  const [notice, setNotice] = useState("");
+  const workerCommand = useRef<{ key: string; id: string } | null>(null);
   const hasRunningJobs = jobs.some(jobPausable);
+  // A recipient that finished goes back to the bot.
+  useEffect(() => {
+    if (!target) return;
+    const view = jobs.find(item => item.id === target.jobId);
+    if (!view || !jobActive(view) || (target.runId && !view.workers?.some(worker => worker.run_id === target.runId))) setTarget(null);
+  }, [jobs, target]);
+  useEffect(() => { setTarget(null); }, [bot.id]);
+  useEffect(() => {
+    if (!notice) return;
+    const timer = window.setTimeout(() => setNotice(""), 4000);
+    return () => window.clearTimeout(timer);
+  }, [notice]);
+  const messageTo = useCallback((next: MessageTarget) => {
+    setTarget(next); setError("");
+    window.setTimeout(() => composerRef.current?.focus(), 0);
+  }, []);
   const missed = waiting.filter(item => item.kind === "missed");
   const proposalKey = waiting.filter(item => item.kind === "proposal").map(item => item.id).join(",");
   const [proposals, setProposals] = useState<InstructionProposal[]>([]);
@@ -429,6 +454,28 @@ export function Chat({ bot, bots, conversationId, status, pending: waiting, defa
     // Chat is not a safe place for passwords: they reach the model and stay
     // in the conversation. Logins keep them in the Keychain instead.
     if (looksLikePassword(body) && !window.confirm(`This looks like a password. Anything typed here reaches the model and stays in the conversation.\n\nTo let ${bot.name} sign in safely, cancel and add a login under Edit bot → Logins instead.\n\nSend it anyway?`)) return;
+    // Answers to the bot's questions and retries always go to the bot.
+    const to = text === undefined ? target : null;
+    if (to) {
+      if (!body) return;
+      if (attachments.length) { setError("Messages to workers are text only. Remove the attachments first."); return; }
+      setSending(true); setError(""); setNotice("");
+      try {
+        if (to.runId) {
+          // A retried send keeps its command ID, so the worker gets it once.
+          const key = `${to.runId}:${body}`;
+          if (workerCommand.current?.key !== key) workerCommand.current = { key, id: crypto.randomUUID() };
+          replaceJob(await api.messageWorker(to.jobId, to.runId, workerCommand.current.id, body));
+          workerCommand.current = null;
+        } else {
+          const job = jobs.find(view => view.id === to.jobId)?.job;
+          if (!job) throw new Error("This job has finished.");
+          replaceJob(await api.steerJob(to.jobId, job.spec_revision, body));
+        }
+        setNotice(`Sent to ${targetName(to)}.`); setDraft(""); setTarget(null);
+      } catch (caught) { setError(errorMessage(caught)); } finally { setSending(false); }
+      return;
+    }
     if (working) {
       if (!steering.canSteer || !body) return;
       if (attachments.length) { setError("While the bot works, send instructions as text. Remove the attachments, or send them after it finishes."); return; }
@@ -551,6 +598,7 @@ export function Chat({ bot, bots, conversationId, status, pending: waiting, defa
         </Fragment>)}
         {detail?.conversation.context_start && lastTurn && lastTurn.started_at < detail.conversation.context_start && <p className="fresh-note">Fresh start. {bot.name} won't carry the conversation above into new messages; memories still apply.</p>}
         <ConversationJobHistory key={bot.id} bot={bot} jobs={jobs} onChanged={replaceJob} />
+        <CurrentJobs bot={bot} jobs={jobs} onChanged={replaceJob} onMessage={messageTo} />
         {proposals.map(proposal => <ProposalCard key={proposal.id} bot={bot} proposal={proposal} onOpenApps={onOpenApps} onAnswered={() => { setProposals(current => current.filter(item => item.id !== proposal.id)); onChanged(); }} />)}
         {missed.map(item => <MissedCard key={item.id} item={item} onAnswered={() => { void load(); onChanged(); }} />)}
         {signIns.map(interaction => <ReconnectCard key={interaction.id} interaction={interaction} />)}
@@ -559,10 +607,15 @@ export function Chat({ bot, bots, conversationId, status, pending: waiting, defa
       </div></div>
       {showJump && <button type="button" className="jump-latest" onClick={jumpToLatest}><ArrowDown size={14} />Jump to latest</button>}
       <footer className="composer-wrap">
-        <ConversationJobs key={bot.id} bot={bot} jobs={jobs} onChanged={replaceJob} />
+        <JobStrip jobs={jobs} onChanged={replaceJob} />
         {steering.receipt && (working || (steering.receipt.state !== "applied" && steering.receipt.state !== "accepted")) && <div className="steering-receipt muted small" role="status">
           <span>{steeringReceiptText(steering.receipt)}</span>
           <details><summary>Your instruction</summary><p>{steering.receipt.content}</p></details>
+        </div>}
+        {notice && <div className="inline-ok" role="status"><span>{notice}</span></div>}
+        {target && <div className="composer-target">
+          <span>To <strong>{targetName(target)}</strong> of “{target.jobTitle}”</span>
+          <button type="button" className="icon-button ghost tiny" aria-label={`Write to ${bot.name} instead`} title={`Write to ${bot.name} instead`} onClick={() => setTarget(null)}><X size={12} /></button>
         </div>}
         {error && <div className="inline-error"><CircleAlert size={14} /><span>{error}</span><button type="button" className="icon-button ghost tiny" onClick={() => setError("")}><X size={12} /></button></div>}
         {attachments.length > 0 && <div className="attachments">{attachments.map((item, index) => <span className="attachment" key={index}><Paperclip size={12} />{item.name}<button type="button" onClick={() => setAttachments(current => current.filter((_, i) => i !== index))} aria-label={`Remove ${item.name}`}><X size={11} /></button></span>)}</div>}
@@ -570,12 +623,12 @@ export function Chat({ bot, bots, conversationId, status, pending: waiting, defa
           <button type="button" className="icon-button ghost" title="Attach files" onClick={() => fileInput.current?.click()}><Paperclip size={17} /></button>
           <input ref={fileInput} type="file" multiple hidden onChange={event => { void attach(event.target.files); event.target.value = ""; }} />
           <textarea ref={composerRef} value={draft} onChange={event => setDraft(event.target.value)} onKeyDown={onKeyDown} rows={1}
-            placeholder={questions.length ? "Answer the bot…" : approvals.length ? "Answer the approval above first" : steerable ? `Tell ${bot.name} something while it works…` : `Message ${bot.name}`}
-            disabled={approvals.length > 0} />
-          <PauseJobsButton key={bot.id} jobs={jobs} onChanged={replaceJob} />
-          {working && !hasRunningJobs && <button type="button" className="send stop" title="Stop" onClick={() => activeRun && api.cancel(activeRun.id).then(load).catch(caught => setError(errorMessage(caught)))}><Square size={14} /></button>}
-          {(!working || hasRunningJobs || steerable) && <button type="button" className="send" title={steerable ? "Send to the bot while it works" : "Send"}
-            disabled={(working && !steerable) || sending || (working ? !draft.trim() : !draft.trim() && !attachments.length) || approvals.length > 0} onClick={() => void send()}><ArrowUp size={17} /></button>}
+            placeholder={target ? (target.runId ? `Message worker ${target.worker}…` : "Instructions for every worker…") : questions.length ? "Answer the bot…" : approvals.length ? "Answer the approval above first" : steerable ? `Tell ${bot.name} something while it works…` : `Message ${bot.name}`}
+            disabled={approvals.length > 0 && !target} />
+          {working && !hasRunningJobs && !target && <button type="button" className="send stop" title="Stop" onClick={() => activeRun && api.cancel(activeRun.id).then(load).catch(caught => setError(errorMessage(caught)))}><Square size={14} /></button>}
+          {(target || !working || hasRunningJobs || steerable) && <button type="button" className="send" title={target ? `Send to ${targetName(target)}` : steerable ? "Send to the bot while it works" : "Send"}
+            disabled={target ? sending || !draft.trim()
+              : (working && !steerable) || sending || (working ? !draft.trim() : !draft.trim() && !attachments.length) || approvals.length > 0} onClick={() => void send()}><ArrowUp size={17} /></button>}
         </div>
         <div className="composer-hint"><span className="model-name">{bot.model || defaultModel || "provider default"}</span> · Enter to send, Shift+Enter for a new line · drop files to attach</div>
       </footer>

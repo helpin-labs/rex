@@ -42,6 +42,10 @@ type Host struct {
 	// jobRetries backs off batch job deliveries (files and report) that
 	// failed, by job ID.
 	jobRetries sync.Map
+	// workerMessages remembers messages delivered to job workers (run and
+	// command ID), so a retried send is not delivered again by another path:
+	// a reply that resumed a worker must not come back as a steering note.
+	workerMessages sync.Map
 	cfg        Config
 	Store      *Store
 	Runtime    *RuntimeClient

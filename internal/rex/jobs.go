@@ -85,6 +85,11 @@ type JobWorker struct {
 	Items          []JobItemRef             `json:"items"`
 	Done           int                      `json:"done"`
 	Steps          []JobWorkerStep          `json:"steps"`
+	// Pending is what this worker is waiting on from the user: a question,
+	// an approval or a sign-in.
+	Pending []Interaction `json:"pending,omitempty"`
+	// LastMessage is what a paused worker last said, usually why it stopped.
+	LastMessage string `json:"last_message,omitempty"`
 }
 
 type JobWorkerStep struct {
@@ -624,7 +629,7 @@ func (h *Host) jobView(ctx context.Context, record JobRecord, detail bool) JobVi
 			}
 		}
 	}
-	view.Workers = h.jobWorkers(ctx, record.ID, labels)
+	view.Workers = h.jobWorkers(ctx, record.ID, labels, view.Pending)
 	view.BrowserNote = h.jobBrowserNote(ctx, record.BotID)
 	view.ItemsPerMinute = h.jobThroughput(ctx, record.ID)
 	return view
@@ -663,7 +668,7 @@ func (h *Host) jobBrowserNote(ctx context.Context, botID string) string {
 
 // jobWorkers describes the batches still running and each worker's latest
 // tool calls.
-func (h *Host) jobWorkers(ctx context.Context, jobID string, labels map[string]string) []JobWorker {
+func (h *Host) jobWorkers(ctx context.Context, jobID string, labels map[string]string, pending []JobInteraction) []JobWorker {
 	workers := []JobWorker{}
 	attempts, err := h.Runtime.ListWorkAttempts(ctx, jobID)
 	if err != nil {
@@ -678,6 +683,14 @@ func (h *Host) jobWorkers(ctx context.Context, jobID string, labels map[string]s
 			worker.Status, worker.PauseReason = run.Status, run.PauseReason
 			if recovery, ok := run.Input.Metadata["runtime_recovery"].(map[string]interface{}); ok {
 				worker.RecoveryReason, _ = recovery["reason"].(string)
+			}
+			if run.Status == "paused" {
+				worker.LastMessage = h.lastAssistantText(ctx, run.ID)
+			}
+		}
+		for _, item := range pending {
+			if item.RunID == attempt.RunID {
+				worker.Pending = append(worker.Pending, item.Interaction)
 			}
 		}
 		if commands, err := h.Runtime.RunSteering(ctx, attempt.RunID); err == nil {
@@ -1128,4 +1141,22 @@ func (h *Host) reportJob(ctx context.Context, record JobRecord, job *sdk.WorkJob
 	}
 	_, _, err := h.deliver(ctx, record.ConversationID, delivery{UserText: shown, ModelText: model, Origin: "job"})
 	return err
+}
+
+// lastAssistantText is a run's latest assistant message, shortened for a
+// status line.
+func (h *Host) lastAssistantText(ctx context.Context, runID string) string {
+	messages, err := h.Runtime.ListMessages(ctx, runID)
+	if err != nil {
+		return ""
+	}
+	for i := len(messages) - 1; i >= 0; i-- {
+		if text := strings.TrimSpace(messages[i].Content); messages[i].Role == "assistant" && text != "" {
+			if runes := []rune(text); len(runes) > 800 {
+				text = string(runes[:800]) + "…"
+			}
+			return text
+		}
+	}
+	return ""
 }

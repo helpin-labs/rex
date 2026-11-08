@@ -83,6 +83,7 @@ func (h *Host) Handler() http.Handler {
 	api.HandleFunc("GET /api/jobs/{id}", h.getJob)
 	api.HandleFunc("GET /api/jobs/{id}/items", h.listJobItems)
 	api.HandleFunc("POST /api/jobs/{id}/reveal", h.revealJobResults)
+	api.HandleFunc("POST /api/jobs/{id}/workers/{run_id}/message", h.messageJobWorker)
 	api.HandleFunc("POST /api/jobs/{id}/{action}", h.jobAction)
 	api.HandleFunc("POST /api/proposals/{id}", h.answerProposal)
 	api.HandleFunc("PUT /api/bots/{id}", h.saveBot)
