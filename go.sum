@@ -164,6 +164,8 @@ github.com/helpin-ai/agent-runtime v0.14.1 h1:yTZkd2dHnfcX5Zehwk3MtQcUyTUNi3V71J
 github.com/helpin-ai/agent-runtime v0.14.1/go.mod h1:fuYNhAlg+JXiUQwzaebecSLowtpLypJUExa4jQC5OE8=
 github.com/helpin-ai/agent-runtime v0.15.0 h1:SATpLE9EKSF4JtiwJAQNvRHumIE+5DxtduDbBwBZZBY=
 github.com/helpin-ai/agent-runtime v0.15.0/go.mod h1:e9H+9R088RvI0cJC0wJm9ep910JFhC4X0cDq8ekE5rY=
+github.com/helpin-ai/agent-runtime v0.16.1 h1:Z09JRuWYPwLA2l4wmAllDDH0N7TesQC9151rsMgo91M=
+github.com/helpin-ai/agent-runtime v0.16.1/go.mod h1:e9H+9R088RvI0cJC0wJm9ep910JFhC4X0cDq8ekE5rY=
 github.com/helpin-ai/agent-runtime-go v0.10.0 h1:ycwu2zWLwL/aOBVx9aKyV1SmkYygCR7rRJLmrenEUlc=
 github.com/helpin-ai/agent-runtime-go v0.10.0/go.mod h1:3XDPyvHh+NCNjlDLyHuemk27ryr7g+xZAmTbeCSOEIk=
 github.com/helpin-ai/agent-runtime-go v0.11.0 h1:1tHzdw1uUlugDXRKUfu+3nGiDN/LQ4zeUbDjvHwsOWE=

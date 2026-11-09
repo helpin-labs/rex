@@ -55,9 +55,14 @@ func (h *Host) runtimeContext(w http.ResponseWriter, r *http.Request) {
 	var sections []string
 	data := map[string]any{"now": time.Now().Format(time.RFC1123)}
 	sections = append(sections, "Current local time: "+time.Now().Format("Monday, 2 January 2006 15:04 MST")+".")
+	attemptID, _ := request.Metadata["work_attempt_id"].(string)
+	jobWorker := strings.TrimSpace(attemptID) != ""
+	if jobWorker {
+		data["context_scope"] = "assigned_batch"
+	}
 	var recalled []RecalledMemory
 	if bot, err := h.Store.GetBot(r.Context(), request.AgentID); err == nil {
-		if bank := bot.MemoryBank(); bank != "" {
+		if bank := bot.MemoryBank(); bank != "" && !jobWorker {
 			query := ""
 			currentTurn := ""
 			if turn, err := h.Store.LatestTurnForConversation(r.Context(), conversationID); err == nil {
@@ -79,10 +84,10 @@ func (h *Host) runtimeContext(w http.ResponseWriter, r *http.Request) {
 			}
 			cancel()
 		}
-		if bot.Role == RoleMain {
+		if bot.Role == RoleMain && !jobWorker {
 			sections = append(sections, h.rosterContext(r.Context()))
 		}
-		if bot.Setup {
+		if bot.Setup && !jobWorker {
 			// A new bot shapes its suggestions around what Rex knows
 			// about the user at a high level.
 			if main := h.MainBot(r.Context()); main != nil && main.MemoryBank() != "" {

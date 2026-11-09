@@ -106,7 +106,7 @@ func TestJobBrowserNoteForStandardBrowser(t *testing.T) {
 		backend string
 		browser bool
 		want    bool
-	}{{"standard", true, true}, {"extension", true, false}, {"standard", false, false}} {
+	}{{"standard", true, true}, {"extension", true, true}, {"standard", false, false}} {
 		bot := Bot{ID: "bot-" + tc.backend + fmt.Sprint(tc.browser), Name: "Bot", BrowserBackend: tc.backend, Capabilities: Capabilities{Browser: tc.browser}}
 		if err := host.Store.SaveBot(ctx, &bot); err != nil {
 			t.Fatal(err)

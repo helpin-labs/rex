@@ -264,6 +264,8 @@ func (h *Host) jobsMCPServer(bot Bot) RunMCPServer {
 }
 
 type startJobInput struct {
+	WorkerTools             *[]string           `json:"worker_tools,omitempty"`
+	WorkerSkills            *[]string           `json:"worker_skills,omitempty"`
 	Title                   string              `json:"title"`
 	Objective               string              `json:"objective"`
 	Instructions            string              `json:"instructions"`
@@ -313,7 +315,7 @@ func (h *Host) jobsMCP() http.Handler {
 			Description: "Start a batch job when the user wants the same work done for many items (more than about 15): researching a list of schools, checking many websites, enriching leads. " +
 				"The engine gives fresh copies of you ten items at a time, records each item's result separately, retries anything missed and keeps going until every item is done; the user does not have to say continue. " +
 				"Define the result for one item as a JSON Schema, write clear instructions for one item, and pass the items inline (up to 500) or as items_file, a JSON, JSONL or CSV file in your folder (CSV needs an id column). " +
-				"Each item needs a stable unique id. Tell the user the job started and that you will report when it finishes; do not process the items yourself.",
+				"Each item needs a stable unique id. Select worker_tools and worker_skills explicitly for the work, omitting unrelated capabilities and skills. Include stable CRM target identifiers in each item input for item-bound writes. Tell the user the job started and that you will report when it finishes; do not process the items yourself.",
 			InputSchema: map[string]any{"type": "object", "additionalProperties": false, "required": []string{"title", "objective", "instructions", "result_schema"}, "properties": map[string]any{
 				"title":                     map[string]any{"type": "string", "minLength": 3, "maxLength": 120, "description": "Short name the user sees, e.g. \"Find parent forums for 1,000 schools\"."},
 				"objective":                 map[string]any{"type": "string", "minLength": 10, "maxLength": 2000, "description": "What the whole job is for."},
@@ -325,8 +327,10 @@ func (h *Host) jobsMCP() http.Handler {
 				"items": map[string]any{"type": "array", "maxItems": maxInlineJobItems, "items": map[string]any{"type": "object", "required": []string{"id"}, "properties": map[string]any{
 					"id": map[string]any{"type": "string"}, "input": map[string]any{"type": "object"},
 				}}},
-				"items_file": map[string]any{"type": "string", "description": "Path inside your folder to a JSON array, JSONL or CSV file of items."},
-				"batch_size": map[string]any{"type": "integer", "minimum": 1, "maximum": 50, "description": "Items per worker; default 10."},
+				"worker_tools":  map[string]any{"type": "array", "items": map[string]any{"type": "string"}, "description": "Select only tools needed by workers, using their exact tool names. Omit to inherit all available tools. Request and result controls remain available."},
+				"worker_skills": map[string]any{"type": "array", "items": map[string]any{"type": "string"}, "description": "Select the bot skill IDs needed by workers. An empty array excludes optional skills; omit to inherit. Parent bot rules always apply."},
+				"items_file":    map[string]any{"type": "string", "description": "Path inside your folder to a JSON array, JSONL or CSV file of items."},
+				"batch_size":    map[string]any{"type": "integer", "minimum": 1, "maximum": 50, "description": "Items per worker; default 10."},
 				"workers": map[string]any{"type": "integer", "minimum": 1, "maximum": 4, "description": "Workers at once. Leave it out for 3 in parallel, which suits independent items, the usual case. " +
 					"Set 1 only when items are strictly sequential: an item needs an earlier item's result, the order matters (such as posting one after another from one account), or the site allows only one session at a time. " +
 					"Use 2 for a site that limits request rates. In Extension browser mode each worker gets its own tab (up to 3); the standard local browser runs browser work one worker at a time."},
@@ -436,6 +440,14 @@ func (h *Host) StartJob(ctx context.Context, bot Bot, input startJobInput, reque
 			workerServers = append(workerServers, server)
 		}
 	}
+	workerTools, workerServers, err := selectWorkerTools(bot.AllowedTools(), workerServers, input.WorkerTools)
+	if err != nil {
+		return nil, err
+	}
+	metadata := map[string]any{"worker_write_scope": "item", "bot_id": bot.ID, "conversation_id": conversation.ID, "trusted_user_messages": h.trustedUserMessages(ctx, conversation.ID)}
+	if input.WorkerSkills != nil {
+		metadata["worker_skill_keys"] = *input.WorkerSkills
+	}
 	workers := defaultJobWorkers
 	if input.Workers > 0 {
 		workers = min(input.Workers, 4)
@@ -453,8 +465,8 @@ func (h *Host) StartJob(ctx context.Context, bot Bot, input startJobInput, reque
 		IdempotencyKey: idempotencyKey, Spec: spec, Items: items,
 		Worker: sdk.WorkJobWorker{
 			AgentID: bot.ID, Target: sdk.TargetRef{Type: "conversation", ID: conversation.ID},
-			Model: model, ModelCredential: credential, MCPServers: workerServers, ExternalActorID: LocalActorID,
-			Metadata: map[string]any{"bot_id": bot.ID, "conversation_id": conversation.ID, "trusted_user_messages": h.trustedUserMessages(ctx, conversation.ID)},
+			Model: model, ModelCredential: credential, MCPServers: workerServers, ExternalActorID: LocalActorID, AllowedTools: workerTools,
+			Metadata: metadata,
 		},
 	})
 	if err != nil {
@@ -662,10 +674,14 @@ func (h *Host) jobBrowserNote(ctx context.Context, botID string) string {
 		return ""
 	}
 	settings, _ := h.Settings.Get(ctx)
-	if bot.browserMode(settings) != "standard" {
+	switch bot.browserMode(settings) {
+	case "standard":
+		return "Standard browser: at most one browser worker runs at a time across this bot’s jobs, even when more workers are requested."
+	case "extension":
+		return "Extension browser: at most three browser workers run at a time across this bot’s jobs, each in its own tab."
+	default:
 		return ""
 	}
-	return "Standard browser: browser work runs one worker at a time. Extension mode gives each worker its own tab."
 }
 
 // jobWorkers describes the batches still running and each worker's latest
