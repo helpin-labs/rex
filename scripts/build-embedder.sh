@@ -53,7 +53,7 @@ if command -v ninja >/dev/null 2>&1; then generator=(-G Ninja); fi
   -DGGML_METAL=ON -DGGML_METAL_EMBED_LIBRARY=ON \
   -DGGML_NATIVE=OFF -DGGML_OPENMP=OFF \
   -DLLAMA_CURL=OFF -DLLAMA_OPENSSL=OFF \
-  -DLLAMA_BUILD_TESTS=OFF -DLLAMA_BUILD_EXAMPLES=OFF -DLLAMA_BUILD_SERVER=ON >/dev/null
+  -DLLAMA_BUILD_TESTS=OFF -DLLAMA_BUILD_EXAMPLES=OFF -DLLAMA_BUILD_SERVER=ON -DLLAMA_USE_PREBUILT_UI=OFF >/dev/null
 "$cmake_bin" --build "$src/build" --target llama-server -j >/dev/null
 cp "$src/build/bin/llama-server" "$server"
 strip -x "$server" 2>/dev/null || true
