@@ -13,8 +13,6 @@ repo_root="$(cd "$(dirname "$0")/.." && pwd)"
 target_triple="${TARGET_TRIPLE:-$(rustc -vV | sed -n 's/^host: //p')}"
 bin_dir="$repo_root/src-tauri/binaries"
 mkdir -p "$bin_dir" "$repo_root/bin"
-# agent-runtime is private: fetch it with git credentials, not the public proxy.
-export GOPRIVATE="${GOPRIVATE:+$GOPRIVATE,}github.com/helpin-ai/*"
 
 flags=(-trimpath -ldflags "-s -w")
 # Rex's own Google client, for Gmail and Google Sheets. Without one, people
