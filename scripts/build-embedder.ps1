@@ -37,7 +37,7 @@ cmake -S $source -B $build -A $platform `
     -DGGML_METAL=OFF -DGGML_VULKAN=OFF -DGGML_CUDA=OFF `
     -DGGML_NATIVE=OFF -DGGML_OPENMP=OFF `
     -DLLAMA_CURL=OFF -DLLAMA_OPENSSL=OFF `
-    -DLLAMA_BUILD_TESTS=OFF -DLLAMA_BUILD_EXAMPLES=OFF -DLLAMA_BUILD_SERVER=ON
+    -DLLAMA_BUILD_TESTS=OFF -DLLAMA_BUILD_EXAMPLES=OFF -DLLAMA_BUILD_SERVER=ON -DLLAMA_USE_PREBUILT_UI=OFF
 cmake --build $build --config Release --target llama-server --parallel 4
 Copy-Item (Join-Path $build 'bin/Release/llama-server.exe') $server
 New-Item -ItemType File -Force $stamp | Out-Null
