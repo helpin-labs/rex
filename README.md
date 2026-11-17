@@ -4,6 +4,8 @@ Personal AI bots that live on your Mac. Each one has its own chat, memory, brows
 
 Rex runs on a local model (LM Studio, Ollama), your API keys (Anthropic, OpenAI, OpenRouter) or your ChatGPT subscription. Conversations, memory and files stay on your Mac; only the model calls you choose leave it.
 
+![Rex with a finished task in the Scribe bot's chat](docs/screenshots/chat.png)
+
 Windows support is in development; see the [Windows preview instructions and verification status](docs/WINDOWS.md).
 
 ## Features
@@ -23,6 +25,14 @@ Windows support is in development; see the [Windows preview instructions and ver
 - **Routines.** Daily, weekly or repeating tasks. Temporary connection failures resume automatically from saved progress. After sleep or a restart, the latest missed occurrence runs once.
 - **MCP connections.** Connect Streamable HTTP MCP servers (signing in with OAuth where they need it), pick their tools, and attach them to bots.
 - **Private by design.** Keys, ChatGPT sign-in and logins live in the macOS Keychain, and the app talks to its backend over loopback with a per-launch token.
+
+## Screenshots
+
+| | |
+|---|---|
+| ![A bot asking before it writes a file](docs/screenshots/approval.png) A bot asks before it writes a file. | ![Abilities and approval modes for one bot](docs/screenshots/abilities.png) Each bot has its own abilities and approval mode. |
+| ![Model settings with a local model server](docs/screenshots/models.png) Local model server, API keys or ChatGPT. | ![Routines](docs/screenshots/routines.png) Routines run tasks on a schedule. |
+| ![Connect apps](docs/screenshots/apps.png) Apps connect over MCP. | ![Skill catalog](docs/screenshots/skills.png) Skills install from GitHub collections. |
 
 ## Architecture
 
