@@ -4,6 +4,8 @@ Personal AI bots that live on your Mac. Each one has its own chat, memory, brows
 
 Rex runs on a local model (LM Studio, Ollama), your API keys (Anthropic, OpenAI, OpenRouter) or your ChatGPT subscription. Conversations, memory and files stay on your Mac; only the model calls you choose leave it.
 
+**[Download the latest release](https://github.com/helpin-labs/rex/releases/latest)** for macOS (Apple Silicon `.dmg`) or Windows x64 (preview installer). The Mac build isn't notarized yet, so the first launch needs System Settings → Privacy & Security → Open Anyway.
+
 ![Rex with a finished task in the Scribe bot's chat](docs/screenshots/chat.png)
 
 Windows support is in development; see the [Windows preview instructions and verification status](docs/WINDOWS.md).
