@@ -92,6 +92,10 @@ Both desktop installers include Chrome for Testing and agent-browser. An explici
 - Cloud browsers (Kernel) start fresh for each task: no saved logins and no takeover.
 - Routines run only while the Mac is awake and Rex is running. Closing the window keeps Rex in the menu bar.
 
+## Contributing
+
+See [CONTRIBUTING.md](CONTRIBUTING.md). Report security issues privately, as described in [SECURITY.md](SECURITY.md).
+
 ## License
 
 [Apache License 2.0](LICENSE)
