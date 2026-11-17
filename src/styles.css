@@ -240,7 +240,7 @@ textarea.code, .schedule-row .cron-input, .json-summary, .model-trigger-text sma
 .approval-head { display: flex; gap: 10px; align-items: flex-start; margin-bottom: 10px; }
 .approval-head strong { display: block; }
 .approval-head small { color: var(--muted); }
-.approval-input { max-height: 220px; overflow: auto; padding: 10px; border-radius: 8px; background: var(--surface); margin-bottom: 10px; }
+.approval-input { max-height: 220px; white-space: pre-wrap; overflow: auto; padding: 10px; border-radius: 8px; background: var(--surface); margin-bottom: 10px; }
 .approval-actions { display: flex; justify-content: flex-end; gap: 8px; }
 .question-options { display: flex; flex-direction: column; margin-top: 12px; border: 1px solid var(--border); border-radius: 14px; overflow: hidden; }
 .composer-wrap { grid-row: 5; padding: 10px clamp(20px, 6vw, 80px) 14px; }
