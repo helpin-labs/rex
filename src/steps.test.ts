@@ -8,6 +8,11 @@ describe("setup approvals", () => {
       .toEqual({ title: "Add the routine “Price check”?", lines: ["Every day at 08:00", "Check prices"] });
     expect(describeApproval("write_file", {})).toBeNull();
   });
+  it("show file writes and commands without raw JSON", () => {
+    expect(describeApproval("write_file", { path: "outputs/a.md", content: "# Hi" })).toEqual({ title: "Write outputs/a.md?", lines: [], preview: "# Hi" });
+    expect(describeApproval("write_file", { raw: JSON.stringify({ path: "a.md", content: "x" }) })?.title).toBe("Write a.md?");
+    expect(describeApproval("run_command", { program: "ls", args: ["-la"] })).toEqual({ title: "Run this command?", lines: [], preview: "ls -la" });
+  });
 });
 
 describe("instruction changes", () => {

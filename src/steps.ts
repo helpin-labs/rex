@@ -87,9 +87,16 @@ export function formatElapsed(milliseconds: number): string {
 
 const toolNames: Record<string, string> = { browser: "Browser", files_read: "Read files", files_write: "Create and edit files", shell: "Run commands and Python" };
 
-/** Plain-language approval prompts for a new bot's setup tools. */
-export function describeApproval(toolName: string, input: unknown): { title: string; lines: string[] } | null {
-  const args = typeof input === "string" ? parseArgs(input) : (input && typeof input === "object" ? input as Record<string, unknown> : {});
+/** Plain-language approval prompts for file writes, commands and a new bot's setup tools. */
+export function describeApproval(toolName: string, input: unknown): { title: string; lines: string[]; preview?: string } | null {
+  let args = typeof input === "string" ? parseArgs(input) : (input && typeof input === "object" ? input as Record<string, unknown> : {});
+  // Some models send the arguments as one JSON string under "raw".
+  if (typeof args.raw === "string" && Object.keys(args).length === 1) args = parseArgs(args.raw);
+  if (toolName === "write_file" && str(args.path)) return { title: `Write ${str(args.path)}?`, lines: [], preview: str(args.content) };
+  if (toolName === "run_command" && (str(args.program) || str(args.command))) {
+    const rest = Array.isArray(args.args) ? args.args.map(String).join(" ") : "";
+    return { title: "Run this command?", lines: [], preview: `${str(args.program) || str(args.command)} ${rest}`.trim() };
+  }
   if (toolName === "mcp__setup__enable_tools") {
     const tools = Object.keys(toolNames).filter(key => args[key] === true).map(key => toolNames[key]);
     return { title: "Turn on tools for this bot?", lines: tools.length ? tools : ["No tools named"] };

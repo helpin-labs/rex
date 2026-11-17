@@ -40,7 +40,7 @@ export function ApprovalCard({ interaction, onRespond }: { interaction: Interact
   const plain = describeApproval(toolName, input);
   return <div className="approval-card">
     <div className="approval-head"><ShieldCheck size={16} /><div><strong>{plain ? plain.title : toolName ? `Allow “${toolName.split("__").at(-1)}”?` : interaction.title || "Approval needed"}</strong>{!plain && <small>{interaction.summary}</small>}</div></div>
-    {plain ? <ul className="approval-list">{plain.lines.map(line => <li key={line}>{line}</li>)}</ul>
+    {plain ? <>{plain.lines.length > 0 && <ul className="approval-list">{plain.lines.map(line => <li key={line}>{line}</li>)}</ul>}{plain.preview && <pre className="approval-input">{plain.preview}</pre>}</>
       : input !== undefined && (typeof input === "string" ? <pre className="approval-input"><TextWithJson text={input} /></pre> : <JsonBlock value={input} />)}
     <div className="approval-actions">
       <button type="button" className="button secondary" disabled={busy} onClick={() => respond("request_changes", "The user declined this action. Do not retry it; continue without it or ask what to do instead.")}>Decline</button>
